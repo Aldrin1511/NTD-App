@@ -1,0 +1,13 @@
+{
+  "short_name": "TRIAS NTD",
+  "name": "TRIAS Skin & NTD",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0F52BA",
+  "background_color": "#F8FAFC"
+}

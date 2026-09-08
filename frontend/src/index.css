@@ -1,0 +1,164 @@
+@import url("https://fonts.googleapis.com/css2?family=Work+Sans:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    font-family: "IBM Plex Sans", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-head {
+    font-family: "Work Sans", sans-serif;
+}
+
+@layer base {
+    :root {
+        --background: 210 40% 98%;
+        --foreground: 222 47% 11%;
+        --card: 0 0% 100%;
+        --card-foreground: 222 47% 11%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222 47% 11%;
+        --primary: 218 84% 39%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 214 95% 93%;
+        --secondary-foreground: 218 84% 30%;
+        --muted: 210 40% 96%;
+        --muted-foreground: 215 19% 35%;
+        --accent: 214 95% 93%;
+        --accent-foreground: 218 84% 30%;
+        --destructive: 0 72% 51%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 214 25% 91%;
+        --input: 214 25% 88%;
+        --ring: 218 84% 39%;
+        --chart-1: 218 84% 39%;
+        --chart-2: 24 95% 53%;
+        --chart-3: 142 71% 40%;
+        --chart-4: 0 72% 51%;
+        --chart-5: 262 60% 50%;
+        --radius: 0.5rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+    ::selection {
+        background: #0f52ba;
+        color: #fff;
+    }
+}
+
+.trias-grid {
+    background-image:
+        linear-gradient(to right, rgba(15, 82, 186, 0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(15, 82, 186, 0.06) 1px, transparent 1px);
+    background-size: 28px 28px;
+}
+
+.stagger > * {
+    animation: riseIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.stagger > *:nth-child(1) {
+    animation-delay: 0.02s;
+}
+.stagger > *:nth-child(2) {
+    animation-delay: 0.07s;
+}
+.stagger > *:nth-child(3) {
+    animation-delay: 0.12s;
+}
+.stagger > *:nth-child(4) {
+    animation-delay: 0.17s;
+}
+.stagger > *:nth-child(5) {
+    animation-delay: 0.22s;
+}
+.stagger > *:nth-child(6) {
+    animation-delay: 0.27s;
+}
+.stagger > *:nth-child(7) {
+    animation-delay: 0.32s;
+}
+.stagger > *:nth-child(8) {
+    animation-delay: 0.37s;
+}
+
+@keyframes riseIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.body-region {
+    fill: #e8eef7;
+    stroke: #94a3b8;
+    stroke-width: 1.2;
+    cursor: pointer;
+    transition:
+        fill 0.18s ease,
+        stroke 0.18s ease;
+}
+.body-region:hover {
+    fill: #c7dbf7;
+}
+.body-region.marked {
+    fill: #dc2626;
+    stroke: #7f1d1d;
+}
+.body-region.selected {
+    stroke: #0f52ba;
+    stroke-width: 3;
+}
+
+.silhouette-region {
+    fill: #3b3b6d;
+    stroke: #ffffff;
+    stroke-width: 1;
+    stroke-linejoin: round;
+    cursor: pointer;
+    transition:
+        fill 0.15s ease,
+        filter 0.15s ease;
+}
+.silhouette-region:hover {
+    fill: #0f52ba;
+    filter: drop-shadow(0 0 4px rgba(15, 82, 186, 0.55));
+}
+.silhouette-region.marked {
+    fill: #dc2626;
+}
+.silhouette-code {
+    font-family: "Work Sans", sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    fill: #ffffff;
+}
+
+@layer base {
+    [data-debug-wrapper="true"] {
+        display: contents !important;
+    }
+    [data-debug-wrapper="true"] > * {
+        margin: inherit;
+        padding: inherit;
+        gap: inherit;
+    }
+}

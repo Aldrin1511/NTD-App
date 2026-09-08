@@ -1,0 +1,36 @@
+{
+  "summary": "Frontend-only regression for iteration 3 (Suspect screening feature + Admin user management + registration overhaul). Cleared localStorage, exercised 44 Playwright checks against the public preview URL covering: login without Register, invalid credential error, admin create-user with validation and table growth, admin password reset (temp password captured from toast then used to sign in as joseph), admin deactivation blocks login, symptom library (30 seeded, count badge, add & remove reflected live), programme rule 'Lost to follow-up' threshold changing patient tags (9999→no tags, 1→multiple tags), Suspect screening flow (empty-complaint + no-suspect validation, save produces SUS-xxxxxx + saved indicator, Start encounter and Use-other-flow buttons, None branch shows green panel and hides Start button), Patient record Suspect screenings section with seeded rows/photos and Start-flow buttons, Encounter no longer has section 1 (completeness shows 'of 8'), Linked-suspect panel + section 3 renamed to 'Assessment — body chart & photos', Patient list photo/outcome filter/photos, Registration form (email, blood group, photo, fingerprint capture generating FP-XXXX-XXXX; no scabies flags section), Access control for mary (view-only alert + New encounter + Suspect screening buttons disabled). All 44/44 checks passed. Only issue found: at 390px viewport, /admin page horizontally overflows to scrollWidth=780px because the user table's min-w-[720px] escapes its overflow-x-auto scroller (parent grid column does not have min-w-0).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Admin at 390px",
+        "issues": [
+          "Horizontal page overflow (documentElement.scrollWidth=780 vs viewport 390) — the Users & access control table (min-w-[720px] inside overflow-x-auto) is expanding its parent grid column because the grid item does not have min-w-0. Suggest adding min-w-0 to the SectionCard grid child (or to the direct wrapper around the .overflow-x-auto div) so the horizontal scroll stays inside the table wrapper."
+        ]
+      }
+    ],
+    "console_warnings": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(LOW) Fix Admin page horizontal overflow at 390px by adding min-w-0 to the user-table's grid column so the inner overflow-x-auto actually contains the scroll."
+  ],
+  "critical_code_review_comments": [
+    "store.addSuspect / addUser generate ids with Math.random() — same collision risk mentioned previously; consider a monotonic counter kept in state.",
+    "Encounter.jsx now stores photos as base64 data URLs inside state (localStorage) — a real device attaching several encounter/suspect photos will hit the ~5 MB localStorage quota fast; not a bug in prototype but should be surfaced to the E1 for the real build.",
+    "PatientRecord 'Open household' button still opens the disease chooser (setChooser(true)) instead of navigating to a household page — comment in previous iteration still applies.",
+    "SuspectScreen sets the linked suspect via query param but Encounter.jsx also falls back to 'latest suspect for patient' when no ?sus is provided; opening a scabies encounter from an old timeline row silently links the newest suspect, which may not be the intended one. Consider requiring an explicit link.",
+    "Login.jsx has no 'Sign out' path visible from the login screen when a session already exists — the app shell handles it, but a direct visit to '/' while authenticated still renders Sign in fields; not a bug this round but worth an auto-redirect to /dashboard."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (frontend-only round)", "frontend": "100% (44/44 requested checks)" },
+  "test_credentials": "admin@trias.health / Admin@123, joseph@trias.health / Health@123, mary@trias.health / Health@123. Reset-demo used to restore state between deactivation and later checks.",
+  "seed_data_creation": "None — mock/data.js seeds SYMPTOMS (30), SUSPECTS (3), USERS, PATIENTS, ENCOUNTERS. localStorage key 'trias.state.v1' was cleared before login as required by this iteration.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "State shape now includes state.settings.{symptoms,lostToFollowUpDays} and state.suspects[]; ALWAYS clear localStorage 'trias.state.v1' before starting or the merged state will be missing settings and pages will render empty. Photo capture uses hidden file inputs (suspect-photo-input / patient-photo-input / encounter-photo-input) — use Playwright set_input_files with a small local PNG. Encounter now has sections 2..9 only (no section 1); completeness reads 'N of 8' for scabies full flow, and 'N of 5' for the generic flow. The user table testids follow -u<id> convention (u1/u2/u3 for seeded users). Symptom slug follows kebab-case: e.g. 'my-skin-is-itchy'.",
+  "rca of the issue": "Admin horizontal overflow at 390px: root layout is grid gap-6 lg:grid-cols-[1.6fr_1fr]; on mobile it collapses to single column but the SectionCard containing the user table (min-w-[720px] inside overflow-x-auto) does not set min-width:0 on the grid item, so CSS grid honours the intrinsic min-content width of the child (720px) and the whole page becomes horizontally scrollable. Fix: add className 'min-w-0' to the SectionCard (or its wrapping div) that hosts the user table."
+}

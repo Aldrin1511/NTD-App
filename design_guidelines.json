@@ -1,0 +1,103 @@
+{
+  "theme": "light",
+  "archetype": "ARCHETYPE 4: SWISS & HIGH-CONTRAST",
+  "typography": {
+    "headings": {
+      "fontFamily": "Work Sans, sans-serif",
+      "strategy": "Bold, clear, and highly legible even in harsh outdoor sunlight."
+    },
+    "body": {
+      "fontFamily": "IBM Plex Sans, sans-serif",
+      "strategy": "Functional, clinical, with a slightly larger base font size to support readability on small field devices."
+    },
+    "scale": {
+      "h1": "text-3xl sm:text-4xl tracking-tight font-bold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-bold",
+      "h3": "text-xl font-semibold",
+      "body": "text-base sm:text-lg",
+      "small": "text-sm font-medium tracking-wide uppercase"
+    }
+  },
+  "colors": {
+    "primary": "#0F52BA",
+    "primary_light": "#DBEAFE",
+    "background": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "text_main": "#0F172A",
+    "text_muted": "#475569",
+    "border": "#E2E8F0",
+    "alerts": {
+      "urgent": "#DC2626",
+      "review": "#F97316",
+      "routine": "#16A34A"
+    },
+    "strategy": "High-contrast clinical palette. Avoid Teal/Green (forbidden). Pure white backgrounds with 1px borders. No soft shadows. Avoid glassmorphism. Flat solid surfaces are mandatory for clinical clarity."
+  },
+  "visual_enhancers": {
+    "shadows": "Minimal. Stick to hard 1px borders (`border-slate-200`) instead of shadows to delineate cards. This ensures visibility under direct sunlight.",
+    "border_radius": "Rounded-md or rounded-lg (4px to 8px max). Sharp but approachable.",
+    "spacing": "Extremely generous padding. Minimum touch target for interactive elements must be 48px (`h-12` or `p-4`) for ease of use with one hand or gloves in the field."
+  },
+  "layouts": {
+    "mobile_first": true,
+    "navigation": "Persistent bottom navigation bar on mobile containing: Dashboard, Patients, Sync, Admin. Top App bar containing Sync Status Indicator (Offline/Online chip).",
+    "scabies_wizard": "Vertical scroll or step-by-step horizontal wizard. Must feature a fixed 'Sticky Footer' at the bottom with 'Previous' and 'Next' large tap buttons. Top should have a segmented progress indicator.",
+    "dashboard": "Dense bento-grid on desktop, stacked single column on mobile. Cards should feature a single KPI with a small trend line or chart."
+  },
+  "components_strategy": {
+    "buttons": "Rounded rectangle, `h-12` minimum height. Full-width on mobile. Use `data-testid` on all buttons.",
+    "inputs": "Shadcn UI Form inputs. Height `h-12`. Must have visible borders and background colors that contrast with the page.",
+    "cards": "Flat, 1px border. No drop shadows. High contrast text.",
+    "body_chart": "Use an SVG-based interactive body map where users can tap regions. This is critical for Step 3 of the Scabies module.",
+    "offline_indicator": "A permanent, glanceable chip in the header. Green for 'Synced', Yellow/Orange for 'Queued/Syncing', Red for 'Offline'.",
+    "clinical_alerts": "Inline alert panels with sharp left border (e.g., `border-l-4 border-red-600 bg-red-50 text-red-900`) for URGENT warnings."
+  },
+  "pages_and_routes": [
+    { "path": "/", "name": "Login/Register" },
+    { "path": "/dashboard", "name": "MIS Dashboard (KPIs, Charts)" },
+    { "path": "/patients", "name": "Patient List" },
+    { "path": "/patients/new", "name": "Quick Registration" },
+    { "path": "/patients/:id", "name": "Patient Clinical Record (Timeline)" },
+    { "path": "/patients/:id/encounter/scabies", "name": "Scabies Module (9 Steps)" },
+    { "path": "/admin", "name": "Admin Matrix & Setup" }
+  ],
+  "scabies_module_steps": [
+    "1. NTD Suspect Screening",
+    "2. Clinical History",
+    "3. Assessment (Interactive Body Chart)",
+    "4. Laboratory/Diagnostics",
+    "5. Diagnosis (IACS classification)",
+    "6. Drugs/Treatment (Weight-based Dose Calculator)",
+    "7. Contact Tracing (Household Dashboard)",
+    "8. Visit Notes (SOAP inserts)",
+    "9. Treatment Outcome"
+  ],
+  "media": {
+    "icons_library": "lucide-react",
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1762939079730-23708c0dd337?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNTl8MHwxfHNlYXJjaHwyfHxtZWRpY2FsJTIwY2xpbmljJTIwbG9nb3xlbnwwfHx8fDE3ODY3NzQ1NzJ8MA&ixlib=rb-4.1.0&q=85",
+        "category": "logo",
+        "description": "App Logo for login and header"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Build a fully clickable UI prototype using React, Tailwind CSS, and Shadcn UI (.js). No backend required, use mock data and local state.",
+    "MANDATORY: Ensure tap targets are at least 48px high (e.g. `h-12`) for field usage.",
+    "MANDATORY: Do not use glassmorphism or transparent backgrounds on cards or headers. Use solid `#FFFFFF` or `#F8FAFC`.",
+    "MANDATORY: Implement a sticky footer for 'Next/Back' actions in the 9-step Scabies wizard.",
+    "MANDATORY: Create a mock interactive SVG Body Chart component for the Scabies assessment step.",
+    "Include a visible 'Sync Status' indicator in the top App Bar to demonstrate offline-first design.",
+    "Build the dashboard using Recharts for KPIs (e.g. treatment completion rate, cases by village).",
+    "Add 'data-testid' to all buttons, inputs, and interactive elements."
+  ],
+  "universal_guidelines": [
+    "Avoid the 'AI slop' aesthetic by ensuring generous padding (`p-6`, `p-8`) and tight typography scaling.",
+    "Never center-align dense text or forms. Left-align for clinical readability.",
+    "Do not use dark colors as gradients.",
+    "Do not apply `transition: all`.",
+    "Use `sonner` for toast notifications.",
+    "Never use AI assistant emoji characters for icons."
+  ]
+}

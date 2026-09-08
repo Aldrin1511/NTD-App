@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend-only regression on the redesigned stacked-encounter + consolidated-disease-view flow of TRIAS Skin & NTD (prototype, localStorage mock). All 15 requested feature areas were exercised via Playwright against the public preview URL. Every high-value acceptance criterion passed: disease list is patient-scoped (Elijah=Scabies only, Peter=Scabies+Buruli), the disease chooser dialog lists all 5 diseases with existing/new labels and navigates to the disease-specific encounter, the consolidated view shows 3 Elijah scabies encounters with per-feature 'N of 3 encounters' badges and all three drug entries (permethrin×2 + cloxacillin), Edit pre-fills the stacked form (itching/burrows/exposure selected, 2 marks, 7 of 9 sections captured), re-saving updates in place (no duplicate; fever appears in consolidated screening), empty consolidated view renders for Lucy+Yaws, generic flow for Leprosy/Yaws/Buruli renders only sections 4/5/6/8/9 with the info panel and Other drugs persists, scabies clinical logic still flips the suspect flag through 'Suspected scabies' → 'Suspected crusted scabies' with an urgent alert, ivermectin calc = 4200 µg / 4.2 mg for Elijah 21 kg and ivm-blocked panel shows for Lucy 12 kg / age 3, Save + Save & close footer is sticky and works at every scroll position on desktop and 390px mobile with no horizontal overflow, and access control for Mary (facility, view-only) disables New encounter and Add encounter buttons on both pages. Only one non-blocking React console warning was seen.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "console_warnings": [
+      {
+        "component": "DiseaseSummary",
+        "issue": "React warning: 'Each child in a list should have a unique key prop.' Triggered when rendering the per-feature rows table. Likely cause: in FEATURES[key=='assessment'].rows, when patient.data.marks has two marks with the same label+view (or when crusted rows repeat) the rows.map uses row[0] (label) as key. Suggest key={`${e.id}-${k}-${idx}`} inside the rows.map.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional/LOW) Fix the DiseaseSummary key-prop React warning by including the row index (or a composite key) in the dl > rows.map key."
+  ],
+  "critical_code_review_comments": [
+    "Encounter.jsx is a single 500-line file mixing controller + 9 section subcomponents; splitting the section subcomponents into /pages/encounter-sections/*.jsx would keep it under the 700-line guideline and improve testability.",
+    "store.saveEncounter generates ENC ids via Math.random(); on high-frequency saves in the same tick there is a small but non-zero collision risk. Suggest a monotonically-increasing counter persisted in state.",
+    "DiseaseSummary FEATURES[key=='assessment'] iterates Object.values(marks || {}) but uses the mark label as a React key inside the outer rows.map — duplicate labels between marks or between marks and 'Crusted features' will trigger the console warning observed.",
+    "PatientRecord shows an 'Open household' link that always deep-links to /encounter/scabies even for patients whose only disease is Buruli or Leprosy — after this iteration's changes the deep link should probably go to the disease chooser instead.",
+    "Encounter.persist calls addDisease(p.id, disease.id) on every save; the store makes this idempotent so behaviour is fine, but it means simply opening + saving any encounter form silently attaches that disease to the patient's diseases[]. Consider only attaching on the first non-empty save."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "N/A (frontend-only round)", "frontend": "100% (15/15 requested checks)" },
+  "test_credentials": "admin@trias.health / Admin@123, joseph@trias.health / Health@123, mary@trias.health / Health@123 (from /app/frontend/src/mock/data.js)",
+  "seed_data_creation": "None — the prototype is fully seeded via mock/data.js. localStorage key 'trias.state.v1' was cleared before each role switch.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Everything requested for iteration 2 passes. If iterating further, know that (a) the disease-chooser Dialog is a Radix dialog — clicking a choose-disease-<id> button must sometimes be dispatched via page.evaluate('...click()') because Playwright's own click can be intercepted by the modal overlay in the preview environment; (b) the stacked encounter form uses section-toggle-1..9 testids, save-btn, save-close-btn, completeness-label, suspect-flag; (c) generic flow (Yaws/Buruli/LF/Leprosy) exposes ONLY sections 4/5/6/8/9; (d) re-save is upsert-by-id in store.saveEncounter, so tests should assert the encounter list length after edit. One low-priority React key-prop warning is emitted from DiseaseSummary and can be ignored functionally.",
+  "rca of the issue": "Not applicable — no defects reproduced."
+}
