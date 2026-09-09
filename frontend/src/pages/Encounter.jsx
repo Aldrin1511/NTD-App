@@ -69,8 +69,8 @@ export default function Encounter() {
     saveEncounter({
       id: existing?.id, patientId: p.id, episodeId: existing?.episodeId || p.episodeId, disease: spec.id,
       facility, worker: user?.name, type: visitType, referral, status: "Complete",
-      diagnosis: diagnosis || "—", treatment: [...d.topical, ...d.oral].join(" + ") || "—", outcome,
-      data: { ...d, diagnosis, outcome, scores },
+      diagnosis: diagnosis || "", treatment: [...d.topical, ...d.oral].join(" + ") || "", outcome: outcome || "",
+      data: { ...d, diagnosis: diagnosis || "", outcome: outcome || "", scores },
     });
     setSavedAt(new Date().toLocaleTimeString());
     if (close) { toast.success("Encounter saved · queued for cloud sync"); navigate(`/patients/${p.id}`); }

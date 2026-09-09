@@ -128,7 +128,7 @@ export function StoreProvider({ children }) {
       addSuspect: (rec) => {
         const out = {
           id: `SUS-${String(Math.floor(Math.random() * 900000) + 100000)}`,
-          date: new Date().toISOString().slice(0, 16),
+          date: new Date().toISOString(),
           worker: state.users.find((u) => u.id === state.currentUserId)?.name,
           ...rec,
         };
@@ -180,7 +180,7 @@ export function StoreProvider({ children }) {
         const { id: _dropId, ...rest } = enc;
         const rec = {
           id: `ENC-${String(Math.floor(Math.random() * 900000) + 100000)}`,
-          date: new Date().toISOString().slice(0, 16),
+          date: new Date().toISOString(),
           disease: "scabies",
           synced: false,
           complete: true,

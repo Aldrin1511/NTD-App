@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertPanel, SelectField, TextField, ChoiceRow } from "@/components/Fields";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Avatar } from "@/components/Capture";
-import { DISEASE_SPECS, SPEC_LIST, fmtDate } from "@/mock/specs";
+import { DISEASE_SPECS, SPEC_LIST, fmtDate, fmtDateTime } from "@/mock/specs";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Stethoscope, Phone, ChevronDown, PanelLeft, Pencil, ChevronsUpDown, ChevronsDownUp } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
@@ -20,17 +20,39 @@ const FEATURES = [
   ["household", "Household"], ["notes", "Visit notes"], ["outcome", "Outcome"],
 ];
 
+const hasValue = (v) => {
+  if (v == null) return false;
+  const s = String(v).trim();
+  return s !== "" && s !== "—" && s !== "Open";
+};
+
 const summarise = (key, e) => {
   const x = e.data || {};
   if (key === "caseDetails") return [x.caseDetails?.mode, x.caseDetails?.caseType, x.caseDetails?.weight && `${x.caseDetails.weight} kg`].filter(Boolean).join(" · ");
   if (key === "history") return Object.entries(x.history || {}).filter(([, v]) => v && typeof v === "string").slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(" · ");
-  if (key === "marks") return Object.values(x.marks || {}).map((m) => `${m.region} (${m.code}${m.extra ? ` ${m.extra}` : ""})`).join(", ");
+  if (key === "marks") {
+    return Object.values(x.marks || {})
+      .map((m) => {
+        const region = m.region || m.label;
+        const code = m.code || m.type;
+        if (!region && !code) return "";
+        return `${region || "—"}${code ? ` (${code}${m.extra ? ` ${m.extra}` : ""})` : ""}`;
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
   if (key === "lab") return Object.entries(x.lab || {}).map(([k, v]) => `${k}: ${v}`).join(" · ");
-  if (key === "diagnosis") return x.diagnosis || e.diagnosis;
+  if (key === "diagnosis") {
+    const dx = x.diagnosis || e.diagnosis;
+    return hasValue(dx) ? dx : "";
+  }
   if (key === "drugs") return [...(x.topical || []), ...(x.oral || [])].join(" + ");
   if (key === "household") return (x.household?.contacts || []).length ? `${x.household.contacts.length} contact(s) registered` : "";
   if (key === "notes") return x.notes;
-  if (key === "outcome") return [x.outcome, ...(x.recommendations || [])].filter(Boolean).join(" · ");
+  if (key === "outcome") {
+    const parts = [hasValue(x.outcome) ? x.outcome : "", ...(x.recommendations || [])].filter(Boolean);
+    return parts.join(" · ");
+  }
   return "";
 };
 
@@ -99,7 +121,7 @@ export default function PatientRecord() {
           <span className="mt-1 block truncate text-sm text-muted-foreground">{e.facility}</span>
           <span className="mt-0.5 block truncate text-xs uppercase tracking-wider text-muted-foreground">
             {[
-              `${fmtDate(e.date)} ${new Date(e.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+              `${fmtDateTime(e.date)}`,
               e.type || null,
               e.worker || null,
             ]
@@ -233,9 +255,7 @@ export default function PatientRecord() {
               {featureRows.map(({ k, label, rows }) => {
                 const isOpen = featureOpen[k] !== false;
                 const last = rows[0]?.e;
-                const lastAt = last
-                  ? `${fmtDate(last.date)} ${new Date(last.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                  : "";
+                const lastAt = last ? fmtDateTime(last.date) : "";
                 return (
                   <section key={k} className="rounded-lg border border-border bg-white" data-testid={`feature-${k}`}>
                     <button

@@ -11,6 +11,22 @@ export default function PatientSidebar({
   testid = "lhs-panel",
 }) {
   const last = [...encounters].sort((a, b) => b.date.localeCompare(a.date))[0];
+  const real = (v) => {
+    if (v == null) return "";
+    const s = String(v).trim();
+    return s && s !== "—" ? s : "";
+  };
+  const lastWithDx = [...encounters]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .find((e) => real(e.diagnosis) || real(e.data?.diagnosis));
+  const lastWithTx = [...encounters]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .find((e) => real(e.treatment) || (e.data?.topical || []).length || (e.data?.oral || []).length);
+  const lastDiagnosis = real(lastWithDx?.diagnosis) || real(lastWithDx?.data?.diagnosis) || "—";
+  const lastTreatment =
+    real(lastWithTx?.treatment) ||
+    [...(lastWithTx?.data?.topical || []), ...(lastWithTx?.data?.oral || [])].join(" + ") ||
+    "—";
   const diseaseNames = diseases.length
     ? diseases.map((d) => (typeof d === "string" ? DISEASE_SPECS[d]?.name || d : d.name)).filter(Boolean)
     : (p.diseases || []).map((id) => DISEASE_SPECS[id]?.name || id);
@@ -52,10 +68,10 @@ export default function PatientSidebar({
       <section className="rounded-lg border border-border bg-white p-4" data-testid="clinical-ready-reckoner">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clinical summary</p>
         <p className="mt-2 text-sm">
-          <b>Last diagnosis:</b> {last?.diagnosis || "—"}
+          <b>Last diagnosis:</b> {lastDiagnosis}
         </p>
         <p className="mt-1 text-sm">
-          <b>Active drugs:</b> {last?.treatment || "—"}
+          <b>Active drugs:</b> {lastTreatment}
         </p>
         <p className="mt-1 text-sm">
           <b>Last encounter:</b> {last ? fmtDate(last.date) : "—"}

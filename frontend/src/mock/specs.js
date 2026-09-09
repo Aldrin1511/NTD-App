@@ -235,12 +235,38 @@ export const DISEASE_SPECS = {
 
 export const SPEC_LIST = Object.values(DISEASE_SPECS);
 
+/** Parse app dates; legacy datetimes without TZ were UTC from toISOString().slice */
+export const parseDate = (v) => {
+  if (!v) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00`);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+    return new Date(s.length === 16 ? `${s}:00Z` : `${s}Z`);
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 export const fmtDate = (v) => {
   if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return String(v);
+  const d = parseDate(v);
+  if (!d) return String(v);
   const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
   return `${String(d.getDate()).padStart(2, "0")}-${m}-${d.getFullYear()}`;
+};
+
+export const fmtDateTime = (v) => {
+  if (!v) return "—";
+  const d = parseDate(v);
+  if (!d) return String(v);
+  return `${fmtDate(v)} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+};
+
+/** Local calendar date YYYY-MM-DD (not UTC) */
+export const localISODate = (d = new Date()) => {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
 
 export const leprosyScores = (d = {}) => {

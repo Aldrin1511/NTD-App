@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/Fields";
 import { Avatar, isLostToFollowUp, dobFromAge, formatAgeYMD } from "@/components/Capture";
 import { GEO, DISEASES } from "@/mock/data";
-import { fmtDate, DISEASE_SPECS } from "@/mock/specs";
+import { fmtDate, fmtDateTime, DISEASE_SPECS } from "@/mock/specs";
 import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft, Users, CalendarDays } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
 import StatusChips from "@/components/StatusChips";
@@ -238,7 +238,7 @@ export default function Patients() {
                   <p className="mt-1 truncate text-sm text-muted-foreground">{e.facility}</p>
                   <p className="mt-0.5 truncate text-xs uppercase tracking-wider text-muted-foreground">
                     {[
-                      `${fmtDate(e.date)} ${new Date(e.date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+                      `${fmtDateTime(e.date)}`,
                       e.type || null,
                       e.worker || null,
                     ]
