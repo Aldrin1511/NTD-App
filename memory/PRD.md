@@ -79,7 +79,7 @@ Source: client's "TRIAS Skin and NTD App - Final.docx".
 - **Clinical intelligence**: Leprosy EHF + WHO G2D auto-scoring with Grade-2 urgent alert; Leprosy PB/MB auto-classification from patches/nerves/slit-skin; Yaws primary/secondary/tertiary auto-staging; weight-based dosing per drug (verified: ivermectin 4.2mg, DEC 126mg, rifampicin 210mg, clarithromycin 157.5mg, azithromycin 630mg at 21kg); "No <disease>" diagnosis auto-sets the matching outcome.
 - **Adherence schedules**: Buruli 8 weekly dated cells, Leprosy 12 monthly cells, cycle taken/not-taken/blank, Extend schedule, and Leprosy Restart regimen (recommended after >3 missed).
 - **Household contact tracing** per disease: age/sex group counts (male/female × child/adult), preventive-prophylaxis counts per drug, and an editable contact register (name, age, gender, relationship, status, consent, prophylaxis, date).
-- **Suspect feature**: new 31-symptom library and 7 suspect options including "Suspected Other NTDs" and "No NTD suspected".
+- **Suspect feature**: new 31-symptom library and 7 suspect options including "Suspected Other NTDs" and "Suspect Non-NTDs Skin Condition".
 - **Patient record redesigned**: tabs (All visits / Suspect / one per condition), collapsible left demographic + clinical-summary panel, per-visit expandable feature summaries, and an Add-encounter popup capturing location, date, clinician, visit type, referral and target flow.
 - **Patient cards**: DOB as dd-MMM-yyyy, patient ID, diagnosis, last encounter date, encounter status (New/Draft/Complete).
 - **Registration**: first/middle/last name, consent (No / By paper / By verbal), address by origin or residency.

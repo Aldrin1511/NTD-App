@@ -1,12 +1,13 @@
-import { Avatar, dobFromAge } from "@/components/Capture";
+import { Avatar, dobFromAge, fingerprintSummary } from "@/components/Capture";
 import { Badge } from "@/components/ui/badge";
 
 export const PatientHeader = ({ patient: p, right, children, testid = "patient-header" }) => {
   const dob = p.dob || dobFromAge(p.age, p.createdAt);
+  const fp = fingerprintSummary(p.fingerprint);
   const chips = [
     ["DOB", dob || "—"],
     ["Age", `${p.age}y`],
-    ["Gender", p.gender],
+    ["Gender", p.gender || p.sex || "—"],
     ["Weight", `${p.weight} kg`],
     ["Height", p.height ? `${p.height} cm` : "—"],
     ["Blood", p.bloodGroup || "Unknown"],
@@ -27,8 +28,8 @@ export const PatientHeader = ({ patient: p, right, children, testid = "patient-h
             <span className="text-xs uppercase tracking-wider text-muted-foreground">
               {p.id} · {p.episodeId}
             </span>
-            {p.fingerprint && (
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">FP {p.fingerprint}</span>
+            {fp && (
+              <span className="text-xs uppercase tracking-wider text-muted-foreground">FP {fp}</span>
             )}
           </div>
           <dl className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm" data-testid={`${testid}-details`}>

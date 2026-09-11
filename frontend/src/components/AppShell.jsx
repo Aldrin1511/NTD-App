@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   LogOut,
   Download,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -16,6 +17,7 @@ import { toast } from "sonner";
 const nav = [
   // MIS hidden for now — re-enable when ready: { to: "/dashboard", label: "MIS", icon: LayoutDashboard, testid: "nav-dashboard" },
   { to: "/patients", label: "Patients", icon: Users, testid: "nav-patients" },
+  { to: "/appointments", label: "Appointments", icon: CalendarDays, testid: "nav-appointments" },
   { to: "/sync", label: "Sync", icon: RefreshCw, testid: "nav-sync" },
   { to: "/admin", label: "Admin", icon: Shield, testid: "nav-admin" },
 ];
@@ -74,6 +76,7 @@ export default function AppShell({ children, title, subtitle, action }) {
               <NavLink
                 key={n.to}
                 to={n.to}
+                end={n.to === "/patients"}
                 data-testid={`${n.testid}-desktop`}
                 className={({ isActive }) =>
                   `flex h-11 items-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors ${
@@ -125,8 +128,8 @@ export default function AppShell({ children, title, subtitle, action }) {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-white lg:hidden">
-        <div className="grid grid-cols-4">
-          {nav.slice(0, 1).map((n) => (
+        <div className="grid grid-cols-5">
+          {nav.slice(0, 2).map((n) => (
             <BottomItem key={n.to} {...n} />
           ))}
           <Link
@@ -139,7 +142,7 @@ export default function AppShell({ children, title, subtitle, action }) {
             </span>
             <span className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">New</span>
           </Link>
-          {nav.slice(1).map((n) => (
+          {nav.slice(2).map((n) => (
             <BottomItem key={n.to} {...n} />
           ))}
         </div>
@@ -151,6 +154,7 @@ export default function AppShell({ children, title, subtitle, action }) {
 const BottomItem = ({ to, label, icon: Icon, testid }) => (
   <NavLink
     to={to}
+    end={to === "/patients"}
     data-testid={testid}
     className={({ isActive }) =>
       `flex h-16 flex-col items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${

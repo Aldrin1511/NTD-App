@@ -5,7 +5,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { TextField, SelectField, ChoiceRow, SectionCard, AlertPanel } from "@/components/Fields";
 import { PhotoCapture, FingerprintCapture, DocumentCapture, ageFromDob, dobFromAge } from "@/components/Capture";
-import { GEO, HOUSEHOLDS, BLOOD_GROUPS } from "@/mock/data";
+import { GEO, REGISTERED_ATS, BLOOD_GROUPS } from "@/mock/data";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -24,15 +24,16 @@ export default function PatientNew() {
     email: "",
     bloodGroup: "Unknown",
     photo: "",
-    fingerprint: "",
+    fingerprint: {},
     pregnancy: "N/A",
     lactating: "N/A",
     phone: "",
+    country: "Papua New Guinea",
     province: user?.province || "",
     district: "",
     village: "",
     facility: "",
-    household: "",
+    registeredAt: "",
     consent: "By verbal",
     consentDoc: null,
     addressType: "By residency",
@@ -99,25 +100,26 @@ export default function PatientNew() {
 
           <SectionCard title="Location &amp; facility" desc="Drives the MIS geography filters">
             <div className="grid gap-5 sm:grid-cols-2">
+              <SelectField label="Facility (registration site)" options={facilities.map((x) => x.name)} value={f.facility} onChange={set("facility")} testid="patient-facility-select" />
+              <SelectField label="Country" options={["Papua New Guinea"]} value={f.country} onChange={set("country")} testid="patient-country-select" />
               <SelectField label="Province" options={Object.keys(GEO)} value={f.province} onChange={(v) => setF({ ...f, province: v, district: "", village: "" })} testid="patient-province-select" />
               <SelectField label="District" options={districts} value={f.district} onChange={(v) => setF({ ...f, district: v, village: "" })} testid="patient-district-select" />
               <SelectField label="Village / residence" options={villages} value={f.village} onChange={set("village")} testid="patient-village-select" />
-              <SelectField label="Facility (registration site)" options={facilities.map((x) => x.name)} value={f.facility} onChange={set("facility")} testid="patient-facility-select" />
-              <SelectField label="Household" options={HOUSEHOLDS.map((h) => `${h.id} — ${h.name}`)} value={f.household} onChange={(v) => set("household")(v.split(" — ")[0])} testid="patient-household-select" hint="Links this patient to household contact tracing" />
+              <SelectField label="Registered at" options={REGISTERED_ATS.map((h) => `${h.id} — ${h.name}`)} value={f.registeredAt} onChange={(v) => set("registeredAt")(v.split(" — ")[0])} testid="patient-registeredAt-select" hint="Links this patient to registeredAt contact tracing" />
             </div>
           </SectionCard>
 
           <SectionCard title="Consent">
             <ChoiceRow
               label="Did the patient / guardian consent to digital capture of information and treatment?"
-              options={["No", "By paper", "By verbal"]}
+              options={["No", "In writing", "By verbal"]}
               value={f.consent}
-              onChange={(v) => setF((s) => ({ ...s, consent: v, consentDoc: v === "By paper" ? s.consentDoc : null }))}
+              onChange={(v) => setF((s) => ({ ...s, consent: v, consentDoc: v === "In writing" ? s.consentDoc : null }))}
               testid="patient-consent"
             />
-            {f.consent === "By paper" && (
+            {f.consent === "In writing" && (
               <DocumentCapture
-                label="Paper consent form"
+                label="Written consent form"
                 value={f.consentDoc}
                 onChange={set("consentDoc")}
                 testid="patient-consent-doc"
@@ -126,7 +128,7 @@ export default function PatientNew() {
             <ChoiceRow label="Address recorded" options={["By origin", "By residency"]} value={f.addressType} onChange={set("addressType")} testid="patient-address-type" />
           </SectionCard>
 
-          <SectionCard title="Unique identification" desc="Photo and fingerprint template help identify returning patients in the field">
+          <SectionCard title="Unique identification" desc="Photo and up to 10 fingerprint templates help identify returning patients in the field">
             <PhotoCapture
               label="Patient photo"
               photos={f.photo ? [f.photo] : []}
@@ -136,23 +138,7 @@ export default function PatientNew() {
             />
             <FingerprintCapture value={f.fingerprint} onChange={set("fingerprint")} />
           </SectionCard>
-        </div>
 
-        <div className="space-y-4 lg:sticky lg:top-24 lg:self-start">
-          <AlertPanel level="info" title="Offline-first" testid="offline-note">
-            The record is written to the device immediately. It appears in your queue and uploads automatically when a
-            connection is available.
-          </AlertPanel>
-          {Number(f.weight) > 0 && Number(f.weight) < 15 && (
-            <AlertPanel level="urgent" title="🔴 Ivermectin contraindicated" testid="weight-alert">
-              Weight under 15 kg — oral ivermectin safety is not established. Topical treatment pathway only.
-            </AlertPanel>
-          )}
-          {f.pregnancy === "Yes" && (
-            <AlertPanel level="urgent" title="🔴 Pregnancy flagged" testid="pregnancy-alert">
-              Avoid oral ivermectin. Use permethrin 5% or sulfur ointment per national protocol.
-            </AlertPanel>
-          )}
           <div className="space-y-3 rounded-lg border border-border bg-white p-5">
             <Button className="h-12 w-full text-base" data-testid="save-and-encounter-btn" onClick={() => save(true)}>
               Save &amp; start suspect screening
@@ -162,6 +148,8 @@ export default function PatientNew() {
             </Button>
           </div>
         </div>
+
+        <div className="hidden lg:block" aria-hidden="true" />
       </div>
     </AppShell>
   );

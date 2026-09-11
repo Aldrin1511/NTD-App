@@ -26,6 +26,7 @@ function Shell() {
       {/* MIS dashboard hidden for now — redirect to patients */}
       <Route path="/dashboard" element={<Guard><Navigate to="/patients" replace /></Guard>} />
       <Route path="/patients" element={<Guard><Patients /></Guard>} />
+      <Route path="/appointments" element={<Guard><Patients /></Guard>} />
 
       <Route path="/patients/new" element={<Guard><PatientNew /></Guard>} />
       <Route path="/patients/:id" element={<Guard><PatientRecord /></Guard>} />

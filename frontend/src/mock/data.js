@@ -28,13 +28,12 @@ export const VISIT_TYPES = [
 ];
 
 export const DRUGS = [
-  { name: "Permethrin 5% cream", form: "Topical", strength: "5%", diseases: ["scabies"] },
-  { name: "Benzyl benzoate 10%", form: "Topical", strength: "10%", diseases: ["scabies"] },
-  { name: "Benzyl benzoate 25%", form: "Topical", strength: "25%", diseases: ["scabies"] },
-  { name: "Malathion 0.5% aqueous", form: "Topical", strength: "0.5%", diseases: ["scabies"] },
-  { name: "Sulfur ointment 5–10%", form: "Topical", strength: "5–10%", diseases: ["scabies"] },
-  { name: "Ivermectin", form: "Oral", strength: "3 mg tablet", diseases: ["scabies"] },
-  { name: "Cloxacillin", form: "Oral", strength: "250 mg", diseases: ["scabies"] },
+  { name: "Permethrin 5% Cream/Lotion", form: "Topical", strength: "5%", diseases: ["scabies"] },
+  { name: "Benzyl Benzoate 25%", form: "Topical", strength: "25%", diseases: ["scabies"] },
+  { name: "Sulphur 5% / 10% Ointment or Lotion", form: "Topical", strength: "5–10%", diseases: ["scabies"] },
+  { name: "Tab Ivermectin (0.2 mg/kg)", form: "Oral", strength: "3 / 6 / 12 mg tablet", diseases: ["scabies"] },
+  { name: "Topical antibiotic", form: "Topical", strength: "as prescribed", diseases: ["scabies"] },
+  { name: "Oral antibiotic", form: "Oral", strength: "as prescribed", diseases: ["scabies"] },
   { name: "Azithromycin", form: "Oral", strength: "500 mg", diseases: ["yaws"] },
   { name: "Rifampicin", form: "Oral", strength: "150 mg", diseases: ["buruli", "leprosy"] },
   { name: "Clarithromycin", form: "Oral", strength: "250 mg", diseases: ["buruli"] },
@@ -185,6 +184,12 @@ export const HOUSEHOLDS = [
   { id: "HH-0043", name: "Sipa household", village: "Kreer", members: 6, symptomatic: 3, diagnosed: 3, treated: 2, treatedDate: "", completed: false },
 ];
 
+export const REGISTERED_ATS = [
+  { id: "REG-0041", name: "Bilbil Health Centre", village: "Bilbil", members: 8, symptomatic: 4, diagnosed: 2, treated: 6, treatedDate: "2026-05-18", completed: false },
+  { id: "REG-0042", name: "Karkar Rural Hospital", village: "Karkar", members: 5, symptomatic: 2, diagnosed: 1, treated: 5, treatedDate: "2026-05-22", completed: true },
+  { id: "REG-0043", name: "Wewak General Hospital", village: "Kreer", members: 6, symptomatic: 3, diagnosed: 3, treated: 2, treatedDate: "", completed: false },
+];
+
 const p = (i, o) => ({
   id: `PNG${String(i).padStart(7, "0")}`,
   createdBy: "u2",
@@ -196,7 +201,7 @@ const p = (i, o) => ({
   email: "",
   bloodGroup: "Unknown",
   photo: "",
-  fingerprint: "",
+  fingerprint: {},
   household: "HH-0041",
   diseases: ["scabies"],
   treatmentEnd: "",

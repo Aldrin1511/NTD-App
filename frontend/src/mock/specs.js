@@ -1,10 +1,23 @@
 export const SUSPECT_SYMPTOMS = [
-  "Itching", "Severe itching", "Itching worse at night", "Rash", "Skin problem", "Skin lesion",
-  "Multiple skin lesions", "Skin swelling", "Skin thickening", "Skin cracking", "Skin scaling",
-  "Crusting", "Skin pain", "Skin tenderness", "Burning skin", "Skin discoloration",
-  "Pale/white skin patch", "Red skin patch", "Dark skin patch", "Numb skin", "Loss of sensation",
-  "Tingling", "Pins and needles", "Weakness", "General fatigue", "Fever", "Chills",
-  "Sleep disturbance", "Difficulty working", "Difficulty attending school", "Reduced mobility",
+  "Red or white skin patch",
+  "Skin patch with loss of feeling",
+  "Numbness or tingling of hands and feet",
+  "Weakness of eyes, hands and feet",
+  "Swelling or lumps on the face/earlobes and skin",
+  "Painless ulcers/burns on hands and feet",
+  "Painless nodules/swelling/plaques",
+  "Painless ulcer",
+  "Painful swelling of leg/breast/scrotum/arm/vulva",
+  "Gradual painless swelling of leg/breast/scrotum/arm/vulva",
+  "Fever, chills, muscle pains",
+  "Itchiness of the skin",
+  "Itchy vesicles and pustules",
+  "Itchy thick skin on hands/feet and body",
+  "Yellow growth/lump on the skin",
+  "Single or multiple ulcers",
+  "Abnormal bone or cartilage shape",
+  "Cracked skin under the feet",
+  "Swollen painful joints",
 ];
 
 export const SUSPECT_OPTIONS = [
@@ -14,13 +27,13 @@ export const SUSPECT_OPTIONS = [
   { id: "lf", label: "Suspected Lymphatic Filariasis" },
   { id: "leprosy", label: "Suspected Leprosy" },
   { id: "other", label: "Suspected Other NTDs" },
-  { id: "none", label: "No NTD suspected" },
+  { id: "none", label: "Suspect Non-NTDs Skin Condition" },
 ];
 
 export const MODE_OF_DETECTION = ["Voluntary", "Referral", "Household contact", "MDA", "Special project", "Others"];
 export const REFERRED_BY = ["Family member", "Village health worker", "Former patient", "Volunteer"];
 export const CASE_TYPES = ["New", "Relapse", "Transfer in"];
-export const CONSENT = ["No", "By paper", "By verbal"];
+export const CONSENT = ["No", "In writing", "By verbal"];
 export const AGE_SEX_GROUPS = ["Male child (<15y)", "Male adult (15y+)", "Female child (<15y)", "Female adult (15y+)"];
 export const CONTACT_STATUS = ["Symptomatic", "Asymptomatic"];
 export const RELATIONSHIPS = ["Spouse", "Parent", "Child", "Sibling", "Grandparent", "Grandchild", "Other relative", "Household member", "Neighbour"];
@@ -60,165 +73,690 @@ const caseDetails = [
   { k: "weight", label: "Weight (kgs)", type: "number" },
 ];
 
-const household = (drugs) => [
-  { k: "hhTotal", label: "Total household contacts", type: "groupCount", options: AGE_SEX_GROUPS },
-  { k: "hhSymptomatic", label: "Household contacts with similar symptoms", type: "groupCount", options: AGE_SEX_GROUPS,
-    note: "For these contacts, please register a new patient and create a disease record." },
-  ...drugs.map((d, i) => ({ k: `hhProphylaxis${i}`, label: `Asymptomatic contacts given preventive ${d}`, type: "groupCount", options: AGE_SEX_GROUPS })),
-  { k: "contacts", label: "Contact register", type: "contactTable", prophylaxis: ["None", ...drugs] },
+const SCABIES_REFERRED_BY = [...REFERRED_BY, "Others"];
+const SCABIES_CASE_TYPES = [...CASE_TYPES, "Chronic/Persistent"];
+
+const scabiesCaseDetails = [
+  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
+  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
+  { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
+  { k: "height", label: "Height (cms)", type: "number" },
+  { k: "weight", label: "Weight (kgs)", type: "number" },
+];
+
+const yawsCaseDetails = [
+  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
+  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
+  { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
+  { k: "height", label: "Height (cms)", type: "number" },
+  { k: "weight", label: "Weight (kgs)", type: "number" },
+];
+
+const lfCaseDetails = [
+  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
+  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
+  { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
+  { k: "height", label: "Height (cms)", type: "number" },
+  { k: "weight", label: "Weight (kgs)", type: "number" },
+];
+
+const buruliCaseDetails = [
+  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
+  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
+  { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
+  { k: "height", label: "Height (cms)", type: "number" },
+  { k: "weight", label: "Weight (kgs)", type: "number" },
+];
+
+const LEPROSY_CASE_TYPES = ["New", "Relapse", "Transfer in", "Chronic", "Old", "Return after default"];
+
+const leprosyCaseDetails = [
+  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
+  { k: "caseType", label: "Case type", type: "select", options: LEPROSY_CASE_TYPES },
+  { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
+  { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
+  { k: "height", label: "Height (cms)", type: "number" },
+  { k: "weight", label: "Weight (kgs)", type: "number" },
+];
+
+const SCABIES_HH_GROUPS = [
+  "Male Child (Below 15 Years)",
+  "Male Adult (15 Years and Above)",
+  "Female Child (Below 15 Years)",
+  "Female Adult (15 Years and Above)",
+];
+
+const scabiesHousehold = [
+  { k: "hhTotal", label: "Total household contacts", type: "groupCount", options: SCABIES_HH_GROUPS },
+  {
+    k: "hhSymptomatic",
+    label: "Total household contacts with similar symptoms",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+    note: "Total household contacts suspected / diagnosed with Scabies, please register a suspect / new patients and create a Scabies record",
+  },
+  {
+    k: "hhIvermectin",
+    label: "Total asymptomatic household contact provided with preventive Tab Ivermectin",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+  },
+  {
+    k: "hhPermethrin",
+    label: "Total asymptomatic household contact provided with preventive Permethrin 5% Cream/Lotion",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+  },
+];
+
+const yawsHousehold = [
+  { k: "hhTotal", label: "Total household contacts", type: "groupCount", options: SCABIES_HH_GROUPS },
+  {
+    k: "hhSymptomatic",
+    label: "Total household contacts with similar symptoms",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+    note: "Total household contacts suspected / diagnosed with Yaws, please register a suspect / new patients and create a Yaws record",
+  },
+  {
+    k: "hhAzithromycin",
+    label: "Total asymptomatic household contact provided with preventive Tab Azithromycin",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+  },
+  {
+    k: "hhBenzathine",
+    label: "Total asymptomatic household contact provided with preventive Inj Benzathine penicillin",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+  },
+];
+
+const lfHousehold = [
+  { k: "hhTotal", label: "Total household contacts", type: "groupCount", options: SCABIES_HH_GROUPS },
+  {
+    k: "hhSymptomatic",
+    label: "Total household contacts with similar symptoms",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+    note: "Total household contacts suspected / diagnosed with LF, please register a suspect / new patients and create a LF record",
+  },
+  {
+    k: "hhIvermectin",
+    label: "Total asymptomatic household contact provided with preventive Tab Ivermectin",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+  },
+  {
+    k: "hhAlbendazole",
+    label: "Total asymptomatic household contact provided with preventive Tab Albendazole",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+  },
+];
+
+const buruliHousehold = [
+  { k: "hhTotal", label: "Total household contacts", type: "groupCount", options: SCABIES_HH_GROUPS },
+  {
+    k: "hhSymptomatic",
+    label: "Total household contacts with similar symptoms",
+    type: "groupCount",
+    options: SCABIES_HH_GROUPS,
+    note: "Total household contacts suspected / diagnosed with Buruli Ulcer, please register a suspect / new patients and create a Buruli Ulcer record",
+  },
 ];
 
 export const DISEASE_SPECS = {
   scabies: {
     id: "scabies", name: "Scabies", icd: "B86",
     bodyChart: { views: ["front", "back"], codes: [
-      ["B", "Burrows / tunnels"], ["P", "Papules"], ["V", "Vesicles"], ["PU", "Pustules"],
-      ["C", "Crusted skin"], ["E", "Excoriations / scratches"], ["NO", "No lesions"]] },
-    caseDetails,
+      ["B", "Burrows"], ["P", "Red or skin colored Papules"], ["V", "Vesicles"], ["PU", "Pustules"],
+      ["C", "Crusted Skin"], ["E", "Excoriations / scratch marks"], ["NO", "No Lesions"]] },
+    caseDetails: scabiesCaseDetails,
     history: [
+      { k: "hpc_section", type: "section", label: "History of Presenting Complaints" },
       { k: "itching", label: "Does the patient have itching?", type: "yesno" },
       { k: "itchNight", label: "Is the itching worse at night?", type: "yesno" },
-      { k: "familySimilar", label: "Other family members with similar symptoms?", type: "yesno" },
-      { k: "priorScabies", label: "Diagnosed with scabies before?", type: "yesno" },
-      { k: "priorWhen", label: "When were you diagnosed?", type: "duration", when: ["priorScabies", "Yes"] },
-      { k: "priorTreatment", label: "What treatment did you take?", type: "checks", options: ["Permethrin cream", "Tab Ivermectin"], when: ["priorScabies", "Yes"] },
+      { k: "familySimilar", label: "Are there other family members with similar complaints / symptoms?", type: "yesno" },
+      { k: "familyScabies", label: "Has anyone of your family/close contacts been diagnosed with Scabies recently?", type: "yesno" },
+      {
+        k: "familyScabiesNote",
+        type: "note",
+        label: "Please check these when doing household contact tracing, and register as patients if they also have Scabies",
+        when: ["familyScabies", "Yes"],
+      },
+      { k: "priorScabies", label: "Have you been diagnosed with scabies before?", type: "yesno" },
+      { k: "priorWhen", label: "When were you diagnosed previously?", type: "duration", when: ["priorScabies", "Yes"] },
+      {
+        k: "priorTreatment",
+        label: "What treatment did you take/use last time?",
+        type: "checks",
+        options: ["Permethrin 5% Lotion / Cream", "Tab Ivermectin", "Others"],
+        when: ["priorScabies", "Yes"],
+      },
+      { k: "priorTreatmentOther", label: "Other treatment (specify)", type: "text", when: ["priorScabies", "Yes"], whenIncludes: ["priorTreatment", "Others"] },
+
+      { k: "si_section", type: "section", label: "Specific Interrogation" },
       { k: "feverQ", label: "Do you have any fever?", type: "yesno" },
-      { k: "chestPain", label: "Any chest pain or shortness of breath?", type: "yesno" },
-      { k: "urine", label: "Is urine output low or tea-coloured?", type: "yesno" },
-      { k: "swelling", label: "Any swelling of face, arms or legs?", type: "yesno" },
-      ...pastMedical,
+      { k: "chestPain", label: "Do you have any chest pain or shortness of breath?", type: "yesno" },
+      { k: "urine", label: "Is your urine output low or urine tea-colored?", type: "yesno" },
+      { k: "swelling", label: "Do you have any swelling in your face, arms or legs?", type: "yesno" },
+
+      { k: "pmh_section", type: "section", label: "Past Medical History" },
+      { k: "otherProblems", label: "Do you have any other medical problems?", type: "yesno" },
+      {
+        k: "conditions",
+        label: "Medical problems",
+        type: "checks",
+        options: ["TB", "HIV", "Diabetes", "Cancer", "Kidney Disease", "Liver Disease", "Don't know"],
+        when: ["otherProblems", "Yes"],
+      },
+      { k: "medications", label: "What medications are you taking now?", type: "lines", placeholder: "Medication name" },
+      { k: "allergy", label: "Are you allergic to any drugs/medication?", type: "yesno" },
+      { k: "allergyDetail", label: "Allergy details", type: "text", when: ["allergy", "Yes"] },
     ],
     assessmentExtra: [
       { k: "secondaryInfection", label: "Secondary infection?", type: "yesno" },
-      { k: "skinScraping", label: "Skin scraping", type: "choice", options: ["Mite identified", "Eggs / faecal pellets identified", "Negative", "Not done"] },
+      {
+        k: "dermoscopy",
+        label: "Dermoscopy",
+        type: "repeatChoice",
+        options: TEST_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add Dermoscopy",
+      },
     ],
     lab: [
-      { k: "dermoscope", label: "Dermoscope", type: "choice", options: TEST_RESULT },
-      { k: "specimenDate", label: "Specimen date", type: "date" },
+      {
+        k: "skinScrapings",
+        label: "Skin scraping",
+        type: "repeatChoice",
+        options: ["Mite identified", "Eggs identified", "Faecal pellets identified", "Negative", "Not done"],
+        addLabel: "Add skin scraping",
+      },
     ],
     diagnosis: ["Confirmed Scabies", "Crusted Scabies", "Suspected Scabies", "No Scabies"],
+    diagnosisHelp: true,
     drugs: {
-      topical: ["Permethrin cream 5%", "Permethrin cream 2%", "Benzyl benzoate 25%", "Benzyl benzoate 10%", "Topical antibiotic"],
-      oral: [{ name: "Tab Ivermectin", mgPerKg: 0.2, tablet: 3 }, { name: "Oral antibiotic" }],
+      topical: [
+        "Permethrin 5% Cream/Lotion",
+        "Benzyl Benzoate 25%",
+        "Sulphur 5% / 10% Ointment or Lotion",
+      ],
+      oral: [{ name: "Tab Ivermectin (0.2 mg/kg)", mgPerKg: 0.2, tablet: 3 }],
+      scabiesProtocol: true,
     },
-    household: household(["Tab Ivermectin", "Permethrin cream"]),
-    outcomes: ["Open", "Healed", "No change", "Worse", "No Scabies", "Lost to follow-up"],
-    recommendations: ["Referred for further review"],
+    household: scabiesHousehold,
+    outcomes: ["Active", "Cured", "No Change", "Worse", "No Scabies", "Lost to Follow-up"],
+    recommendations: [
+      "Referred for further review",
+      "Morbidity Management and Disability Prevention (MMDP)",
+    ],
   },
 
   yaws: {
     id: "yaws", name: "Yaws", icd: "A66",
     bodyChart: { views: ["front", "back"], codes: [
-      ["T", "Thick skin patch"], ["U", "Ulcer"], ["P", "Papilloma"], ["J", "Joint swelling"],
-      ["BC", "Bone / cartilage deformity"], ["NO", "No lesions"]] },
-    caseDetails,
+      ["T", "Thick Skin Patch"],
+      ["U", "Ulcer"],
+      ["P", "Papilloma (raised yellow lesion)"],
+      ["J", "Joint Swelling"],
+      ["TS", "Thickened/Cracked skin on palms and soles of feet"],
+      ["BC", "Bone and cartilage deformity"],
+      ["NO", "No Lesions"],
+    ] },
+    caseDetails: yawsCaseDetails,
     history: [
-      { k: "keyComplaints", label: "Key presenting complaints", type: "checks", options: ["Ulcer", "Joint swelling", "Bone pain", "Yellow papilloma"] },
-      ...commonHpc,
-      { k: "jointPain", label: "Pain in joints / bone?", type: "yesno" },
-      { k: "feverQ", label: "Any fever?", type: "yesno" },
-      { k: "swelling", label: "Any swelling?", type: "yesno" },
-      { k: "heelSores", label: "Sores on your heel?", type: "yesno" },
-      { k: "footCracks", label: "Thick skin patches or cracks under the foot?", type: "yesno" },
-      { k: "familySimilar", label: "Anyone in the family with similar symptoms?", type: "yesno" },
-      { k: "familyYaws", label: "Anyone in the family diagnosed / treated for Yaws?", type: "yesno" },
-      ...pastMedical,
+      { k: "hpc_section", type: "section", label: "History of Presenting Complaints" },
+      {
+        k: "complaintDetails",
+        type: "perComplaint",
+        label: "Key presenting complaints",
+        options: ["Ulcer", "Joint swelling", "Bone pain", "Raised yellow lesion"],
+        fields: [
+          { k: "onsetHow", label: "How did it start?", type: "textarea" },
+          { k: "onsetWhen", label: "When did it start?", type: "duration" },
+          { k: "tookMeds", label: "Did you take any medication for this complaint?", type: "yesno" },
+          { k: "medsTaken", label: "Medication taken", type: "lines", when: ["tookMeds", "Yes"], placeholder: "Medication name" },
+          { k: "firstTime", label: "Is this the first time you have this complaint?", type: "yesno" },
+          { k: "familySimilar", label: "Are there any other family members with similar symptoms?", type: "yesno" },
+          { k: "familyYaws", label: "Has anyone of your family/close contacts been diagnosed with Yaws recently?", type: "yesno" },
+          {
+            k: "familyYawsNote",
+            type: "note",
+            label: "Please check these when doing household contact tracing, and register as patients if they also have Yaws",
+            when: ["familyYaws", "Yes"],
+          },
+        ],
+      },
+
+      { k: "si_section", type: "section", label: "Specific Interrogation" },
+      {
+        k: "si_note",
+        type: "note",
+        label: "Questions shown depend on the presenting complaints selected above.",
+        whenHasAny: "complaintDetails",
+      },
+      {
+        k: "jointPain",
+        label: "Do you have any pain in your joints / bone?",
+        type: "yesno",
+        whenIncludesAny: ["complaintDetails", ["Joint swelling", "Bone pain"]],
+      },
+      {
+        k: "feverQ",
+        label: "Do you have any fever?",
+        type: "yesno",
+        whenHasAny: "complaintDetails",
+      },
+      {
+        k: "jointSwellingQ",
+        label: "Do you have any swelling in any of your joints or bones?",
+        type: "yesno",
+        whenIncludesAny: ["complaintDetails", ["Joint swelling"]],
+      },
+      {
+        k: "soresUlcers",
+        label: "Do you have any sores or ulcers?",
+        type: "yesno",
+        whenIncludesAny: ["complaintDetails", ["Ulcer"]],
+      },
+      {
+        k: "footCracks",
+        label: "Do you have any thick patches on your skin or cracks under your foot?",
+        type: "yesno",
+        whenIncludesAny: ["complaintDetails", ["Raised yellow lesion"]],
+      },
+
+      { k: "pmh_section", type: "section", label: "Past Medical History" },
+      { k: "otherProblems", label: "Do you have any other medical problems?", type: "yesno" },
+      {
+        k: "conditions",
+        label: "Medical problems",
+        type: "checks",
+        options: ["TB", "HIV", "Diabetes", "Cancer", "Kidney Disease", "Liver Disease", "Don't know"],
+        when: ["otherProblems", "Yes"],
+      },
+      { k: "medications", label: "What medications are you taking now?", type: "lines", placeholder: "Medication name" },
+      {
+        k: "allergy",
+        label: "Are you allergic to any drugs/medication e.g. Penicillin and/or Erythromycin?",
+        type: "yesno",
+      },
+      { k: "allergyDetail", label: "Allergy details", type: "text", when: ["allergy", "Yes"] },
     ],
-    assessmentExtra: [{ k: "secondaryInfection", label: "Secondary infection?", type: "yesno" }],
+    assessmentExtra: [],
+    repeatExam: true,
     lab: [
-      { k: "rdt", label: "RDT", type: "choice", options: TEST_RESULT },
-      { k: "dfaPcr", label: "DFA / PCR", type: "choice", options: DETECT_RESULT },
-      { k: "darkfield", label: "Darkfield microscopy", type: "choice", options: DETECT_RESULT },
-      { k: "rdtDpp", label: "RDT / DPP", type: "choice", options: DETECT_RESULT },
-      { k: "specimenDate", label: "Specimen date", type: "date" },
+      {
+        k: "rdt",
+        label: "RDT",
+        type: "repeatChoice",
+        options: TEST_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add RDT",
+      },
+      {
+        k: "dfaPcr",
+        label: "DFA / PCR",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add DFA / PCR",
+      },
+      {
+        k: "darkfield",
+        label: "Darkfield Microscopy Test",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Date",
+        addLabel: "Add Darkfield Microscopy",
+      },
+      {
+        k: "dpp",
+        label: "DPP",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add DPP",
+      },
     ],
-    diagnosis: ["Primary Yaws", "Secondary Yaws", "Tertiary Yaws", "Suspected Yaws", "No Yaws"],
+    diagnosis: [
+      "Primary Yaws (Clinical / confirmed)",
+      "Secondary Yaws (Clinical / confirmed)",
+      "Tertiary Yaws (Clinical / confirmed)",
+      "No Yaws",
+    ],
     drugs: {
       topical: ["Topical antibiotic"],
       oral: [{ name: "Tab Azithromycin 500mg", mgPerKg: 30, tablet: 500 }, { name: "Inj Benzathine penicillin", fixed: "0.6 MU (<10y) / 1.2 MU (10y+)" }, { name: "Oral antibiotic" }],
     },
-    household: household(["Tab Azithromycin", "Inj Benzathine penicillin"]),
-    outcomes: ["Open", "Healed", "Improved", "No change", "No Yaws", "New lesions", "Lost to follow-up"],
-    recommendations: ["Referred for further review"],
+    household: yawsHousehold,
+    outcomes: ["Active", "Cured", "Improved", "No Change", "No Yaws", "New Lesions", "Lost to Follow-up"],
+    recommendations: [
+      "Referred for further review",
+      "Morbidity Management and Disability Prevention (MMDP)",
+    ],
   },
 
   lf: {
     id: "lf", name: "Lymphatic Filariasis", icd: "B74",
-    bodyChart: { views: ["front"], codes: [
-      ["S1", "Stage 1 (reversible) — mild"], ["S2", "Stage 2 (not reversible) — mild"],
-      ["S3", "Stage 3 (shallow fold) — moderate"], ["S4", "Stage 4 (knobs) — severe"],
-      ["S5", "Stage 5 (deep folds) — severe"], ["S6", "Stage 6 (mossy lesions) — severe"],
-      ["S7", "Stage 7 (incapacitated) — severe"]],
-      perLesion: { k: "secondary", label: "Secondary infection", options: ["None", "Acute", "Mild", "Chronic"] } },
-    caseDetails,
-    history: [...commonHpc, ...commonInterrogation, ...pastMedical],
-    assessmentExtra: [],
-    lab: [
-      { k: "thickSmear", label: "Thick smear", type: "choice", options: TEST_RESULT },
-      { k: "pcr", label: "PCR", type: "choice", options: DETECT_RESULT },
-      { k: "rdt", label: "RDT", type: "choice", options: DETECT_RESULT },
-      { k: "specimenDate", label: "Specimen date", type: "date" },
+    bodyChart: {
+      views: ["front"],
+      codes: [
+        ["S1", "Stage 1 (Reversible Swelling) — pitting edema that subsides overnight"],
+        ["S2", "Stage 2 (Persistent swelling) — pitting edema remains, does not fully resolve with rest"],
+        ["S3", "Stage 3 (Early skin changes) — shallow folds, beginning fibrosis"],
+        ["S4", "Stage 4 (Moderate fibrosis) — skin thickening, deeper folds, early nodules"],
+        ["S5", "Stage 5 (Severe fibrosis) — papillomatosis, wart-like growths, recurrent infections"],
+        ["S6", "Stage 6 (Advanced elephantiasis) — gross enlargement, skin hardening, deformity"],
+        ["S7", "Stage 7 (End-stage elephantiasis) — extreme deformity, disability, loss of function"],
+      ],
+      perLesion: {
+        k: "secondary",
+        label: "Secondary infection?",
+        options: ["None", "Acute", "Mild", "Chronic"],
+        default: "None",
+      },
+      stageHelp: true,
+    },
+    caseDetails: lfCaseDetails,
+    history: [
+      { k: "hpc_section", type: "section", label: "History of Presenting Complaints" },
+      { k: "onsetHow", label: "How did it start?", type: "textarea" },
+      { k: "onsetWhen", label: "When did it start?", type: "duration" },
+      { k: "tookMeds", label: "Did you take any medication for this complaint?", type: "yesno" },
+      { k: "medsTaken", label: "Medication taken", type: "lines", when: ["tookMeds", "Yes"], placeholder: "Medication name" },
+      { k: "firstTime", label: "Is this the first time you have this complaint/symptom?", type: "yesno" },
+      { k: "communitySimilar", label: "Are there any other people in the community with similar symptom?", type: "yesno" },
+      {
+        k: "communitySimilarNote",
+        type: "note",
+        label: "Please check these when doing household contact tracing, and register as patients if they also have LF",
+        when: ["communitySimilar", "Yes"],
+      },
+
+      { k: "si_section", type: "section", label: "Specific Interrogation" },
+      { k: "fever", label: "Do you have any fever?", type: "choice", options: ["High", "Moderate", "Low", "No"] },
+      { k: "chills", label: "Do you have Chills and Rigors?", type: "yesno" },
+      { k: "trauma", label: "Do you have any history of trauma?", type: "yesno" },
+      { k: "lymphadenopathy", label: "Do you have any Swollen/Painful lymph nodes?", type: "yesno" },
+
+      { k: "pmh_section", type: "section", label: "Past Medical History" },
+      { k: "otherProblems", label: "Do you have any other medical problems?", type: "yesno" },
+      {
+        k: "conditions",
+        label: "Medical problems",
+        type: "checks",
+        options: ["TB", "HIV", "Diabetes", "Cancer", "Don't know", "Kidney Disease", "Liver Disease", "None"],
+        when: ["otherProblems", "Yes"],
+      },
+      { k: "medications", label: "What medications are you taking now?", type: "lines", placeholder: "Medication name" },
+      { k: "allergy", label: "Are you allergic to any drugs/medication?", type: "yesno" },
+      { k: "allergyDetail", label: "Allergy details", type: "text", when: ["allergy", "Yes"] },
     ],
-    diagnosis: ["Confirmed Lymphatic Filariasis", "Acute Adenolymphangitis", "No Lymphatic Filariasis"],
+    assessmentExtra: [],
+    repeatExam: true,
+    lab: [
+      {
+        k: "thickSmear",
+        label: "Thick Smear",
+        type: "repeatChoice",
+        options: TEST_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add Thick Smear",
+      },
+      {
+        k: "pcr",
+        label: "PCR",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add PCR",
+      },
+      {
+        k: "rdt",
+        label: "RDT",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add RDT",
+      },
+    ],
+    diagnosis: [
+      "Confirmed Lymphatic Filariasis",
+      "Acute Adenolymphangitis (ADL)",
+      "Clinical LF (when tests are Negative)",
+      "No Lymphatic Filariasis",
+    ],
     drugs: {
       topical: ["Dressing material", "Self-care kit"],
       oral: [{ name: "Tab Ivermectin 3mg", mgPerKg: 0.2, tablet: 3 }, { name: "Tab Albendazole", fixed: "200mg (<10y) / 400mg (10y+)" }, { name: "Tab DEC 50mg", mgPerKg: 6, tablet: 50 }],
     },
-    household: household(["Tab Ivermectin", "Tab Albendazole"]),
-    outcomes: ["Open", "No change", "No Lymphatic Filariasis", "MMDP", "Lost to follow-up"],
-    recommendations: ["Referred for further review", "Referred for surgery", "Self care"],
+    household: lfHousehold,
+    outcomes: ["Active", "No Change", "No Lymphatic Filariasis", "MMDP", "Lost to Follow-up"],
+    recommendations: [
+      "Referred for further review and further management of Acute Attacks especially in a pregnant woman",
+      "Referred for Surgery",
+      "Self care",
+      "Morbidity Management and Disability Prevention (MMDP)",
+    ],
   },
 
   buruli: {
     id: "buruli", name: "Buruli Ulcer", icd: "A31.1",
-    bodyChart: { views: ["front", "back"], codes: [
-      ["PA", "Painless papule"], ["PN", "Painless nodule"], ["PPl", "Painless plaque"],
-      ["O", "Oedema"], ["NU", "Necrotic ulcer with undermining edges"]],
-      perLesion: { k: "category", label: "Category", options: ["Category 1", "Category 2", "Category 3"] } },
-    caseDetails,
-    history: [...commonHpc, ...commonInterrogation, ...pastMedical],
-    assessmentExtra: [],
-    lab: [
-      { k: "zn", label: "ZN", type: "choice", options: TEST_RESULT },
-      { k: "pcr", label: "PCR", type: "choice", options: DETECT_RESULT },
-      { k: "specimenDate", label: "Specimen date", type: "date" },
+    bodyChart: {
+      views: ["front", "back"],
+      codes: [
+        ["PA", "Painless Papule"],
+        ["PN", "Painless Nodule"],
+        ["PPl", "Painless Plaque"],
+        ["O", "Oedema"],
+        ["NU", "Necrotic Ulcer with undermining edges"],
+        ["D", "Deformed limb"],
+        ["S", "Scar of healed ulcer"],
+      ],
+      perLesion: {
+        k: "category",
+        label: "Category?",
+        options: ["Category 1", "Category 2", "Category 3"],
+        default: "Category 1",
+      },
+    },
+    caseDetails: buruliCaseDetails,
+    history: [
+      { k: "hpc_section", type: "section", label: "History of Presenting Complaints" },
+      { k: "onsetHow", label: "How did it start?", type: "textarea" },
+      { k: "onsetWhen", label: "When did it start?", type: "duration" },
+      { k: "tookMeds", label: "Did you take any medication?", type: "yesno" },
+      { k: "medsTaken", label: "Medication taken", type: "lines", when: ["tookMeds", "Yes"], placeholder: "Medication name" },
+      { k: "firstTime", label: "Is this the first time you have this complaint/symptom?", type: "yesno" },
+      { k: "communitySimilar", label: "Are there any other people in the community with similar symptom?", type: "yesno" },
+      {
+        k: "communitySimilarNote",
+        type: "note",
+        label: "Please check these when doing household contact tracing, and register as patients if they also have Buruli Ulcer",
+        when: ["communitySimilar", "Yes"],
+      },
+
+      { k: "si_section", type: "section", label: "Specific Interrogation" },
+      { k: "lesionPain", label: "Do you feel pain in the nodule/swelling or ulcer?", type: "yesno" },
+      { k: "fever", label: "Do you have any fever?", type: "choice", options: ["High", "Moderate", "Low", "No"] },
+      { k: "chills", label: "Do you have Chills and Rigors?", type: "yesno" },
+      { k: "trauma", label: "Do you have history of trauma?", type: "yesno" },
+      { k: "lymphadenopathy", label: "Do you have any Swollen/Painful lymph nodes?", type: "yesno" },
+
+      { k: "pmh_section", type: "section", label: "Past Medical History" },
+      { k: "otherProblems", label: "Do you have any other medical problems?", type: "yesno" },
+      {
+        k: "conditions",
+        label: "Medical problems",
+        type: "checks",
+        options: ["TB", "HIV", "Diabetes", "Cancer", "Don't know", "Kidney Disease", "Liver Disease", "None"],
+        when: ["otherProblems", "Yes"],
+      },
+      { k: "medications", label: "What medications are you taking now?", type: "lines", placeholder: "Medication name" },
+      { k: "allergy", label: "Are you allergic to any drugs?", type: "yesno" },
+      { k: "allergyDetail", label: "Allergy details", type: "text", when: ["allergy", "Yes"] },
     ],
-    diagnosis: ["Suspected Buruli Ulcer", "Confirmed Buruli Ulcer", "No Buruli Ulcer"],
+    assessmentExtra: [],
+    repeatExam: true,
+    lab: [
+      {
+        k: "zn",
+        label: "ZN",
+        type: "repeatChoice",
+        options: TEST_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add ZN",
+      },
+      {
+        k: "pcr",
+        label: "PCR",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Collection Date",
+        addLabel: "Add PCR",
+      },
+    ],
+    diagnosis: ["Clinical Buruli Ulcer", "Confirmed Buruli Ulcer", "No Buruli Ulcer"],
     drugs: {
       oral: [{ name: "Tab Rifampicin 300mg", mgPerKg: 10, tablet: 300 }, { name: "Tab Clarithromycin 500mg", mgPerKg: 7.5, tablet: 500 }],
     },
     adherence: { unit: "week", count: 8, label: "8-week treatment schedule" },
-    household: household(["Tab Rifampicin", "Tab Clarithromycin"]),
-    outcomes: ["Open", "Healed", "No change", "No Buruli Ulcer", "MMDP", "Lost to follow-up"],
-    recommendations: ["Referred for further review", "Referred for surgery", "Self care"],
+    household: buruliHousehold,
+    outcomes: ["Active", "Healed", "No Change/Improvement", "No Buruli Ulcer", "Lost to Follow-up"],
+    recommendations: [
+      "Referred for further review",
+      "Referred for Surgery",
+      "Self care",
+      "Physiotherapy",
+      "Morbidity Management and Disability Prevention (MMDP)",
+    ],
   },
 
   leprosy: {
     id: "leprosy", name: "Leprosy", icd: "A30",
-    bodyChart: { views: ["front", "back"], codes: [
-      ["PT", "Skin patch"], ["N", "Enlarged / tender nerve"], ["CL", "Claw finger / toe"],
-      ["BL", "Bone loss"], ["UL", "Ulcer / wound / burn"], ["NO", "No lesions"]] },
-    caseDetails,
-    history: [...commonHpc, ...commonInterrogation, ...pastMedical],
+    bodyChart: {
+      views: ["front", "back"],
+      codes: [
+        ["A", "Well defined patch / plaque without sensation"],
+        ["B", "Well defined patch / plaque with sensation"],
+        ["C", "Ill defined patch / plaque without sensation"],
+        ["D", "Ill defined patch / plaque with sensation"],
+        ["E", "Painless Nodule"],
+        ["F", "Painful Nodule"],
+        ["G", "Enlarged nerve"],
+        ["H", "Tender nerve"],
+        ["I", "Nerve abscess"],
+        ["J", "Clawed"],
+        ["K", "Swollen"],
+        ["N", "Bone loss"],
+        ["P", "Ulcer/burn/wound"],
+        ["R", "Blind eye"],
+        ["S", "Unable to close eyelid/weakness of the eyelid (Lagophthalmos)"],
+        ["T", "Loss of eyebrows/eyelashes"],
+        ["U", "Collapsed or widened bridge of the nose"],
+        ["V", "Foot drop / Wrist drop"],
+      ],
+      showNerves: true,
+    },
+    caseDetails: leprosyCaseDetails,
+    history: [
+      { k: "hpc_section", type: "section", label: "History of Presenting Complaints" },
+      { k: "onsetHow", label: "How did it start?", type: "textarea" },
+      { k: "onsetWhen", label: "When did it start?", type: "duration" },
+      { k: "tookMeds", label: "Did you take any medication for this complaint?", type: "yesno" },
+      { k: "medsTaken", label: "Medication taken", type: "lines", when: ["tookMeds", "Yes"], placeholder: "Medication name" },
+      { k: "firstTime", label: "Is this the first time you have this complaint/symptom?", type: "yesno" },
+      { k: "communitySimilar", label: "Are there any other people in your family or community with similar symptom?", type: "yesno" },
+      {
+        k: "communitySimilarNote",
+        type: "note",
+        label: "Please check these when doing household contact tracing, and register as patients if they also have Leprosy",
+        when: ["communitySimilar", "Yes"],
+      },
+
+      { k: "si_section", type: "section", label: "Specific Interrogation" },
+      { k: "skinPatches", label: "Do you have any red or white skin patches?", type: "yesno" },
+      { k: "lesionPain", label: "Do you feel pain in the nodule/swelling or ulcer?", type: "yesno" },
+      { k: "feverQ", label: "Do you have any fever?", type: "yesno" },
+      { k: "chills", label: "Do you have Chills?", type: "yesno" },
+      { k: "blockedNose", label: "Do you have a blocked nose?", type: "yesno" },
+      { k: "numbness", label: "Do you have any pins and needles/numbness in your hands and feet?", type: "yesno" },
+      { k: "weakness", label: "Is there weakness of your eyelids/hands and feet?", type: "yesno" },
+      { k: "noseBleed", label: "Do you have any bleeding from your nose?", type: "yesno" },
+      { k: "lymphadenopathy", label: "Do you have any lymphadenopathy/enlarged lymph nodes?", type: "yesno" },
+      { k: "limbSwelling", label: "Is there any swelling and pain of your arms or legs?", type: "yesno" },
+      { k: "faceThickening", label: "Have you noticed thickening or redness of the skin on your face and earlobes and nose?", type: "yesno" },
+
+      { k: "pmh_section", type: "section", label: "Past Medical History" },
+      { k: "otherProblems", label: "Do you have any other medical problems?", type: "yesno" },
+      {
+        k: "conditions",
+        label: "Medical problems",
+        type: "checks",
+        options: ["TB", "HIV", "Diabetes", "Cancer", "Don't know", "Kidney Disease", "Liver Disease", "None"],
+        when: ["otherProblems", "Yes"],
+      },
+      { k: "medications", label: "What medications are you taking now?", type: "lines", placeholder: "Medication name" },
+      {
+        k: "allergy",
+        label: "Are you allergic to any drugs, especially Dapsone, Septrin/Panadol and Fansidar?",
+        type: "yesno",
+      },
+      { k: "allergyDetail", label: "Allergy details", type: "text", when: ["allergy", "Yes"] },
+    ],
     assessmentExtra: [
-      { k: "patches", label: "Number of skin patches", type: "number" },
-      { k: "nerves", label: "Number of nerves affected (max 12)", type: "number" },
-      { k: "sensoryHands", label: "Sensation loss — hands", type: "choice", options: ["None", "Left", "Right", "Both"] },
-      { k: "sensoryFeet", label: "Sensation loss — feet", type: "choice", options: ["None", "Left", "Right", "Both"] },
-      { k: "sensoryEyes", label: "Eyes not blinking normally", type: "choice", options: ["None", "Left", "Right", "Both"] },
-      { k: "vmtEye", label: "VMT — tight eye closure", type: "choice", options: ["Strong (0)", "Weak (1)", "Paralysed (2)"] },
-      { k: "vmtWrist", label: "VMT — wrist up", type: "choice", options: ["Strong (0)", "Weak (1)", "Paralysed (2)"] },
-      { k: "vmtFinger", label: "VMT — little finger out", type: "choice", options: ["Strong (0)", "Weak (1)", "Paralysed (2)"] },
-      { k: "vmtFoot", label: "VMT — foot up", type: "choice", options: ["Strong (0)", "Weak (1)", "Paralysed (2)"] },
-      { k: "vmtThumb", label: "VMT — thumb up", type: "choice", options: ["Strong (0)", "Weak (1)", "Paralysed (2)"] },
-      { k: "visionAcuity", label: "Vision acuity", type: "text" },
+      { k: "vmtChart", type: "leprosyVmtChart" },
+      { k: "sensoryChart", type: "leprosySensoryChart" },
+      { k: "visionChart", type: "leprosyVisionChart" },
+      { k: "patches", label: "Number of anaesthetic patches A+C (override if needed)", type: "number" },
+      { k: "nerves", label: "Nerves affected — max(body chart, NFA) override (max 18 for NFA / 12 body)", type: "number" },
     ],
-    lab: [
-      { k: "slitSkin", label: "Slit skin smear", type: "choice", options: TEST_RESULT },
-      { k: "rdt", label: "RDT", type: "choice", options: TEST_RESULT },
-      { k: "specimenDate", label: "Specimen date", type: "date" },
-    ],
+    repeatExam: true,
+    repeatExamIncludesAssessment: true,
     diagnosis: ["Paucibacillary (PB)", "Multibacillary (MB)", "No Leprosy"],
+    lab: [
+      {
+        k: "slitSkinZn",
+        label: "Slit Skin Smear: ZN",
+        type: "repeatChoice",
+        options: TEST_RESULT,
+        dateLabel: "Specimen Date",
+        addLabel: "Add Slit Skin Smear",
+      },
+      {
+        k: "biopsy",
+        label: "Biopsy",
+        type: "repeatChoice",
+        options: DETECT_RESULT,
+        dateLabel: "Specimen Date",
+        addLabel: "Add Biopsy",
+      },
+      {
+        k: "rdt",
+        label: "RDT",
+        type: "repeatChoice",
+        options: TEST_RESULT,
+        dateLabel: "Specimen Date",
+        addLabel: "Add RDT",
+      },
+    ],
     drugs: {
       oral: [
         { name: "Cap Rifampicin 300mg / 150mg" }, { name: "Cap Clofazimine 100mg / 50mg" },
@@ -227,9 +765,16 @@ export const DISEASE_SPECS = {
       ],
     },
     adherence: { unit: "month", count: 12, label: "MDT month-wise schedule (PB 6, MB 12+)", restart: true },
-    household: household(["SDR-PEP"]),
-    outcomes: ["Open", "Healed", "No change", "No Leprosy", "MMDP", "Lost to follow-up"],
-    recommendations: ["Referred for further review", "Referred for surgery", "Self care"],
+    household: [
+      { k: "contacts", label: "Household Monitoring", type: "leprosyHousehold" },
+    ],
+    outcomes: ["Active", "Cured", "No Change", "No Leprosy", "Lost to Follow-up"],
+    recommendations: [
+      "Referred for further review (NOPS/Physiotherapy/Medical Clinic & or Admission/Eye Clinic (Opthamology))",
+      "Referred for Surgery",
+      "Self care",
+      "Morbidity Management and Disability Prevention (MMDP)",
+    ],
   },
 };
 
@@ -269,33 +814,191 @@ export const localISODate = (d = new Date()) => {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 };
 
-export const leprosyScores = (d = {}) => {
-  const side = (v) => (v === "Both" ? 2 : v === "None" || !v ? 0 : 1);
-  const vmt = (v) => (v?.includes("(2)") ? 2 : v?.includes("(1)") ? 1 : 0);
-  const eyes = side(d.sensoryEyes) + vmt(d.vmtEye);
-  const hands = side(d.sensoryHands) + vmt(d.vmtWrist) + vmt(d.vmtFinger) + vmt(d.vmtThumb);
-  const feet = side(d.sensoryFeet) + vmt(d.vmtFoot);
-  const cap = (n) => Math.min(n, 4);
-  const ehf = cap(eyes) + cap(hands) + cap(feet);
-  const g2d = Math.min(2, Math.max(eyes ? (eyes >= 2 ? 2 : 1) : 0, hands ? (hands >= 2 ? 2 : 1) : 0, feet ? (feet >= 2 ? 2 : 1) : 0));
-  return { eyes, hands, feet, ehf: Math.min(ehf, 12), g2d };
+/** Diagnosis patches: Well defined (A) + Ill defined (C) without sensation only. */
+const DIAGNOSIS_PATCH_CODES = new Set(["A", "C"]);
+/** Body-chart nerve findings: enlarged / tender / abscess — each nerve site = 1 pt max. */
+const BODY_NERVE_CODES = new Set(["G", "H", "I"]);
+
+const HAND_NERVE_GROUPS = {
+  R: [
+    ["Right Lower Palm below thumb", "Right Index Finger"],
+    ["Right Lower Palm below pinky", "Right Little Finger"],
+  ],
+  L: [
+    ["Left Lower Palm below thumb", "Left Index Finger"],
+    ["Left Lower Palm below pinky", "Left Little Finger"],
+  ],
+};
+const FOOT_POINTS = {
+  R: ["Right Foot Thumb", "Right Foot Medial", "Right Foot Lateral", "Right Foot Mid"],
+  L: ["Left Foot Thumb", "Left Foot Medial", "Left Foot Lateral", "Left Foot Mid"],
+};
+const VMT_IDS = {
+  eye: { R: "right-tight-eye", L: "left-tight-eye" },
+  wrist: { R: "right-wrist", L: "left-wrist" },
+  finger: { R: "right-little-finger", L: "left-little-finger" },
+  thumb: { R: "right-thumb", L: "left-thumb" },
+  foot: { R: "right-foot", L: "left-foot" },
 };
 
+const regionSide = (region = "") => {
+  const r = String(region).toLowerCase();
+  if (/\bright\b/.test(r) || r.startsWith("r ")) return "R";
+  if (/\bleft\b/.test(r) || r.startsWith("l ")) return "L";
+  return null;
+};
+const isEyeRegion = (region = "") => /\beye\b/.test(String(region).toLowerCase());
+const isHandRegion = (region = "") => /\b(hand|palm|finger|wrist)\b/.test(String(region).toLowerCase());
+const isFootRegion = (region = "") => /\b(foot|toe)\b/.test(String(region).toLowerCase());
+const isNerveRegion = (region = "") => /\bnerve\b/.test(String(region).toLowerCase());
+
+const vmtPointScore = (code) => {
+  if (code === "PARALYZED") return 2;
+  if (code === "WEAK") return 1;
+  return 0;
+};
+const vmtAffected = (code) => code === "WEAK" || code === "PARALYZED";
+
+/** Patches (A+C) and body-chart nerves (unique G/H/I nerve sites, max 12). */
+export const countLeprosyFindings = (marks = {}) => {
+  const entries = Object.values(marks || {});
+  const patches = entries.filter((m) => DIAGNOSIS_PATCH_CODES.has(m.code)).length;
+  const nerveSites = new Set();
+  entries.forEach((m) => {
+    if (!BODY_NERVE_CODES.has(m.code)) return;
+    if (!isNerveRegion(m.region)) return;
+    nerveSites.add(`${m.view || ""}:${m.region}`);
+  });
+  return { patches, nerves: Math.min(12, nerveSites.size) };
+};
+
+/** NFA affected nerves: ST (max 8) + VMT (max 10) = max 18. */
+export const countNfaNerves = (d = {}) => {
+  const st = d.sensoryChart?.points || {};
+  const vmt = d.vmtChart?.points || {};
+
+  let sensory = 0;
+  if (st["Right Eye"] === "BLINKNOTNORM") sensory += 1;
+  if (st["Left Eye"] === "BLINKNOTNORM") sensory += 1;
+
+  ["R", "L"].forEach((side) => {
+    HAND_NERVE_GROUPS[side].forEach((ids) => {
+      if (ids.some((id) => st[id] === "WITHOUTSENS")) sensory += 1;
+    });
+    if (FOOT_POINTS[side].some((id) => st[id] === "WITHOUTSENS")) sensory += 1;
+  });
+
+  let voluntary = 0;
+  Object.values(VMT_IDS).forEach((pair) => {
+    if (vmtAffected(vmt[pair.R])) voluntary += 1;
+    if (vmtAffected(vmt[pair.L])) voluntary += 1;
+  });
+
+  return {
+    sensory: Math.min(8, sensory),
+    voluntary: Math.min(10, voluntary),
+    total: Math.min(18, sensory + voluntary),
+  };
+};
+
+/**
+ * EHF: per-side max of body-chart disability + ST + VMT (each site 0–2).
+ * Total = sum of 6 sites (max 12). WHO G2D = max of the 6.
+ */
+export const leprosyScores = (d = {}) => {
+  const marks = Object.values(d.marks || {});
+  const st = d.sensoryChart?.points || {};
+  const vmt = d.vmtChart?.points || {};
+
+  const body = { eye: { R: 0, L: 0 }, hand: { R: 0, L: 0 }, foot: { R: 0, L: 0 } };
+  marks.forEach((m) => {
+    const side = regionSide(m.region);
+    if (!side) return;
+    const code = m.code;
+    // Blind eye → 2
+    if (code === "R" && isEyeRegion(m.region)) body.eye[side] = Math.max(body.eye[side], 2);
+    // Claw / bone loss / ulcer on hand or foot → 2
+    if (["J", "N", "P"].includes(code) && isHandRegion(m.region)) body.hand[side] = Math.max(body.hand[side], 2);
+    if (["J", "N", "P"].includes(code) && isFootRegion(m.region)) body.foot[side] = Math.max(body.foot[side], 2);
+  });
+
+  const sensoryEye = (id) => (st[id] === "BLINKNOTNORM" ? 1 : 0);
+  const sensoryLimb = (ids) => (ids.some((id) => st[id] === "WITHOUTSENS") ? 1 : 0);
+
+  const rightEye = Math.max(body.eye.R, sensoryEye("Right Eye"), vmtPointScore(vmt[VMT_IDS.eye.R]));
+  const leftEye = Math.max(body.eye.L, sensoryEye("Left Eye"), vmtPointScore(vmt[VMT_IDS.eye.L]));
+  const rightHand = Math.max(
+    body.hand.R,
+    sensoryLimb(HAND_NERVE_GROUPS.R.flat()),
+    vmtPointScore(vmt[VMT_IDS.wrist.R]),
+    vmtPointScore(vmt[VMT_IDS.finger.R]),
+    vmtPointScore(vmt[VMT_IDS.thumb.R]),
+  );
+  const leftHand = Math.max(
+    body.hand.L,
+    sensoryLimb(HAND_NERVE_GROUPS.L.flat()),
+    vmtPointScore(vmt[VMT_IDS.wrist.L]),
+    vmtPointScore(vmt[VMT_IDS.finger.L]),
+    vmtPointScore(vmt[VMT_IDS.thumb.L]),
+  );
+  const rightFoot = Math.max(body.foot.R, sensoryLimb(FOOT_POINTS.R), vmtPointScore(vmt[VMT_IDS.foot.R]));
+  const leftFoot = Math.max(body.foot.L, sensoryLimb(FOOT_POINTS.L), vmtPointScore(vmt[VMT_IDS.foot.L]));
+
+  const sites = [rightEye, leftEye, rightHand, leftHand, rightFoot, leftFoot].map((n) => Math.min(2, n));
+  const ehf = Math.min(12, sites.reduce((a, b) => a + b, 0));
+  const g2d = Math.max(0, ...sites);
+  const eyes = rightEye + leftEye;
+  const hands = rightHand + leftHand;
+  const feet = rightFoot + leftFoot;
+
+  return {
+    rightEye: sites[0],
+    leftEye: sites[1],
+    rightHand: sites[2],
+    leftHand: sites[3],
+    rightFoot: sites[4],
+    leftFoot: sites[5],
+    eyes: Math.min(4, eyes),
+    hands: Math.min(4, hands),
+    feet: Math.min(4, feet),
+    ehf,
+    g2d,
+    eyeGrade: Math.max(sites[0], sites[1]),
+    handGrade: Math.max(sites[2], sites[3]),
+    footGrade: Math.max(sites[4], sites[5]),
+  };
+};
+
+/**
+ * Classification: patches (1–5 PB, ≥6 MB) and max(body-chart nerves, NFA nerves)
+ * (1 PB, ≥2 MB). No patches and no nerves → No Leprosy.
+ */
 export const leprosyClass = (d = {}) => {
-  const patches = Number(d.patches || 0);
-  const nerves = Number(d.nerves || 0);
-  if (d.slitSkin === "Positive") return `Multibacillary (MB) (${patches} patches, ${nerves} nerves)`;
-  if (!patches && !nerves) return "No Leprosy (0 patches, 0 nerves)";
-  if (patches >= 6 && nerves > 1) return `Multibacillary (MB) (${patches} patches, ${nerves} nerves)`;
-  return `Paucibacillary (PB) (${patches} patches, ${nerves} nerves)`;
+  const counted = countLeprosyFindings(d.marks || {});
+  const nfa = countNfaNerves(d);
+  const patches = Number(d.patches != null && d.patches !== "" ? d.patches : counted.patches);
+  const bodyNerves = counted.nerves;
+  const computedNerves = Math.max(bodyNerves, nfa.total);
+  const nerves = Number(d.nerves != null && d.nerves !== "" ? d.nerves : computedNerves);
+  const smearPositive = Array.isArray(d.slitSkinZn)
+    ? d.slitSkinZn.some((x) => (typeof x === "string" ? x : x?.result) === "Positive")
+    : d.slitSkin === "Positive";
+
+  if (!patches && !nerves && !smearPositive) {
+    return { classification: "No Leprosy", patches: 0, nerves: 0, bodyNerves, nfaNerves: nfa.total };
+  }
+  if (smearPositive || patches >= 6 || nerves >= 2) {
+    return { classification: "Multibacillary (MB)", patches, nerves, bodyNerves, nfaNerves: nfa.total };
+  }
+  return { classification: "Paucibacillary (PB)", patches, nerves, bodyNerves, nfaNerves: nfa.total };
 };
 
 export const yawsClass = (marks = {}) => {
   const codes = Object.values(marks).map((m) => m.code);
-  if (codes.includes("BC")) return "Tertiary Yaws";
+  if (codes.includes("BC")) return "Tertiary Yaws (Clinical / confirmed)";
   const p = codes.filter((c) => c === "P").length;
   const u = codes.filter((c) => c === "U").length;
   if (p + u === 0) return "";
-  if (p <= 1 && u <= 1 && p + u <= 2) return "Primary Yaws";
-  return "Secondary Yaws";
+  if (p <= 1 && u <= 1 && p + u <= 2) return "Primary Yaws (Clinical / confirmed)";
+  return "Secondary Yaws (Clinical / confirmed)";
 };

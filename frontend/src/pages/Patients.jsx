@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,9 @@ import { SelectField } from "@/components/Fields";
 import { Avatar, isLostToFollowUp, dobFromAge, formatAgeYMD } from "@/components/Capture";
 import { GEO, DISEASES } from "@/mock/data";
 import { fmtDate, fmtDateTime, DISEASE_SPECS } from "@/mock/specs";
-import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft, Users, CalendarDays } from "lucide-react";
+import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
-import StatusChips from "@/components/StatusChips";
+import StatusChips, { PendingSyncChip } from "@/components/StatusChips";
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -41,6 +41,8 @@ const shift = (period, anchor, dir) => {
 export default function Patients() {
   const { visiblePatients, users, encounters, settings, suspects } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
+  const view = location.pathname.startsWith("/appointments") ? "encounter" : "patient";
   const [q, setQ] = useState("");
   const [village, setVillage] = useState("");
   const [status, setStatus] = useState("");
@@ -48,7 +50,6 @@ export default function Patients() {
   const [disease, setDisease] = useState("");
   const [clinician, setClinician] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [view, setView] = useState("patient");
   const [period, setPeriod] = useState("Day");
   const [anchor, setAnchor] = useState(iso(new Date()));
   const [custom, setCustom] = useState({ from: "", to: "" });
@@ -92,14 +93,36 @@ export default function Patients() {
   return (
     <AppShell>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex gap-1 rounded-md border border-border bg-white p-1" data-testid="view-toolbar">
-          {[["patient", "Patient view", Users], ["encounter", "Encounter view", CalendarDays]].map(([k, label, Icon]) => (
-            <button key={k} data-testid={`view-toggle-${k}`} onClick={() => setView(k)}
-              className={`flex h-10 items-center gap-2 rounded px-3 text-sm font-semibold ${view === k ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted"}`}>
-              <Icon className="h-4 w-4" /> <span className="hidden sm:inline">{label}</span>
+        {view === "encounter" ? (
+          <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="encounter-period-toolbar">
+            <select data-testid="period-select" value={period} onChange={(e) => { setPeriod(e.target.value); setAnchor(iso(new Date())); }}
+              className="h-12 rounded-md border border-input bg-white px-3 text-sm font-semibold">
+              {PERIODS.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+
+            {!["All", "Custom"].includes(period) && (
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" className="h-12 w-12" data-testid="period-prev-btn" onClick={() => setAnchor(shift(period, anchor, -1))}><ChevronLeft className="h-4 w-4" /></Button>
+                <span className="min-w-[160px] px-2 text-center text-sm font-semibold" data-testid="period-label">{range.label}</span>
+                <Button variant="outline" size="icon" className="h-12 w-12" data-testid="period-next-btn" onClick={() => setAnchor(shift(period, anchor, 1))}><ChevronRight className="h-4 w-4" /></Button>
+              </div>
+            )}
+            {period === "Custom" && (
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="date" data-testid="period-from" value={custom.from} onChange={(e) => setCustom({ ...custom, from: e.target.value })} className="h-12 rounded-md border border-input bg-white px-3 text-sm" />
+                <input type="date" data-testid="period-to" value={custom.to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} className="h-12 rounded-md border border-input bg-white px-3 text-sm" />
+              </div>
+            )}
+            {period === "All" && <span className="text-sm font-semibold" data-testid="period-label">All time</span>}
+
+            <button data-testid="today-btn" onClick={() => { setAnchor(iso(new Date())); setCustom({ from: "", to: "" }); }}
+              className={`h-12 rounded-md border px-4 text-sm font-semibold ${isToday ? "border-border bg-white text-muted-foreground" : "border-primary bg-primary text-white"}`}>
+              Today
             </button>
-          ))}
-        </div>
+            <span className="text-sm text-muted-foreground" data-testid="encounter-count-label">{dayEncounters.length} encounter(s)</span>
+          </div>
+        ) : null}
+
         <div className="relative ml-auto min-w-0 flex-1 sm:max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -124,36 +147,6 @@ export default function Patients() {
           <Plus className="h-4 w-4 sm:mr-2" /> <span className="hidden sm:inline">Register patient</span>
         </Button>
       </div>
-
-      {view === "encounter" && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-white p-3" data-testid="encounter-period-toolbar">
-          <select data-testid="period-select" value={period} onChange={(e) => { setPeriod(e.target.value); setAnchor(iso(new Date())); }}
-            className="h-11 rounded-md border border-input bg-white px-3 text-sm font-semibold">
-            {PERIODS.map((x) => <option key={x} value={x}>{x}</option>)}
-          </select>
-
-          {!["All", "Custom"].includes(period) && (
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-11 w-11" data-testid="period-prev-btn" onClick={() => setAnchor(shift(period, anchor, -1))}><ChevronLeft className="h-4 w-4" /></Button>
-              <span className="min-w-[190px] px-2 text-center text-sm font-semibold" data-testid="period-label">{range.label}</span>
-              <Button variant="outline" size="icon" className="h-11 w-11" data-testid="period-next-btn" onClick={() => setAnchor(shift(period, anchor, 1))}><ChevronRight className="h-4 w-4" /></Button>
-            </div>
-          )}
-          {period === "Custom" && (
-            <div className="flex flex-wrap items-center gap-2">
-              <input type="date" data-testid="period-from" value={custom.from} onChange={(e) => setCustom({ ...custom, from: e.target.value })} className="h-11 rounded-md border border-input bg-white px-3 text-sm" />
-              <input type="date" data-testid="period-to" value={custom.to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} className="h-11 rounded-md border border-input bg-white px-3 text-sm" />
-            </div>
-          )}
-          {period === "All" && <span className="text-sm font-semibold" data-testid="period-label">All time</span>}
-
-          <button data-testid="today-btn" onClick={() => { setAnchor(iso(new Date())); setCustom({ from: "", to: "" }); }}
-            className={`h-11 rounded-md border px-4 text-sm font-semibold ${isToday ? "border-border bg-white text-muted-foreground" : "border-primary bg-primary text-white"}`}>
-            Today
-          </button>
-          <span className="ml-auto text-sm text-muted-foreground" data-testid="encounter-count-label">{dayEncounters.length} encounter(s)</span>
-        </div>
-      )}
 
       {showFilters && (
         <div className="mb-4 grid gap-3 rounded-lg border border-border bg-white p-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="filter-panel">
@@ -231,7 +224,6 @@ export default function Patients() {
                       diseaseId={e.disease}
                       diagnosis={e.diagnosis}
                       outcome={e.outcome || pt.outcome}
-                      pending={!e.synced}
                       testid={`encounter-status-${e.id}`}
                     />
                   </div>
@@ -246,7 +238,34 @@ export default function Patients() {
                       .join(" · ")}
                   </p>
                 </div>
-                <ChevronRight className="hidden h-5 w-5 text-muted-foreground sm:block" />
+                <div className="flex shrink-0 items-center gap-2">
+                  <PendingSyncChip pending={!e.synced} testid={`encounter-pending-${e.id}`} />
+                  {pt.phone && (
+                    <>
+                      <a
+                        href={`tel:${pt.phone.replace(/\s/g, "")}`}
+                        data-testid={`encounter-call-btn-${e.id}`}
+                        onClick={(ev) => ev.stopPropagation()}
+                        className="grid h-11 w-11 place-items-center rounded-md border border-border text-primary transition-colors hover:bg-secondary"
+                        title={`Call ${pt.phone}`}
+                      >
+                        <Phone className="h-4 w-4" />
+                      </a>
+                      <a
+                        href={`https://wa.me/${pt.phone.replace(/[^0-9]/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        data-testid={`encounter-whatsapp-btn-${e.id}`}
+                        onClick={(ev) => ev.stopPropagation()}
+                        className="grid h-11 w-11 place-items-center rounded-md border border-border text-green-700 transition-colors hover:bg-green-50"
+                        title={`WhatsApp ${pt.phone}`}
+                      >
+                        <WhatsAppIcon className="h-4 w-4" />
+                      </a>
+                    </>
+                  )}
+                  <ChevronRight className="hidden h-5 w-5 text-muted-foreground sm:block" />
+                </div>
               </div>
             );
           })}
@@ -285,7 +304,6 @@ export default function Patients() {
                     diseaseId={diseaseId}
                     diagnosis={diagnosis}
                     outcome={recordedOutcome}
-                    pending={unsynced}
                     testid={`patient-status-${p.id}`}
                   />
                 </div>
@@ -296,7 +314,8 @@ export default function Patients() {
                   {p.id} · Last encounter {lastEnc ? fmtDate(lastEnc.date) : "—"}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-2">
+                <PendingSyncChip pending={unsynced} testid={`patient-pending-${p.id}`} />
                 {p.phone && (
                   <>
                     <a

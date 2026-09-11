@@ -1,11 +1,68 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/Fields";
-import { Camera, X, Fingerprint, FileUp, FileText } from "lucide-react";
+import { Camera, X, Fingerprint, FileUp, FileText, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
+import { HandRenderer, FINGER_LABELS } from "@/components/HandRenderer";
+import { FINGER_CODES } from "@/components/handConstants";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid = "photo", max = 6 }) => {
-  const input = useRef(null);
+  const galleryInput = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+
+  const stopCamera = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  const closeCamera = () => {
+    stopCamera();
+    setCameraOpen(false);
+  };
+
+  const openCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOpen(true);
+    } catch {
+      toast.error("Camera access denied or unavailable — try Upload from gallery");
+    }
+  };
+
+  useEffect(() => {
+    if (!cameraOpen || !streamRef.current || !videoRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+    videoRef.current.play().catch(() => {});
+  }, [cameraOpen]);
+
+  useEffect(() => () => stopCamera(), []);
+
+  const snapPhoto = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return toast.error("Camera not ready yet");
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+    onChange([...photos, dataUrl].slice(0, max));
+    toast.success("Photo captured — stored on the device until sync");
+    closeCamera();
+  };
 
   const pick = (e) => {
     const files = [...(e.target.files || [])].slice(0, max - photos.length);
@@ -14,7 +71,7 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
       r.onload = () => onChange([...photos, r.result].slice(0, max));
       r.readAsDataURL(f);
     });
-    toast.success(`${files.length} photo(s) attached — stored on the device until sync`);
+    if (files.length) toast.success(`${files.length} photo(s) attached — stored on the device until sync`);
     e.target.value = "";
   };
 
@@ -35,20 +92,50 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
           </div>
         ))}
         {photos.length < max && (
-          <button
-            type="button"
-            data-testid={`${testid}-add-btn`}
-            onClick={() => input.current?.click()}
-            className="grid h-24 w-24 place-items-center rounded-md border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary"
-          >
-            <span className="text-center">
-              <Camera className="mx-auto h-5 w-5" />
-              <span className="mt-1 block text-[11px] font-semibold uppercase tracking-wide">Capture</span>
-            </span>
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                data-testid={`${testid}-add-btn`}
+                className="grid h-24 w-24 place-items-center rounded-md border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary"
+              >
+                <span className="text-center">
+                  <Camera className="mx-auto h-5 w-5" />
+                  <span className="mt-1 block text-[11px] font-semibold uppercase tracking-wide">Capture</span>
+                </span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuItem data-testid={`${testid}-camera-option`} onSelect={() => openCamera()}>
+                <Camera className="mr-2 h-4 w-4" /> Take photo
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid={`${testid}-gallery-option`} onSelect={() => galleryInput.current?.click()}>
+                <ImagePlus className="mr-2 h-4 w-4" /> Upload from gallery
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
-      <input ref={input} type="file" accept="image/*" capture="environment" multiple hidden onChange={pick} data-testid={`${testid}-input`} />
+      <input ref={galleryInput} type="file" accept="image/*" multiple hidden onChange={pick} data-testid={`${testid}-input`} />
+
+      <Dialog open={cameraOpen} onOpenChange={(open) => (open ? setCameraOpen(true) : closeCamera())}>
+        <DialogContent className="sm:max-w-md" data-testid={`${testid}-camera-dialog`}>
+          <DialogHeader>
+            <DialogTitle>Take photo</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-hidden rounded-md border border-border bg-black">
+            <video ref={videoRef} playsInline muted autoPlay className="aspect-[4/3] w-full object-cover" />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" className="h-11" onClick={closeCamera}>
+              Cancel
+            </Button>
+            <Button type="button" className="h-11" data-testid={`${testid}-snap-btn`} onClick={snapPhoto}>
+              <Camera className="mr-2 h-4 w-4" /> Capture
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Field>
   );
 };
@@ -111,32 +198,116 @@ export const DocumentCapture = ({
   );
 };
 
-export const FingerprintCapture = ({ value, onChange }) => (
-  <Field label="Fingerprint template" hint="Biometric template used as the patient's unique identifier (mock scanner in this prototype)">
-    <div className="flex min-w-0 flex-col gap-3 overflow-hidden rounded-md border border-border p-4 sm:flex-row sm:items-center">
-      <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-md ${value ? "bg-green-50 text-green-700" : "bg-secondary text-primary"}`}>
-        <Fingerprint className="h-7 w-7" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold">{value ? "Template captured" : "No template captured"}</p>
-        <p className="truncate text-sm text-muted-foreground">{value || "Place the patient's right index finger on the scanner"}</p>
+export const FingerprintCapture = ({ value, onChange }) => {
+  const [selectedFinger, setSelectedFinger] = useState(null);
+  const prints = normalizeFingerprints(value);
+  const savedFingers = Object.keys(prints);
+  const selectedSaved = selectedFinger ? prints[selectedFinger] : null;
+  const count = savedFingers.length;
+
+  const capture = () => {
+    if (!selectedFinger) {
+      toast.error("Select a finger on the hand diagram first");
+      return;
+    }
+    const template = `FP-${Math.random().toString(16).slice(2, 6).toUpperCase()}-${Math.random().toString(16).slice(2, 6).toUpperCase()}`;
+    const next = {
+      ...prints,
+      [selectedFinger]: { template, label: FINGER_LABELS[selectedFinger] },
+    };
+    onChange(next);
+    toast.success(`${FINGER_LABELS[selectedFinger]} template ${selectedSaved ? "updated" : "captured"} (${Object.keys(next).length}/10)`);
+  };
+
+  const removeSelected = () => {
+    if (!selectedFinger || !prints[selectedFinger]) return;
+    const next = { ...prints };
+    delete next[selectedFinger];
+    onChange(Object.keys(next).length ? next : {});
+    toast.success(`${FINGER_LABELS[selectedFinger]} template removed`);
+  };
+
+  return (
+    <Field label="Fingerprint templates" hint="Select each finger and capture — a patient can register all 10 fingers. Templates are stored on device until sync (mock scanner in this prototype).">
+      <div className="min-w-0 space-y-4 overflow-hidden rounded-md border border-border p-4">
+        <HandRenderer selectedFinger={selectedFinger} savedFingers={savedFingers} onSelectFinger={setSelectedFinger} />
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+          <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-md ${count ? "bg-green-50 text-green-700" : "bg-secondary text-primary"}`}>
+            <Fingerprint className="h-7 w-7" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">
+              {selectedFinger ? FINGER_LABELS[selectedFinger] : count ? `${count} finger${count === 1 ? "" : "s"} registered` : "No finger selected"}
+            </p>
+            <p className="truncate text-sm text-muted-foreground">
+              {selectedSaved
+                ? `${selectedSaved.template} · already captured — capture again to replace`
+                : selectedFinger
+                  ? `Ready to scan ${FINGER_LABELS[selectedFinger].toLowerCase()} (${count}/10)`
+                  : count
+                    ? `${count}/10 fingers registered — select another finger to add`
+                    : "Tap a finger on the diagram, then capture"}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {selectedSaved && (
+              <Button type="button" variant="outline" className="h-12 text-red-600 hover:text-red-700" data-testid="fingerprint-remove-btn" onClick={removeSelected}>
+                Remove
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12"
+              data-testid="fingerprint-capture-btn"
+              disabled={!selectedFinger}
+              onClick={capture}
+            >
+              {selectedSaved ? "Re-capture" : "Capture fingerprint"}
+            </Button>
+          </div>
+        </div>
+        {count > 0 && (
+          <ul className="flex flex-wrap gap-2" data-testid="fingerprint-list">
+            {FINGER_CODES.filter((code) => prints[code]).map((code) => (
+              <li key={code}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFinger(code)}
+                  className={`rounded border px-2.5 py-1 text-xs font-medium ${
+                    selectedFinger === code ? "border-green-600 bg-green-50 text-green-800" : "border-border bg-white text-foreground"
+                  }`}
+                >
+                  {prints[code].label || FINGER_LABELS[code]}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        className="h-12"
-        data-testid="fingerprint-capture-btn"
-        onClick={() => {
-          const t = `FP-${Math.random().toString(16).slice(2, 6).toUpperCase()}-${Math.random().toString(16).slice(2, 6).toUpperCase()}`;
-          onChange(t);
-          toast.success("Fingerprint template captured");
-        }}
-      >
-        {value ? "Re-capture" : "Capture fingerprint"}
-      </Button>
-    </div>
-  </Field>
-);
+    </Field>
+  );
+};
+
+/** Normalize legacy string fingerprint or map of finger → template */
+export const normalizeFingerprints = (value) => {
+  if (!value) return {};
+  if (typeof value === "string") return { LEGACY: { template: value, label: "Fingerprint" } };
+  if (Array.isArray(value)) {
+    return Object.fromEntries(
+      value.filter((x) => x?.finger).map((x) => [x.finger, { template: x.template, label: x.label || FINGER_LABELS[x.finger] }])
+    );
+  }
+  return value;
+};
+
+export const fingerprintSummary = (value) => {
+  const prints = normalizeFingerprints(value);
+  const keys = Object.keys(prints);
+  if (!keys.length) return "";
+  if (keys.length === 1 && keys[0] === "LEGACY") return prints.LEGACY.template;
+  return `${keys.length} finger${keys.length === 1 ? "" : "s"}`;
+};
 
 export const Avatar = ({ patient, size = "h-12 w-12", testid }) =>
   patient.photo ? (

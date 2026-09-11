@@ -1,6 +1,7 @@
 import { Avatar, dobFromAge } from "@/components/Capture";
 import { Button } from "@/components/ui/button";
 import { fmtDate, DISEASE_SPECS } from "@/mock/specs";
+import { scabiesTreatmentSummary } from "@/components/ScabiesMedications";
 import { PanelLeftClose } from "lucide-react";
 
 export default function PatientSidebar({
@@ -25,6 +26,7 @@ export default function PatientSidebar({
   const lastDiagnosis = real(lastWithDx?.diagnosis) || real(lastWithDx?.data?.diagnosis) || "—";
   const lastTreatment =
     real(lastWithTx?.treatment) ||
+    scabiesTreatmentSummary(lastWithTx?.data || {}) ||
     [...(lastWithTx?.data?.topical || []), ...(lastWithTx?.data?.oral || [])].join(" + ") ||
     "—";
   const diseaseNames = diseases.length
@@ -50,7 +52,7 @@ export default function PatientSidebar({
           {[
             ["DOB", fmtDate(p.dob || dobFromAge(p.age, p.createdAt))],
             ["Age", `${p.age}y`],
-            ["Gender", p.gender],
+            ["Gender", p.gender || p.sex || "—"],
             ["Blood", p.bloodGroup || "Unknown"],
             ["Weight", `${p.weight} kg`],
             ["Phone", p.phone || "—"],

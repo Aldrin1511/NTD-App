@@ -145,6 +145,28 @@ h4,
 .silhouette-region.marked {
     fill: #dc2626;
 }
+.silhouette-nerve {
+    fill: #fbbf24;
+    stroke: #92400e;
+    stroke-width: 1.5;
+    cursor: pointer;
+    transition: fill 0.15s ease;
+}
+.silhouette-nerve:hover {
+    fill: #0f52ba;
+    stroke: #fff;
+}
+.silhouette-nerve.marked {
+    fill: #dc2626;
+    stroke: #fff;
+}
+.silhouette-nerve-label {
+    font-family: "Work Sans", sans-serif;
+    font-size: 8px;
+    font-weight: 800;
+    fill: #1f2937;
+    pointer-events: none;
+}
 .silhouette-code {
     font-family: "Work Sans", sans-serif;
     font-size: 11px;

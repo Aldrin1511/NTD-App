@@ -69,7 +69,7 @@ export default function SuspectScreen() {
               </Button>
             )}
             <div className="min-w-0 flex-1">
-              <p className="font-head text-xl font-bold tracking-tight sm:text-2xl">Suspect screening</p>
+              <p className="font-head text-xl font-bold tracking-tight sm:text-2xl">NTD Suspect</p>
               <p className="text-xs uppercase tracking-wider text-muted-foreground" data-testid="suspect-context">
                 {p.facility || "No facility"} · Step 1 — presenting complaints
               </p>
@@ -79,20 +79,16 @@ export default function SuspectScreen() {
             </Button>
           </div>
 
-          <AlertPanel level="info" title="Step 1 — what is the patient telling you?" testid="suspect-intro">
+          {/* <AlertPanel level="info" title="Step 1 — what is the patient telling you?" testid="suspect-intro">
             Tick everything the patient reports in their own words, take photos of the skin, then choose which NTD you
             suspect. The complaint list is maintained by your programme administrator.
-          </AlertPanel>
+          </AlertPanel> */}
 
           <SectionCard title="Presenting complaints / symptoms" desc={`${settings.symptoms.length} complaints configured by the programme`}>
-            <CheckGrid label="Patient reports" options={settings.symptoms} value={symptoms} onChange={setSymptoms} testid="symptom" cols="sm:grid-cols-2" />
+            <CheckGrid label="" options={settings.symptoms} value={symptoms} onChange={setSymptoms} testid="symptom" cols="sm:grid-cols-2" />
           </SectionCard>
 
-          <SectionCard title="Skin photographs" desc="Stored with the screening and uploaded on sync">
-            <PhotoCapture label="Capture skin photos" photos={photos} onChange={setPhotos} testid="suspect-photo" />
-          </SectionCard>
-
-          <SectionCard title="Suspected NTD" desc="One choice only — this decides which disease flow opens next">
+          <SectionCard title="What is the NTD suspected?" desc="One choice only — this decides which disease flow opens next">
             <div className="grid gap-2 sm:grid-cols-2">
               {options.map((o) => {
                 const active = suspect === o.id;
@@ -117,10 +113,14 @@ export default function SuspectScreen() {
             <AreaField label="Screening note (optional)" testid="suspect-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </SectionCard>
 
+          <SectionCard title="Skin photographs" desc="Stored with the screening and uploaded on sync">
+            <PhotoCapture label="Capture skin photos" photos={photos} onChange={setPhotos} testid="suspect-photo" />
+          </SectionCard>
+
           {saved && (
             <SectionCard title="Screening saved" desc={`${saved.id} · ${symptoms.length} complaint(s) · ${photos.length} photo(s)`}>
               {["none", "other"].includes(suspect) || !DISEASES.find((d) => d.id === suspect) ? (
-                <AlertPanel level="routine" title="🟢 No NTD suspected" testid="suspect-none-result">
+                <AlertPanel level="routine" title="🟢 Suspect Non-NTDs Skin Condition" testid="suspect-none-result">
                   No disease flow is required. Advise the patient to return if symptoms change.
                 </AlertPanel>
               ) : (

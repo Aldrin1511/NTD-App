@@ -11,13 +11,13 @@ import { DISEASE_SPECS, SPEC_LIST, fmtDate, fmtDateTime } from "@/mock/specs";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Stethoscope, Phone, ChevronDown, PanelLeft, Pencil, ChevronsUpDown, ChevronsDownUp } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
-import StatusChips from "@/components/StatusChips";
+import StatusChips, { PendingSyncChip } from "@/components/StatusChips";
 import PatientSidebar from "@/components/PatientSidebar";
 
 const FEATURES = [
   ["caseDetails", "Case details"], ["history", "Clinical history"], ["marks", "Assessment"],
   ["lab", "Laboratory"], ["diagnosis", "Diagnosis"], ["drugs", "Drugs"],
-  ["household", "Household"], ["notes", "Visit notes"], ["outcome", "Outcome"],
+  ["household", "Household"], ["reactions", "Leprosy reaction"], ["notes", "Visit notes"], ["outcome", "Outcome"],
 ];
 
 const hasValue = (v) => {
@@ -31,24 +31,72 @@ const summarise = (key, e) => {
   if (key === "caseDetails") return [x.caseDetails?.mode, x.caseDetails?.caseType, x.caseDetails?.weight && `${x.caseDetails.weight} kg`].filter(Boolean).join(" · ");
   if (key === "history") return Object.entries(x.history || {}).filter(([, v]) => v && typeof v === "string").slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(" · ");
   if (key === "marks") {
-    return Object.values(x.marks || {})
-      .map((m) => {
-        const region = m.region || m.label;
-        const code = m.code || m.type;
-        if (!region && !code) return "";
-        return `${region || "—"}${code ? ` (${code}${m.extra ? ` ${m.extra}` : ""})` : ""}`;
+    const rounds = Array.isArray(x.examRounds) && x.examRounds.length
+      ? x.examRounds
+      : [{ marks: x.marks || {}, secondaryInfection: x.assessment?.secondaryInfection }];
+    return rounds
+      .map((round, i) => {
+        const findings = Object.values(round.marks || {})
+          .map((m) => {
+            const region = m.region || m.label;
+            const code = m.code || m.type;
+            if (!region && !code) return "";
+            return `${region || "—"}${code ? ` (${code}${m.extra ? ` ${m.extra}` : ""})` : ""}`;
+          })
+          .filter(Boolean)
+          .join(", ");
+        const si = round.secondaryInfection ? `SI: ${round.secondaryInfection}` : "";
+        const parts = [findings, si].filter(Boolean);
+        if (!parts.length) return "";
+        return rounds.length > 1 ? `Assessment ${i + 1}: ${parts.join(" · ")}` : parts.join(" · ");
       })
       .filter(Boolean)
-      .join(", ");
+      .join(" | ");
   }
-  if (key === "lab") return Object.entries(x.lab || {}).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  if (key === "lab") {
+    return Object.entries(x.lab || {})
+      .map(([k, v]) => {
+        if (Array.isArray(v)) {
+          const parts = v
+            .map((item) => {
+              if (item == null || item === "") return null;
+              if (typeof item === "string") return item;
+              const result = item.result || "";
+              const date = item.date ? ` (${fmtDate(item.date)})` : "";
+              return result ? `${result}${date}` : null;
+            })
+            .filter(Boolean);
+          return parts.length ? `${k}: ${parts.join("; ")}` : null;
+        }
+        return hasValue(v) ? `${k}: ${v}` : null;
+      })
+      .filter(Boolean)
+      .join(" · ");
+  }
   if (key === "diagnosis") {
     const dx = x.diagnosis || e.diagnosis;
     return hasValue(dx) ? dx : "";
   }
-  if (key === "drugs") return [...(x.topical || []), ...(x.oral || [])].join(" + ");
-  if (key === "household") return (x.household?.contacts || []).length ? `${x.household.contacts.length} contact(s) registered` : "";
-  if (key === "notes") return x.notes;
+  if (key === "drugs") {
+    const parts = [...(x.topical || []), ...(x.oral || [])];
+    (x.topicalAntibiotics || []).forEach((n) => parts.push(`Topical antibiotic: ${n}`));
+    (x.oralAntibiotics || []).forEach((n) => parts.push(`Oral antibiotic: ${n}`));
+    return parts.join(" + ");
+  }
+  if (key === "household") {
+    const n = (x.household?.contacts || []).length;
+    if (!n) return "";
+    return `${n} contact(s) registered`;
+  }
+  if (key === "reactions") {
+    const n = (x.reactions || []).length;
+    if (!n) return "";
+    return `${n} reaction assessment(s)`;
+  }
+  if (key === "notes") {
+    if (Array.isArray(x.notes)) return x.notes.map((n) => String(n || "").trim()).filter(Boolean).join(" · ");
+    return x.notes;
+  }
   if (key === "outcome") {
     const parts = [hasValue(x.outcome) ? x.outcome : "", ...(x.recommendations || [])].filter(Boolean);
     return parts.join(" · ");
@@ -114,7 +162,6 @@ export default function PatientRecord() {
               diseaseId={e.disease}
               diagnosis={e.diagnosis}
               outcome={e.outcome || p.outcome}
-              pending={!e.synced}
               testid={`visit-status-${e.id}`}
             />
           </span>
@@ -129,7 +176,10 @@ export default function PatientRecord() {
               .join(" · ")}
           </span>
         </span>
-        <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open[e.id] ? "rotate-180" : ""}`} />
+        <span className="flex shrink-0 items-center gap-2">
+          <PendingSyncChip pending={!e.synced} testid={`visit-pending-${e.id}`} />
+          <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open[e.id] ? "rotate-180" : ""}`} />
+        </span>
       </button>
       {open[e.id] && (
         <div className="space-y-2 border-t border-border p-4">
@@ -184,7 +234,7 @@ export default function PatientRecord() {
               {encs.map(visitRow)}
               {mySuspects.map((s) => (
                 <div key={s.id} className="rounded-lg border border-border bg-white p-4" data-testid={`suspect-row-${s.id}`}>
-                  <p className="font-head font-semibold">Suspect screening · {s.suspect === "none" ? "No NTD suspected" : `${DISEASE_SPECS[s.suspect]?.name || s.suspect} suspected`}</p>
+                  <p className="font-head font-semibold">Suspect screening · {s.suspect === "none" ? "Suspect Non-NTDs Skin Condition" : `${DISEASE_SPECS[s.suspect]?.name || s.suspect} suspected`}</p>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground">{s.worker} · {fmtDate(s.date)} · {s.id}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{s.symptoms.join(" · ")}</p>
                 </div>
@@ -194,15 +244,15 @@ export default function PatientRecord() {
 
           {tab === "suspect" && (
             <div className="space-y-3" data-testid="suspect-tab">
-              <Button className="h-11" data-testid="new-suspect-btn" disabled={!canEdit} onClick={() => navigate(`/patients/${p.id}/suspect`)}>
+              {/* <Button className="h-11" data-testid="new-suspect-btn" disabled={!canEdit} onClick={() => navigate(`/patients/${p.id}/suspect`)}>
                 <Stethoscope className="mr-2 h-4 w-4" /> New suspect screening
-              </Button>
+              </Button> */}
               {mySuspects.length === 0 && <AlertPanel level="info" title="No suspect screening yet" testid="no-suspect">Record complaints, photos and the suspected NTD here first.</AlertPanel>}
               {mySuspects.map((s) => (
                 <div key={s.id} className="flex flex-col gap-3 rounded-lg border border-border bg-white p-4 sm:flex-row sm:items-center">
                   {s.photos?.[0] && <img src={s.photos[0]} alt="lesion" className="h-16 w-16 rounded-md border border-border object-cover" />}
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold">{fmtDate(s.date)} · {s.suspect === "none" ? "No NTD suspected" : `${DISEASE_SPECS[s.suspect]?.name} suspected`}</p>
+                    <p className="font-semibold">{fmtDate(s.date)} · {s.suspect === "none" ? "Suspect Non-NTDs Skin Condition" : `${DISEASE_SPECS[s.suspect]?.name} suspected`}</p>
                     <p className="text-sm text-muted-foreground">{s.symptoms.join(" · ")}</p>
                   </div>
                   {s.suspect !== "none" && DISEASE_SPECS[s.suspect] && (

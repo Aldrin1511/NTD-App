@@ -5,38 +5,46 @@ import { ChoiceRow, CheckGrid, SelectField } from "@/components/Fields";
 import { Trash2 } from "lucide-react";
 
 const FRONT = [
-  { id: "head", label: "Head", d: "M100 8 a20 20 0 0 1 0 44 a20 20 0 0 1 0 -44" },
-  { id: "face", label: "Face", d: "M88 22 h24 v22 h-24 z" },
-  { id: "neck", label: "Neck", d: "M90 52 h20 v12 h-20 z" },
-  { id: "chest", label: "Chest", d: "M72 64 h56 v40 h-56 z" },
-  { id: "abdomen", label: "Abdomen", d: "M74 104 h52 v42 h-52 z" },
-  { id: "arm-r", label: "R arm", d: "M46 68 h24 v78 h-24 z" },
-  { id: "arm-l", label: "L arm", d: "M130 68 h24 v78 h-24 z" },
-  { id: "hand-r", label: "R hand", d: "M44 146 h28 v26 h-28 z" },
-  { id: "hand-l", label: "L hand", d: "M128 146 h28 v26 h-28 z" },
-  { id: "groin", label: "Groin", d: "M82 146 h36 v22 h-36 z" },
-  { id: "thigh-r", label: "R thigh", d: "M76 168 h20 v52 h-20 z" },
-  { id: "thigh-l", label: "L thigh", d: "M104 168 h20 v52 h-20 z" },
-  { id: "leg-r", label: "R leg", d: "M78 220 h18 v52 h-18 z" },
-  { id: "leg-l", label: "L leg", d: "M104 220 h18 v52 h-18 z" },
-  { id: "foot-r", label: "R foot", d: "M74 272 h24 v20 h-24 z" },
-  { id: "foot-l", label: "L foot", d: "M102 272 h24 v20 h-24 z" },
+  { id: "head", label: "Head", d: "M78 8h44c8 0 14 8 14 18 0 8-3 14-8 18H72c-5-4-8-10-8-18 0-10 6-18 14-18z" },
+  { id: "face", label: "Face", d: "M82 36h36c4 0 8 4 8 10v14c0 8-8 14-18 14h-16c-10 0-18-6-18-14V46c0-6 4-10 8-10z" },
+  { id: "ear-r", label: "Right ear", d: "M68 34h10v22H68c-4 0-6-4-6-11s2-11 6-11z" },
+  { id: "ear-l", label: "Left ear", d: "M122 34h10c4 0 6 4 6 11s-2 11-6 11h-10z" },
+  { id: "eye-r", label: "Right eye", d: "M86 46h12v8H86z" },
+  { id: "eye-l", label: "Left eye", d: "M102 46h12v8h-12z" },
+  { id: "neck", label: "Neck", d: "M88 74h24v16H88z" },
+  { id: "chest", label: "Chest", d: "M68 90h64v46H68z" },
+  { id: "abdomen", label: "Abdomen", d: "M72 136h56v42H72z" },
+  { id: "arm-r", label: "Right arm", d: "M42 92h24v70H42z" },
+  { id: "arm-l", label: "Left arm", d: "M134 92h24v70h-24z" },
+  { id: "hand-r", label: "Right hand", d: "M40 162h26v18H40z" },
+  { id: "hand-l", label: "Left hand", d: "M134 162h26v18h-26z" },
+  { id: "palm-r", label: "Right palm", d: "M42 180h22v14H42z" },
+  { id: "palm-l", label: "Left palm", d: "M136 180h22v14h-22z" },
+  { id: "finger-r", label: "Right fingers", d: "M40 194h26v14H40z" },
+  { id: "finger-l", label: "Left fingers", d: "M134 194h26v14h-26z" },
+  { id: "groin", label: "Groin/Genital", d: "M80 178h40v28H80z" },
+  { id: "thigh-r", label: "Right thigh", d: "M72 206h24v52H72z" },
+  { id: "thigh-l", label: "Left thigh", d: "M104 206h24v52h-24z" },
+  { id: "leg-r", label: "Right leg", d: "M74 258h22v54H74z" },
+  { id: "leg-l", label: "Left leg", d: "M104 258h22v54h-22z" },
+  { id: "foot-r", label: "Right foot", d: "M70 312h28v18H70z" },
+  { id: "foot-l", label: "Left foot", d: "M102 312h28v18h-28z" },
+  { id: "toe-r", label: "Right toes", d: "M68 330h30v14H68z" },
+  { id: "toe-l", label: "Left toes", d: "M102 330h30v14h-30z" },
 ];
 
 const BACK = [
-  { id: "scalp", label: "Scalp", d: "M100 8 a20 20 0 0 1 0 44 a20 20 0 0 1 0 -44" },
-  { id: "neck-b", label: "Neck", d: "M90 52 h20 v12 h-20 z" },
-  { id: "upper-back", label: "Upper back", d: "M72 64 h56 v42 h-56 z" },
-  { id: "lower-back", label: "Lower back", d: "M74 106 h52 v40 h-52 z" },
-  { id: "buttocks", label: "Buttocks", d: "M76 146 h48 v26 h-48 z" },
-  { id: "arm-post-r", label: "Post. R arm", d: "M46 68 h24 v78 h-24 z" },
-  { id: "arm-post-l", label: "Post. L arm", d: "M130 68 h24 v78 h-24 z" },
-  { id: "palm-r", label: "R palm", d: "M44 146 h28 v26 h-28 z" },
-  { id: "palm-l", label: "L palm", d: "M128 146 h28 v26 h-28 z" },
-  { id: "leg-post-r", label: "Post. R leg", d: "M76 172 h20 v100 h-20 z" },
-  { id: "leg-post-l", label: "Post. L leg", d: "M104 172 h20 v100 h-20 z" },
-  { id: "sole-r", label: "R sole", d: "M74 272 h24 v20 h-24 z" },
-  { id: "sole-l", label: "L sole", d: "M102 272 h24 v20 h-24 z" },
+  { id: "scalp", label: "Scalp", d: "M78 8h44c8 0 14 8 14 20 0 12-8 22-22 22H86c-14 0-22-10-22-22 0-12 6-20 14-20z" },
+  { id: "neck-b", label: "Neck", d: "M88 50h24v16H88z" },
+  { id: "upper-back", label: "Upper back", d: "M68 66h64v50H68z" },
+  { id: "lower-back", label: "Lower back", d: "M72 116h56v44H72z" },
+  { id: "buttocks", label: "Buttocks", d: "M74 160h52v34H74z" },
+  { id: "post-arm-r", label: "Right posterior arm", d: "M42 70h24v90H42z" },
+  { id: "post-arm-l", label: "Left posterior arm", d: "M134 70h24v90h-24z" },
+  { id: "post-leg-r", label: "Right posterior leg", d: "M72 194h24v110H72z" },
+  { id: "post-leg-l", label: "Left posterior leg", d: "M104 194h24v110h-24z" },
+  { id: "foot-b-r", label: "Right foot", d: "M70 304h28v28H70z" },
+  { id: "foot-b-l", label: "Left foot", d: "M102 304h28v28h-28z" },
 ];
 
 const LESION_TYPES = ["Papule", "Vesicle", "Nodule", "Burrow", "Excoriation", "Crust", "Scale", "Erosion", "Ulcer", "Pustule", "Other"];
@@ -85,7 +93,7 @@ export default function BodyChart({ marks, onChange }) {
             </button>
           ))}
         </div>
-        <svg viewBox="0 0 200 300" className="mx-auto h-[420px] w-full max-w-[280px]">
+        <svg viewBox="0 0 200 360" className="mx-auto h-[420px] w-full max-w-[280px]">
           {regions.map((r) => (
             <g key={r.id}>
               <path
