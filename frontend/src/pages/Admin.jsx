@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { TextField, SelectField, SectionCard, AlertPanel } from "@/components/Fields";
+import { TextField, SelectField, SectionCard, AlertPanel, CheckGrid } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { GEO, DISEASES } from "@/mock/data";
@@ -274,7 +274,7 @@ const FacilitiesTab = ({ s }) => {
                 <tr key={x.id} className="border-t border-border" data-testid={`facility-row-${x.id}`}>
                   <td className="p-3">
                     <p className="font-semibold">{x.name}</p>
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">{x.id}</p>
+                    <p className="text-xs text-muted-foreground">{x.id}</p>
                   </td>
                   <td className="p-3">{x.country}</td>
                   <td className="p-3">{x.province}</td>
@@ -381,25 +381,28 @@ const DrugsMaster = ({ s }) => {
 };
 
 const RegimentMaster = ({ s }) => {
-  const [r, setR] = useState({ name: "", disease: "scabies", diagnosis: "", ageMin: "", ageMax: "", weightMin: "", weightMax: "", drugs: "" });
+  const [r, setR] = useState({ name: "", disease: "scabies", diagnosis: "", ageMin: "", ageMax: "", weightMin: "", weightMax: "", drugs: [] });
   const regimens = s.settings.regimens || [];
   const spec = DISEASE_SPECS[r.disease];
+  const diseaseDrugs = (s.settings.drugs || [])
+    .filter((d) => !(d.diseases || []).length || (d.diseases || []).includes(r.disease))
+    .map((d) => d.name);
   return (
-    <SectionCard title="Regiment" desc="Build treatment regimens from the drug list; criteria drive auto-population in the Drugs feature after assessment"
+    <SectionCard title="Regiment" desc="Build treatment regimens from the drug list; matching diagnosis, age and weight auto-populate Medications"
       right={<Badge variant="outline" className="rounded" data-testid="regimen-count">{regimens.length} regimens</Badge>}>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <TextField label="Regimen name" testid="new-regimen-name" value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} />
-        <SelectField label="Condition" options={SPEC_LIST.map((x) => x.name)} value={spec?.name} onChange={(v) => setR({ ...r, disease: SPEC_LIST.find((x) => x.name === v).id, diagnosis: "" })} testid="new-regimen-disease" />
-        <SelectField label="Diagnosis criteria" options={spec?.diagnosis || []} value={r.diagnosis} onChange={(v) => setR({ ...r, diagnosis: v })} testid="new-regimen-diagnosis" />
-        <SelectField label="Drug" options={s.settings.drugs.map((d) => d.name)} value={r.drugs} onChange={(v) => setR({ ...r, drugs: v })} testid="new-regimen-drug" />
+        <SelectField label="Condition" options={SPEC_LIST.map((x) => x.name)} value={spec?.name} onChange={(v) => setR({ ...r, disease: SPEC_LIST.find((x) => x.name === v).id, diagnosis: "", drugs: [] })} testid="new-regimen-disease" />
+        <SelectField label="Diagnosis criteria" options={["Any", ...(spec?.diagnosis || [])]} value={r.diagnosis || "Any"} onChange={(v) => setR({ ...r, diagnosis: v === "Any" ? "" : v })} testid="new-regimen-diagnosis" />
         <TextField label="Age min (y)" type="number" testid="new-regimen-age-min" value={r.ageMin} onChange={(e) => setR({ ...r, ageMin: e.target.value })} />
         <TextField label="Age max (y)" type="number" testid="new-regimen-age-max" value={r.ageMax} onChange={(e) => setR({ ...r, ageMax: e.target.value })} />
         <TextField label="Weight min (kg)" type="number" testid="new-regimen-weight-min" value={r.weightMin} onChange={(e) => setR({ ...r, weightMin: e.target.value })} />
         <TextField label="Weight max (kg)" type="number" testid="new-regimen-weight-max" value={r.weightMax} onChange={(e) => setR({ ...r, weightMax: e.target.value })} />
       </div>
+      <CheckGrid label="Drugs" options={diseaseDrugs} value={r.drugs} onChange={(v) => setR({ ...r, drugs: v })} testid="new-regimen-drug" />
       <Button className="h-12" data-testid="add-regimen-btn" onClick={() => {
-        if (!r.name.trim() || !r.drugs) return toast.error("Regimen name and drug are required");
-        s.addRegimen(r); setR({ name: "", disease: "scabies", diagnosis: "", ageMin: "", ageMax: "", weightMin: "", weightMax: "", drugs: "" });
+        if (!r.name.trim() || !r.drugs.length) return toast.error("Regimen name and at least one drug are required");
+        s.addRegimen(r); setR({ name: "", disease: "scabies", diagnosis: "", ageMin: "", ageMax: "", weightMin: "", weightMax: "", drugs: [] });
         toast.success("Regimen added");
       }}>
         <Plus className="mr-2 h-4 w-4" /> Add regimen
@@ -410,12 +413,12 @@ const RegimentMaster = ({ s }) => {
           <tbody>
             {regimens.map((x) => (
               <tr key={x.id} className="border-t border-border" data-testid={`regimen-row-${x.id}`}>
-                <td className="p-3"><p className="font-semibold">{x.name}</p><p className="text-xs uppercase tracking-wider text-muted-foreground">{x.id}</p></td>
+                <td className="p-3"><p className="font-semibold">{x.name}</p><p className="text-xs text-muted-foreground">{x.id}</p></td>
                 <td className="p-3">{DISEASE_SPECS[x.disease]?.name}</td>
                 <td className="p-3">{x.diagnosis || "Any"}</td>
                 <td className="p-3">{x.ageMin || 0}–{x.ageMax || 120}y</td>
                 <td className="p-3">{x.weightMin || 0}–{x.weightMax || 200}kg</td>
-                <td className="p-3">{x.drugs}</td>
+                <td className="p-3">{Array.isArray(x.drugs) ? x.drugs.join(", ") : x.drugs}</td>
                 <td className="p-3"><Button variant="ghost" size="icon" className="h-10 w-10 text-red-600" data-testid={`remove-regimen-${x.id}`} onClick={() => { s.removeRegimen(x.id); toast.success("Regimen removed"); }}><Trash2 className="h-4 w-4" /></Button></td>
               </tr>
             ))}

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { AreaField, SectionCard, AlertPanel, CheckGrid } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
 import PatientSidebar from "@/components/PatientSidebar";
-import { SUSPECT_OPTIONS, SPEC_LIST } from "@/mock/specs";
+import { SUSPECT_OPTIONS, assessmentSpecs } from "@/mock/specs";
 import { DISEASES } from "@/mock/data";
 import { toast } from "sonner";
 import { ArrowLeft, ClipboardList, ShieldQuestion, PanelLeft } from "lucide-react";
@@ -14,10 +14,10 @@ import { ArrowLeft, ClipboardList, ShieldQuestion, PanelLeft } from "lucide-reac
 export default function SuspectScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { patients, encounters, addSuspect, addDisease, settings, user } = useStore();
+  const { patients, encounters, suspects, addSuspect, addDisease, settings, user, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
-  const myDiseases = SPEC_LIST.filter((s) => (p?.diseases || []).includes(s.id));
+  const myDiseases = useMemo(() => assessmentSpecs(id, { suspects, encounters: patientEncs }), [id, suspects, patientEncs]);
 
   const [symptoms, setSymptoms] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -40,7 +40,11 @@ export default function SuspectScreen() {
     if (!suspect) return toast.error("Choose the suspected NTD, or None");
     const rec = addSuspect({ patientId: p.id, symptoms, photos, suspect, notes });
     setSaved(rec);
-    toast.success(`Suspect screening ${rec.id} saved locally`);
+    toast.success(
+      online
+        ? `Suspect screening ${rec.id} saved to device`
+        : `Suspect screening ${rec.id} saved locally · queued until you are online`
+    );
   };
 
   const startEncounter = (diseaseId) => {
@@ -70,7 +74,7 @@ export default function SuspectScreen() {
             )}
             <div className="min-w-0 flex-1">
               <p className="font-head text-xl font-bold tracking-tight sm:text-2xl">NTD Suspect</p>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground" data-testid="suspect-context">
+              <p className="text-xs text-muted-foreground" data-testid="suspect-context">
                 {p.facility || "No facility"} · Step 1 — presenting complaints
               </p>
             </div>

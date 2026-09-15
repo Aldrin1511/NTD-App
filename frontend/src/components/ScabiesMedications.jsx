@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Field, AlertPanel, SelectField } from "@/components/Fields";
+import { AlertPanel, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
+import { DosePhysicalBox, DoseUnitSelect } from "@/components/MedicationShared";
+import { formatDosePhysical } from "@/lib/medications";
 import {
   Dialog,
   DialogContent,
@@ -76,55 +77,6 @@ function DrugCard({ id, title, selected, onToggle, children, disabled, disabledH
   );
 }
 
-function FreeTextList({ label, value = [], onChange, testid, placeholder }) {
-  const [draft, setDraft] = useState("");
-  return (
-    <Field label={label}>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input
-          className="h-12 w-full min-w-0 bg-white text-base"
-          placeholder={placeholder}
-          data-testid={`${testid}-input`}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          className="h-12"
-          data-testid={`${testid}-add`}
-          onClick={() => {
-            if (!draft.trim()) return;
-            onChange([...value, draft.trim()]);
-            setDraft("");
-          }}
-        >
-          <Plus className="mr-2 h-4 w-4" /> Add
-        </Button>
-      </div>
-      {value.length > 0 && (
-        <ul className="mt-2 space-y-2" data-testid={`${testid}-list`}>
-          {value.map((x, i) => (
-            <li key={`${x}-${i}`} className="flex items-center gap-2 rounded-md border border-border bg-white p-2 text-sm">
-              <span className="flex-1">{x}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 text-red-600"
-                data-testid={`${testid}-remove-${i}`}
-                onClick={() => onChange(value.filter((_, j) => j !== i))}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Field>
-  );
-}
-
 function benzylGuidance(months) {
   if (months == null) return { ban: false, text: "Enter patient age/DOB to calculate dilution and contact time." };
   if (months < 6) {
@@ -170,6 +122,7 @@ export default function ScabiesMedications({
   caseDetails = {},
   history = {},
   weight = 0,
+  medCourses = {},
 }) {
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age) || null;
@@ -207,11 +160,11 @@ export default function ScabiesMedications({
 
   const setTopical = (name, on) => {
     const next = on ? [...new Set([...topical, name])] : topical.filter((x) => x !== name);
-    onChange({ topical: next });
+    onChange({ topical: next, medCourses: withDrugCourse(medCourses, name, on) });
   };
   const setOral = (name, on) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
-    onChange({ oral: next });
+    onChange({ oral: next, medCourses: withDrugCourse(medCourses, name, on) });
   };
 
   const toggleIvermectin = () => {
@@ -245,7 +198,7 @@ export default function ScabiesMedications({
         }}
       >
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advice</p>
+          <p className="text-xs font-semibold text-muted-foreground">Advice</p>
           <AdviceList
             items={[
               "Apply at night all over the body below the neck and leave it on all night and wash off in the morning.",
@@ -262,6 +215,7 @@ export default function ScabiesMedications({
             5% permethrin cream or lotion is considered safe in pregnancy and while lactating.
           </AlertPanel>
         )}
+        {selected.permethrin && <DrugCourseBlock name={SCABIES_DRUGS.permethrin} medCourses={medCourses} onChange={onChange} />}
       </DrugCard>
 
       {/* ii. Benzyl Benzoate */}
@@ -283,7 +237,7 @@ export default function ScabiesMedications({
           {benzyl.text}
         </AlertPanel>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advice</p>
+          <p className="text-xs font-semibold text-muted-foreground">Advice</p>
           <AdviceList
             items={[
               "Do not apply to broken skin, the face or mucous membranes.",
@@ -292,6 +246,7 @@ export default function ScabiesMedications({
             ]}
           />
         </div>
+        {selected.benzyl && <DrugCourseBlock name={SCABIES_DRUGS.benzyl} medCourses={medCourses} onChange={onChange} />}
       </DrugCard>
 
       {/* iii. Sulphur */}
@@ -306,8 +261,8 @@ export default function ScabiesMedications({
           {sulphurPreferred ? " This patient is under 2 months — sulphur is preferred." : ""}
         </AlertPanel>
         {selected.sulphur && (
-          <SelectField
-            label="Strength"
+          <DoseUnitSelect
+            label="Dose unit"
             options={["5%", "10%"]}
             value={sulphurStrength || "5%"}
             onChange={(v) => onChange({ sulphurStrength: v })}
@@ -315,17 +270,20 @@ export default function ScabiesMedications({
           />
         )}
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Application cycle</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Apply to the child’s entire body every night for 3 to 5 consecutive nights. Leave on for 24 hours before a brief wash and reapplication, or wash off in the morning depending on the protocol prescribed.
-          </p>
+          <p className="text-xs font-semibold text-muted-foreground">Advice</p>
+          <AdviceList
+            items={[
+              "Apply to the child’s entire body every night for 3 to 5 consecutive nights. Leave on for 24 hours before a brief wash and reapplication, or wash off in the morning depending on the protocol prescribed.",
+            ]}
+          />
         </div>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Drawbacks</p>
+          <p className="text-xs font-semibold text-muted-foreground">Drawbacks</p>
           <p className="mt-1 text-sm text-muted-foreground">
             Malodorous (rotten eggs), greasy, can stain clothing or bed sheets. May cause mild skin dryness or localized irritation (sulfur dermatitis).
           </p>
         </div>
+        {selected.sulphur && <DrugCourseBlock name={SCABIES_DRUGS.sulphur} medCourses={medCourses} onChange={onChange} />}
       </DrugCard>
 
       {/* iv. Ivermectin */}
@@ -337,30 +295,23 @@ export default function ScabiesMedications({
       >
         <p className="text-sm text-muted-foreground">Once today and once after 2 weeks. Dose 0.2 mg/kg by weight.</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <SelectField
-            label="Available tablet dose"
+          <DoseUnitSelect
             options={TABLET_OPTIONS.map((t) => `${t} mg`)}
             value={`${ivermectinTabletMg || 3} mg`}
             onChange={(v) => onChange({ ivermectinTabletMg: Number(String(v).replace(/\D/g, "")) || 3 })}
             testid="ivermectin-tablet"
           />
-          <div className="rounded-md border border-border bg-muted/30 p-3" data-testid="ivermectin-dose">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Calculated dose</p>
-            {dose ? (
-              <p className="mt-1 text-sm font-semibold">
-                {dose.mg.toFixed(1)} mg · {dose.tabs} tablet(s) of {dose.tabletMg} mg
-                <span className="mt-1 block text-xs font-normal text-muted-foreground">× 2 doses (today + after 2 weeks)</span>
-              </p>
-            ) : (
-              <p className="mt-1 text-sm text-muted-foreground">Enter weight in case details to calculate tablets.</p>
-            )}
-          </div>
+          <DosePhysicalBox
+            testid="ivermectin-dose"
+            doseText={dose ? formatDosePhysical(dose.mg, dose.tabs) : ""}
+            hint={dose ? `× 2 doses (today + after 2 weeks) · ${dose.tabletMg} mg tablets` : "Enter weight in case details to calculate tablets."}
+          />
         </div>
         <AlertPanel level="info" title="Note" testid="ivermectin-note">
           Not recommended for children under 5 years or weighing less than 15 kg, pregnant or breastfeeding women, and individuals with known hypersensitivity or severe liver and kidney disease.
         </AlertPanel>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advice</p>
+          <p className="text-xs font-semibold text-muted-foreground">Advice</p>
           <AdviceList
             items={[
               "Oral ivermectin is indicated in topical failure, inability to comply with topical therapy, non-adherence, institutional outbreaks, mass treatment, and crusted scabies.",
@@ -369,31 +320,8 @@ export default function ScabiesMedications({
             ]}
           />
         </div>
+        {selected.ivermectin && <DrugCourseBlock name={SCABIES_DRUGS.ivermectin} medCourses={medCourses} onChange={onChange} />}
       </DrugCard>
-
-      {/* v. Topical antibiotic */}
-      <div className="rounded-lg border border-border bg-white p-4" data-testid="scabies-drug-topical-abx">
-        <p className="mb-3 font-semibold">Topical antibiotic</p>
-        <FreeTextList
-          label="Drug name"
-          value={topicalAntibiotics}
-          onChange={(v) => onChange({ topicalAntibiotics: v })}
-          testid="topical-abx"
-          placeholder="e.g. Fusidic acid cream"
-        />
-      </div>
-
-      {/* Oral antibiotic */}
-      <div className="rounded-lg border border-border bg-white p-4" data-testid="scabies-drug-oral-abx">
-        <p className="mb-3 font-semibold">Oral antibiotic</p>
-        <FreeTextList
-          label="Antibiotic prescribed"
-          value={oralAntibiotics}
-          onChange={(v) => onChange({ oralAntibiotics: v })}
-          testid="oral-abx"
-          placeholder="e.g. Cloxacillin"
-        />
-      </div>
 
       <Dialog open={iverDialog} onOpenChange={setIverDialog}>
         <DialogContent className="sm:max-w-lg" data-testid="ivermectin-warning-dialog">

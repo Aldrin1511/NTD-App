@@ -280,12 +280,15 @@ export const DISEASE_SPECS = {
         addLabel: "Add Dermoscopy",
       },
     ],
+    repeatExam: true,
+    repeatExamIncludesAssessment: true,
     lab: [
       {
         k: "skinScrapings",
         label: "Skin scraping",
         type: "repeatChoice",
         options: ["Mite identified", "Eggs identified", "Faecal pellets identified", "Negative", "Not done"],
+        dateLabel: "Specimen Collection Date",
         addLabel: "Add skin scraping",
       },
     ],
@@ -442,8 +445,13 @@ export const DISEASE_SPECS = {
       "No Yaws",
     ],
     drugs: {
-      topical: ["Topical antibiotic"],
-      oral: [{ name: "Tab Azithromycin 500mg", mgPerKg: 30, tablet: 500 }, { name: "Inj Benzathine penicillin", fixed: "0.6 MU (<10y) / 1.2 MU (10y+)" }, { name: "Oral antibiotic" }],
+      topical: [],
+      oral: [
+        { name: "Tab Azithromycin 500mg (30mg per Kg)", tablet: 500 },
+        { name: "Inj Benzathine penicillin" },
+      ],
+      otherOralAntibiotic: true,
+      otherTopicalAntibiotic: true,
     },
     household: yawsHousehold,
     outcomes: ["Active", "Cured", "Improved", "No Change", "No Yaws", "New Lesions", "Lost to Follow-up"],
@@ -544,14 +552,24 @@ export const DISEASE_SPECS = {
       "No Lymphatic Filariasis",
     ],
     drugs: {
-      topical: ["Dressing material", "Self-care kit"],
-      oral: [{ name: "Tab Ivermectin 3mg", mgPerKg: 0.2, tablet: 3 }, { name: "Tab Albendazole", fixed: "200mg (<10y) / 400mg (10y+)" }, { name: "Tab DEC 50mg", mgPerKg: 6, tablet: 50 }],
+      topical: [
+        "Dressing Material (Compression Bandage / Wound Care)",
+        "Self care kit",
+      ],
+      oral: [
+        { name: "Tab Ivermectin (0.2 mg/kg)", mgPerKg: 0.2, tablet: 3 },
+        { name: "Tab Albendazole 200mg", fixed: "200mg (<10y) / 400mg (10y+)" },
+        { name: "Tab DEC 100mg (6 mg/kg)", mgPerKg: 6, tablet: 100 },
+        { name: "Doxycycline 100mg tablet" },
+      ],
+      ida: true,
     },
     household: lfHousehold,
     outcomes: ["Active", "No Change", "No Lymphatic Filariasis", "MMDP", "Lost to Follow-up"],
     recommendations: [
+      "Surgery for Hydrocele",
+      "Rest during Acute Attacks",
       "Referred for further review and further management of Acute Attacks especially in a pregnant woman",
-      "Referred for Surgery",
       "Self care",
       "Morbidity Management and Disability Prevention (MMDP)",
     ],
@@ -635,7 +653,10 @@ export const DISEASE_SPECS = {
     ],
     diagnosis: ["Clinical Buruli Ulcer", "Confirmed Buruli Ulcer", "No Buruli Ulcer"],
     drugs: {
-      oral: [{ name: "Tab Rifampicin 300mg", mgPerKg: 10, tablet: 300 }, { name: "Tab Clarithromycin 500mg", mgPerKg: 7.5, tablet: 500 }],
+      oral: [
+        { name: "Tab Rifampicin 300mg (10mg per Kg)", mgPerKg: 10, tablet: 300, schedule: "OD × 8 weeks" },
+        { name: "Tab Clarithromycin 500mg (7.5mg per kg)", mgPerKg: 7.5, tablet: 500, schedule: "BID × 8 weeks" },
+      ],
     },
     adherence: { unit: "week", count: 8, label: "8-week treatment schedule" },
     household: buruliHousehold,
@@ -759,12 +780,17 @@ export const DISEASE_SPECS = {
     ],
     drugs: {
       oral: [
-        { name: "Cap Rifampicin 300mg / 150mg" }, { name: "Cap Clofazimine 100mg / 50mg" },
-        { name: "Tab Dapsone 100mg / 50mg" }, { name: "Tab Prednisolone 5mg (reaction)" },
-        { name: "Cap Rifampicin — SDR-PEP" },
+        { name: "Multi-Drug Therapy (MDT) Blister pack" },
+        { name: "Tab Prednisolone 5mg" },
       ],
+      mdt: true,
     },
-    adherence: { unit: "month", count: 12, label: "MDT month-wise schedule (PB 6, MB 12+)", restart: true },
+    adherence: {
+      unit: "month",
+      mdt: true,
+      label: "MDT month-wise drug adherence",
+      restart: true,
+    },
     household: [
       { k: "contacts", label: "Household Monitoring", type: "leprosyHousehold" },
     ],
@@ -779,6 +805,20 @@ export const DISEASE_SPECS = {
 };
 
 export const SPEC_LIST = Object.values(DISEASE_SPECS);
+
+/** Disease assessment tabs come from suspect screening (or a saved encounter), never from registration. */
+export const assessmentSpecs = (patientId, { suspects = [], encounters = [] } = {}) => {
+  const ids = new Set();
+  for (const s of suspects) {
+    if (patientId && s.patientId && s.patientId !== patientId) continue;
+    if (s.suspect && DISEASE_SPECS[s.suspect]) ids.add(s.suspect);
+  }
+  for (const e of encounters) {
+    if (patientId && e.patientId && e.patientId !== patientId) continue;
+    if (e.disease && DISEASE_SPECS[e.disease]) ids.add(e.disease);
+  }
+  return SPEC_LIST.filter((d) => ids.has(d.id));
+};
 
 /** Parse app dates; legacy datetimes without TZ were UTC from toISOString().slice */
 export const parseDate = (v) => {
@@ -812,6 +852,52 @@ export const fmtDateTime = (v) => {
 export const localISODate = (d = new Date()) => {
   const x = d instanceof Date ? d : new Date(d);
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
+
+export const visitLabel = (n) => `${n} visit${n === 1 ? "" : "s"}`;
+
+export const isEpisodeClosed = (outcome) => /cured|healed|lost to follow-up|^no\b/i.test(String(outcome || "").trim());
+
+const EPISODE_PREFIX = { scabies: "SCAB", yaws: "YAWS", lf: "LF", buruli: "BURU", leprosy: "LEP" };
+
+export const newEpisodeId = (disease) =>
+  `${EPISODE_PREFIX[disease] || "NTD"}-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 90000000) + 10000000)}`;
+
+export const resolveEpisodeId = ({ existingId, disease, patientEpisodeId, diseaseEncounters }) => {
+  if (existingId) return existingId;
+  const latest = [...(diseaseEncounters || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  if (latest && !isEpisodeClosed(latest.outcome || latest.data?.outcome)) {
+    return latest.episodeId || patientEpisodeId || newEpisodeId(disease);
+  }
+  if (!latest) {
+    const prefix = EPISODE_PREFIX[disease];
+    if (prefix && String(patientEpisodeId || "").startsWith(`${prefix}-`)) return patientEpisodeId;
+    return newEpisodeId(disease);
+  }
+  return newEpisodeId(disease);
+};
+
+export const groupDiseaseEpisodes = (encounters, diseaseId, fallbackEpisodeId) => {
+  const list = (encounters || []).filter((e) => e.disease === diseaseId);
+  const by = {};
+  for (const e of list) {
+    const eid = e.episodeId || fallbackEpisodeId || "_none";
+    (by[eid] ||= []).push(e);
+  }
+  return Object.entries(by)
+    .map(([eid, visits]) => {
+      const sorted = [...visits].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      return {
+        id: eid,
+        visits: sorted,
+        visitCount: sorted.length,
+        start: sorted[sorted.length - 1].date,
+        last: sorted[0].date,
+        outcome: sorted[0].outcome || sorted[0].data?.outcome || "",
+        diagnosis: sorted[0].diagnosis || sorted[0].data?.diagnosis || "",
+      };
+    })
+    .sort((a, b) => String(b.last).localeCompare(String(a.last)));
 };
 
 /** Diagnosis patches: Well defined (A) + Ill defined (C) without sensation only. */

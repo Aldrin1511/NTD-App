@@ -122,7 +122,7 @@ export default function BodyChart({ marks, onChange }) {
               <li key={id} className="flex items-start gap-3 rounded-md border border-border bg-white p-3">
                 <div className="flex-1">
                   <p className="font-semibold">
-                    {m.label} <span className="text-xs font-normal uppercase tracking-wider text-muted-foreground">({m.view})</span>
+                    {m.label} <span className="text-xs font-normal text-muted-foreground">({m.view})</span>
                   </p>
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     {[m.type, m.severity, m.number].filter(Boolean).join(" · ") || "Details not set"}

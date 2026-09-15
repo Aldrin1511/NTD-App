@@ -101,7 +101,7 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
               >
                 <span className="text-center">
                   <Camera className="mx-auto h-5 w-5" />
-                  <span className="mt-1 block text-[11px] font-semibold uppercase tracking-wide">Capture</span>
+                  <span className="mt-1 block text-[11px] font-semibold">Capture</span>
                 </span>
               </button>
             </DropdownMenuTrigger>
@@ -347,7 +347,7 @@ export const ageFromDob = (dob, refDate) => {
   return a >= 0 ? String(a) : "";
 };
 
-/** e.g. "4Y 5M 3D" from date of birth */
+/** e.g. "7y 5m 4d" from date of birth */
 export const formatAgeYMD = (dob, refDate) => {
   if (!dob) return "";
   const birth = new Date(dob);
@@ -367,7 +367,13 @@ export const formatAgeYMD = (dob, refDate) => {
     m += 12;
   }
   if (y < 0) return "";
-  return `${y}Y ${m}M ${d}D`;
+  return `${y}y ${m}m ${d}d`;
+};
+
+/** Display age for a patient record: "7y 5m 4d". */
+export const patientAgeLabel = (p, refDate) => {
+  const dob = p?.dob || dobFromAge(p?.age, p?.createdAt);
+  return formatAgeYMD(dob, refDate) || (p?.age != null && p.age !== "" ? `${p.age}y 0m 0d` : "—");
 };
 
 export const dobFromAge = (age, refDate) => {

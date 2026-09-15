@@ -21,8 +21,9 @@ export default function Sync() {
               data-testid="sync-now-btn"
               disabled={!online || pendingSync === 0}
               onClick={() => {
-                syncNow();
-                toast.success("All local changes pushed to cloud");
+                const n = syncNow();
+                if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to the cloud`);
+                else if (!online) toast.error("No internet. Sync when you are back online.");
               }}
             >
               <CloudUpload className="mr-2 h-4 w-4" /> Sync now
@@ -46,7 +47,7 @@ export default function Sync() {
                       {e.patientId} · {new Date(e.date).toLocaleString()}
                     </p>
                   </div>
-                  <span className="rounded border border-orange-300 bg-orange-50 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-orange-800">
+                  <span className="rounded border border-orange-300 bg-orange-50 px-2 py-1 text-[11px] font-bold text-orange-800">
                     Queued
                   </span>
                 </li>
@@ -64,20 +65,19 @@ export default function Sync() {
               ].map(([k, v, Icon]) => (
                 <div key={k} className="rounded-md border border-border p-4">
                   <Icon className="h-4 w-4 text-primary" />
-                  <p className="mt-2 text-xs uppercase tracking-wider text-muted-foreground">{k}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{k}</p>
                   <p className="mt-1 font-head text-2xl font-bold">{v}</p>
                 </div>
               ))}
             </div>
             {online ? (
               <AlertPanel level="routine" title="🟢 Online" testid="online-note">
-                Background sync is active. New records upload automatically.
+                Save a record or tap Sync now to upload the offline queue.
               </AlertPanel>
             ) : (
               <AlertPanel level="urgent" title="🔴 Offline" testid="offline-alert">
                 <span className="flex items-center gap-2">
-                  <WifiOff className="h-4 w-4" /> Continue working — data is stored on the device and will upload
-                  automatically.
+                  <WifiOff className="h-4 w-4" /> Continue working — data stays on this device. When internet returns, Save again or tap Sync.
                 </span>
               </AlertPanel>
             )}

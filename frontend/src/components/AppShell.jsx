@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const nav = [
   // MIS hidden for now — re-enable when ready: { to: "/dashboard", label: "MIS", icon: LayoutDashboard, testid: "nav-dashboard" },
@@ -34,9 +35,13 @@ export const SyncChip = () => {
     <button
       data-testid="sync-status-chip"
       onClick={() => {
+        if (state === "offline") {
+          toast.error("No internet. Items stay queued until you are online — then Save again or tap Sync.");
+          return;
+        }
         if (state === "queued") {
-          syncNow();
-          toast.success("Local queue pushed to cloud");
+          const n = syncNow();
+          if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to the cloud`);
         }
       }}
       className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${map.cls}`}
@@ -47,12 +52,49 @@ export const SyncChip = () => {
   );
 };
 
+const SyncPromptDialog = () => {
+  const { syncPrompt, dismissSyncPrompt, syncNow, online, pendingSync } = useStore();
+  const count = Number(syncPrompt?.count) || pendingSync;
+  const open = Boolean(syncPrompt) && online && count > 0;
+  if (!open) return null;
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) dismissSyncPrompt(); }}>
+      <DialogContent data-testid="sync-prompt" className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Sync pending items?</DialogTitle>
+          <DialogDescription>
+            You are online. {count} item{count === 1 ? "" : "s"} in the offline queue {count === 1 ? "is" : "are"} waiting to upload.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" className="h-11" data-testid="sync-prompt-later" onClick={dismissSyncPrompt}>
+            Later
+          </Button>
+          <Button
+            className="h-11"
+            data-testid="sync-prompt-now"
+            onClick={() => {
+              const n = syncNow();
+              if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to the cloud`);
+            }}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Sync now
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 export default function AppShell({ children, title, subtitle, action }) {
   const { user, branding, logout } = useStore();
   const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-background pb-24 lg:pb-0">
+      <SyncPromptDialog />
       <header className="sticky top-0 z-40 border-b border-border bg-white">
         <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-3 sm:px-6">
           <Link to="/patients" className="flex items-center gap-2.5" data-testid="brand-home-link">
@@ -65,7 +107,7 @@ export default function AppShell({ children, title, subtitle, action }) {
             )}
             <span className="hidden sm:block">
               <span className="block font-head text-base font-extrabold leading-none tracking-tight">TRIAS</span>
-              <span className="block text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+              <span className="block text-[11px] font-medium text-muted-foreground">
                 Skin &amp; NTD
               </span>
             </span>
@@ -94,7 +136,7 @@ export default function AppShell({ children, title, subtitle, action }) {
             <SyncChip />
             <span className="hidden text-right sm:block">
               <span className="block text-sm font-semibold leading-tight">{user?.name}</span>
-              <span className="block text-[11px] uppercase tracking-wider text-muted-foreground">{user?.role}</span>
+              <span className="block text-[11px] text-muted-foreground">{user?.role}</span>
             </span>
             <Button
               variant="outline"
@@ -140,7 +182,7 @@ export default function AppShell({ children, title, subtitle, action }) {
             <span className="grid h-11 w-11 place-items-center rounded-full bg-primary text-white">
               <Activity className="h-5 w-5" />
             </span>
-            <span className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">New</span>
+            <span className="mt-0.5 text-[10px] font-semibold text-primary">New</span>
           </Link>
           {nav.slice(2).map((n) => (
             <BottomItem key={n.to} {...n} />
@@ -157,7 +199,7 @@ const BottomItem = ({ to, label, icon: Icon, testid }) => (
     end={to === "/patients"}
     data-testid={testid}
     className={({ isActive }) =>
-      `flex h-16 flex-col items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${
+      `flex h-16 flex-col items-center justify-center gap-1 text-[10px] font-semibold ${
         isActive ? "text-primary" : "text-muted-foreground"
       }`
     }

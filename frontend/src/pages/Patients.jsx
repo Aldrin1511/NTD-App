@@ -5,7 +5,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/Fields";
-import { Avatar, isLostToFollowUp, dobFromAge, formatAgeYMD } from "@/components/Capture";
+import { Avatar, isLostToFollowUp, dobFromAge, patientAgeLabel } from "@/components/Capture";
 import { GEO, DISEASES } from "@/mock/data";
 import { fmtDate, fmtDateTime, DISEASE_SPECS } from "@/mock/specs";
 import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft } from "lucide-react";
@@ -72,12 +72,12 @@ export default function Patients() {
           (!status || p.status === status) &&
           (!outcome || outcomeOf(p) === outcome) &&
           (!disease ||
-            (p.diseases || []).includes(diseaseId) ||
-            encounters.some((e) => e.patientId === p.id && e.disease === diseaseId)) &&
+            encounters.some((e) => e.patientId === p.id && e.disease === diseaseId) ||
+            suspects.some((s) => s.patientId === p.id && s.suspect === diseaseId)) &&
           (!clinician || encounters.some((e) => e.patientId === p.id && e.worker === clinician))
       );
     },
-    [all, q, village, status, outcome, disease, clinician, encounters] // eslint-disable-line react-hooks/exhaustive-deps
+    [all, q, village, status, outcome, disease, clinician, encounters, suspects] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const range = periodRange(period, anchor, custom);
@@ -228,7 +228,7 @@ export default function Patients() {
                     />
                   </div>
                   <p className="mt-1 truncate text-sm text-muted-foreground">{e.facility}</p>
-                  <p className="mt-0.5 truncate text-xs uppercase tracking-wider text-muted-foreground">
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
                     {[
                       `${fmtDateTime(e.date)}`,
                       e.type || null,
@@ -283,7 +283,7 @@ export default function Patients() {
           const unsynced = encs.some((e) => !e.synced);
           const lastEnc = [...encs].sort((a, b) => b.date.localeCompare(a.date))[0];
           const lastSuspect = suspects.filter((s) => s.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date))[0]?.suspect;
-          const diseaseId = lastEnc?.disease || (p.diseases || [])[0] || (lastSuspect !== "none" ? lastSuspect : "") || "";
+          const diseaseId = lastEnc?.disease || (lastSuspect && DISEASE_SPECS[lastSuspect] ? lastSuspect : "") || "";
           const diagnosis = lastEnc?.diagnosis || "";
           const recordedOutcome = p.outcome || lastEnc?.outcome || (isLostToFollowUp(p, encounters, settings) ? "Lost to follow-up" : "");
           return (
@@ -308,9 +308,9 @@ export default function Patients() {
                   />
                 </div>
                 <p className="mt-1 truncate text-sm text-muted-foreground">
-                  {formatAgeYMD(p.dob || dobFromAge(p.age, p.createdAt)) || `${p.age}Y`} · {p.sex} · {p.weight}kg · DOB {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {p.village}, {p.district}
+                  {patientAgeLabel(p)} · {p.sex} · {p.weight}kg · Date of Birth {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {p.village}, {p.district}
                 </p>
-                <p className="mt-0.5 truncate text-xs uppercase tracking-wider text-muted-foreground">
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
                   {p.id} · Last encounter {lastEnc ? fmtDate(lastEnc.date) : "—"}
                 </p>
               </div>

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
+import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU, DISEASES } from "@/mock/data";
 import { SUSPECT_SYMPTOMS } from "@/mock/specs";
 import { USERS, PATIENTS, ENCOUNTERS, HOUSEHOLDS } from "@/mock/data";
 
@@ -14,12 +14,13 @@ const initial = () => ({
   suspects: SUSPECTS,
   facilities: FACILITIES_LIST,
   settings: { symptoms: SUSPECT_SYMPTOMS, drugs: DRUGS, visitTypes: VISIT_TYPES, ltfuByDisease: DEFAULT_LTFU, lostToFollowUpDays: 30, regimens: [
-    { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: "Permethrin 5% Cream/Lotion (apply overnight; repeat in 7 days if needed)" },
-    { id: "R-002", name: "Scabies — oral ivermectin", disease: "scabies", diagnosis: "Crusted Scabies", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, drugs: "Tab Ivermectin 0.2 mg/kg once today and once after 2 weeks" },
-    { id: "R-003", name: "Buruli — RC 8 weeks", disease: "buruli", diagnosis: "Confirmed Buruli Ulcer", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: "Rifampicin 10 mg/kg + Clarithromycin 7.5 mg/kg daily × 8 weeks" },
-    { id: "R-004", name: "Leprosy MDT — MB adult", disease: "leprosy", diagnosis: "Multibacillary (MB)", ageMin: 15, ageMax: 120, weightMin: 35, weightMax: 200, drugs: "Rifampicin 600mg monthly + Clofazimine + Dapsone × 12 months" },
-    { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "Primary Yaws (Clinical / confirmed)", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: "Tab Azithromycin 30 mg/kg single dose" },
-    { id: "R-006", name: "LF — IDA / DA", disease: "lf", diagnosis: "Confirmed Lymphatic Filariasis", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, drugs: "Ivermectin + DEC + Albendazole annually" },
+    { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Permethrin 5% Cream/Lotion"] },
+    { id: "R-001b", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Suspected Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Permethrin 5% Cream/Lotion"] },
+    { id: "R-002", name: "Scabies — oral ivermectin", disease: "scabies", diagnosis: "Crusted Scabies", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, drugs: ["Tab Ivermectin (0.2 mg/kg)"] },
+    { id: "R-003", name: "Buruli — RC 8 weeks", disease: "buruli", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Tab Rifampicin 300mg (10mg per Kg)", "Tab Clarithromycin 500mg (7.5mg per kg)"] },
+    { id: "R-004", name: "Leprosy MDT — blister pack", disease: "leprosy", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Multi-Drug Therapy (MDT) Blister pack"] },
+    { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
+    { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
   currentUserId: null,
   branding: {
@@ -34,14 +35,27 @@ const initial = () => ({
 const load = () => {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...initial(), ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      const merged = { ...initial(), ...saved };
+      const have = new Set((merged.encounters || []).map((e) => e.id));
+      const extra = ENCOUNTERS.filter((e) => !have.has(e.id));
+      if (extra.length) merged.encounters = [...(merged.encounters || []), ...extra];
+      return merged;
+    }
   } catch (e) {}
   return initial();
+};
+
+const queuedCount = (s) => {
+  const enc = (s.encounters || []).filter((e) => !e.synced).length;
+  return Math.max(Number(s.pendingSync) || 0, enc);
 };
 
 export function StoreProvider({ children }) {
   const [state, setState] = useState(load);
   const [online, setOnline] = useState(navigator.onLine);
+  const [syncPrompt, setSyncPrompt] = useState(null);
 
   useEffect(() => {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -49,7 +63,10 @@ export function StoreProvider({ children }) {
 
   useEffect(() => {
     const on = () => setOnline(true);
-    const off = () => setOnline(false);
+    const off = () => {
+      setOnline(false);
+      setSyncPrompt(null);
+    };
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => {
@@ -59,6 +76,9 @@ export function StoreProvider({ children }) {
   }, []);
 
   const patch = (fn) => setState((s) => ({ ...s, ...fn(s) }));
+  const offerSyncAfterSave = (count) => {
+    if (online && count > 0) setSyncPrompt({ count });
+  };
 
   const api = useMemo(() => {
     const user = state.users.find((u) => u.id === state.currentUserId) || null;
@@ -73,6 +93,8 @@ export function StoreProvider({ children }) {
     return {
       ...state,
       online,
+      pendingSync: queuedCount(state),
+      syncPrompt,
       user,
       visiblePatients,
       login: (email, password) => {
@@ -132,7 +154,20 @@ export function StoreProvider({ children }) {
           worker: state.users.find((u) => u.id === state.currentUserId)?.name,
           ...rec,
         };
-        patch((s) => ({ suspects: [...s.suspects, out], pendingSync: s.pendingSync + 1 }));
+        const diseaseId = DISEASES.some((d) => d.id === rec.suspect) ? rec.suspect : "";
+        const nextPending = queuedCount(state) + 1;
+        patch((s) => ({
+          suspects: [...s.suspects, out],
+          pendingSync: nextPending,
+          patients: diseaseId
+            ? s.patients.map((p) =>
+                p.id === rec.patientId && !(p.diseases || []).includes(diseaseId)
+                  ? { ...p, diseases: [...(p.diseases || []), diseaseId] }
+                  : p
+              )
+            : s.patients,
+        }));
+        offerSyncAfterSave(nextPending);
         return out;
       },
       logout: () => patch(() => ({ currentUserId: null })),
@@ -153,12 +188,14 @@ export function StoreProvider({ children }) {
           createdBy: state.currentUserId,
           createdAt: new Date().toISOString().slice(0, 10),
           status: "Suspected",
-          diseases: ["scabies"],
+          diseases: [],
           ...data,
           sex: data.sex || data.gender || "",
           gender: data.gender || data.sex || "",
         };
-        patch((s) => ({ patients: [rec, ...s.patients], pendingSync: s.pendingSync + 1 }));
+        const nextPending = queuedCount(state) + 1;
+        patch((s) => ({ patients: [rec, ...s.patients], pendingSync: nextPending }));
+        offerSyncAfterSave(nextPending);
         return rec;
       },
       addDisease: (patientId, diseaseId) =>
@@ -172,11 +209,19 @@ export function StoreProvider({ children }) {
       saveEncounter: (enc) => {
         const existing = enc.id && state.encounters.find((e) => e.id === enc.id);
         if (existing) {
-          const merged = { ...existing, ...enc, synced: false };
-          patch((s) => ({
-            encounters: s.encounters.map((e) => (e.id === merged.id ? merged : e)),
-            pendingSync: s.pendingSync + 1,
-          }));
+          const merged = {
+            ...existing,
+            ...enc,
+            id: existing.id,
+            date: existing.date,
+            synced: false,
+            editedAt: new Date().toISOString(),
+            editedSections: [...new Set([...(existing.editedSections || []), ...(enc.editedSections || [])])],
+          };
+          const nextEncounters = state.encounters.map((e) => (e.id === merged.id ? merged : e));
+          const nextPending = queuedCount({ ...state, encounters: nextEncounters, pendingSync: state.pendingSync + 1 });
+          patch(() => ({ encounters: nextEncounters, pendingSync: nextPending }));
+          offerSyncAfterSave(nextPending);
           return merged;
         }
         const { id: _dropId, ...rest } = enc;
@@ -188,20 +233,33 @@ export function StoreProvider({ children }) {
           complete: true,
           ...rest,
         };
-        patch((s) => ({ encounters: [...s.encounters, rec], pendingSync: s.pendingSync + 1 }));
+        const nextEncounters = [...state.encounters, rec];
+        const nextPending = queuedCount({ ...state, encounters: nextEncounters, pendingSync: state.pendingSync + 1 });
+        patch(() => ({ encounters: nextEncounters, pendingSync: nextPending }));
+        offerSyncAfterSave(nextPending);
         return rec;
       },
-      syncNow: () =>
+      dismissSyncPrompt: () => setSyncPrompt(null),
+      syncNow: () => {
+        if (!online) return 0;
+        const n = queuedCount(state);
+        if (!n) {
+          setSyncPrompt(null);
+          return 0;
+        }
         patch((s) => ({
           pendingSync: 0,
           encounters: s.encounters.map((e) => ({ ...e, synced: true })),
-        })),
+        }));
+        setSyncPrompt(null);
+        return n;
+      },
       resetDemo: () => {
         localStorage.removeItem(KEY);
         setState(initial());
       },
     };
-  }, [state, online]);
+  }, [state, online, syncPrompt]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

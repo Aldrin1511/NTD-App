@@ -29,7 +29,7 @@ export default function Login() {
           </span>
           <span>
             <span className="block font-head text-lg font-extrabold leading-none">TRIAS</span>
-            <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-white/70">Skin &amp; NTD</span>
+            <span className="text-[11px] font-medium text-white/70">Skin &amp; NTD</span>
           </span>
         </div>
 
@@ -56,7 +56,7 @@ export default function Login() {
           </ul>
         </div>
 
-        <p className="text-xs uppercase tracking-[0.2em] text-white/50">{branding.clientName}</p>
+        <p className="text-xs text-white/50">{branding.clientName}</p>
       </div>
 
       <div className="flex items-center justify-center bg-background px-5 py-12 sm:px-10">

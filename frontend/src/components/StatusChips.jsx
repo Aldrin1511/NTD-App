@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { DISEASE_SPECS } from "@/mock/specs";
 
-const chipCls = "shrink-0 rounded px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide";
+const chipCls = "shrink-0 rounded px-2 py-0.5 text-[11px] font-bold";
 
 /** Unsynced indicator — place on the right of the row next to action icons */
 export function PendingSyncChip({ pending, testid }) {

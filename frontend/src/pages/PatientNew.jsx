@@ -3,14 +3,24 @@ import { useNavigate } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import { TextField, SelectField, ChoiceRow, SectionCard, AlertPanel } from "@/components/Fields";
+import { SelectField, ChoiceRow, SectionCard, TextField, capitalizeName } from "@/components/Fields";
 import { PhotoCapture, FingerprintCapture, DocumentCapture, ageFromDob, dobFromAge } from "@/components/Capture";
 import { GEO, REGISTERED_ATS, BLOOD_GROUPS } from "@/mock/data";
 import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+
+const emptyAddress = (type = "By residency", province = "") => ({
+  type,
+  country: "Papua New Guinea",
+  province,
+  district: "",
+  village: "",
+});
+
+const registeredAtOptions = REGISTERED_ATS.map((h) => `${h.id} — ${h.name}`);
 
 export default function PatientNew() {
-  const { addPatient, user, facilities } = useStore();
+  const { addPatient, user, online } = useStore();
   const navigate = useNavigate();
   const [f, setF] = useState({
     name: "",
@@ -28,25 +38,58 @@ export default function PatientNew() {
     pregnancy: "N/A",
     lactating: "N/A",
     phone: "",
-    country: "Papua New Guinea",
-    province: user?.province || "",
-    district: "",
-    village: "",
     facility: "",
     registeredAt: "",
     consent: "By verbal",
     consentDoc: null,
-    addressType: "By residency",
+    addresses: [emptyAddress("By residency", user?.province || "")],
   });
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
-  const districts = f.province ? Object.keys(GEO[f.province] || {}) : [];
-  const villages = f.province && f.district ? GEO[f.province]?.[f.district] || [] : [];
-  const female = f.gender === "Female";
+
+  const patchAddress = (index, changes) =>
+    setF((s) => ({
+      ...s,
+      addresses: s.addresses.map((addr, i) => (i === index ? { ...addr, ...changes } : addr)),
+    }));
+
+  const addAddress = () =>
+    setF((s) => {
+      const hasOrigin = s.addresses.some((a) => a.type === "By origin");
+      return {
+        ...s,
+        addresses: [...s.addresses, emptyAddress(hasOrigin ? "By residency" : "By origin", user?.province || "")],
+      };
+    });
+
+  const removeAddress = (index) =>
+    setF((s) => ({
+      ...s,
+      addresses: s.addresses.filter((_, i) => i !== index),
+    }));
+
+  const registeredAtDisplay =
+    registeredAtOptions.find((o) => o.startsWith(`${f.registeredAt} —`)) || "";
 
   const save = (thenEncounter) => {
     if (!f.name || !f.age || !f.gender) return toast.error("Name, age and gender are required");
-    const rec = addPatient({ ...f, name: [f.name, f.middleName, f.lastName].filter(Boolean).join(" "), age: Number(f.age), weight: Number(f.weight) || 0, height: Number(f.height) || 0 });
-    toast.success(`Patient ${rec.id} saved locally · queued for sync`);
+    const primary = f.addresses[0] || emptyAddress();
+    const rec = addPatient({
+      ...f,
+      name: [f.name, f.middleName, f.lastName].filter(Boolean).join(" "),
+      age: Number(f.age),
+      weight: Number(f.weight) || 0,
+      height: Number(f.height) || 0,
+      country: primary.country,
+      province: primary.province,
+      district: primary.district,
+      village: primary.village,
+      addressType: primary.type,
+    });
+    toast.success(
+      online
+        ? `Patient ${rec.id} saved to device`
+        : `Patient ${rec.id} saved locally · queued until you are online`
+    );
     navigate(thenEncounter ? `/patients/${rec.id}/suspect` : `/patients/${rec.id}`);
   };
 
@@ -64,9 +107,9 @@ export default function PatientNew() {
         <div className="min-w-0 space-y-6">
           <SectionCard title="Patient identity" desc="Patient ID and Scabies Episode ID are generated automatically">
             <div className="grid min-w-0 gap-5 sm:grid-cols-2">
-              <TextField label="First name" testid="patient-name-input" value={f.name} onChange={(e) => set("name")(e.target.value)} placeholder="First name" />
-              <TextField label="Middle name" testid="patient-middle-input" value={f.middleName} onChange={(e) => set("middleName")(e.target.value)} />
-              <TextField label="Last name" testid="patient-last-input" value={f.lastName} onChange={(e) => set("lastName")(e.target.value)} />
+              <TextField label="First name" testid="patient-name-input" value={f.name} onChange={(e) => set("name")(capitalizeName(e.target.value))} placeholder="First name" autoCapitalize="words" />
+              <TextField label="Middle name" testid="patient-middle-input" value={f.middleName} onChange={(e) => set("middleName")(capitalizeName(e.target.value))} autoCapitalize="words" />
+              <TextField label="Last name" testid="patient-last-input" value={f.lastName} onChange={(e) => set("lastName")(capitalizeName(e.target.value))} autoCapitalize="words" />
               <TextField
                 label="Date of birth"
                 type="date"
@@ -83,29 +126,101 @@ export default function PatientNew() {
                 onChange={(e) => setF((s) => ({ ...s, age: e.target.value, dob: dobFromAge(e.target.value) }))}
                 hint="Entering age fills the date of birth from today's registration date"
               />
-              <SelectField label="Gender" options={["Male", "Female", "Other"]} value={f.gender} onChange={set("gender")} testid="patient-gender-select" />
-              {/* <TextField label="Weight (kg)" testid="patient-weight-input" type="number" value={f.weight} onChange={(e) => set("weight")(e.target.value)} hint="Used for ivermectin dose calculation" />
-              <TextField label="Height (cm) — optional" testid="patient-height-input" type="number" value={f.height} onChange={(e) => set("height")(e.target.value)} /> */}
+              <ChoiceRow label="Gender" options={["Male", "Female", "Other"]} value={f.gender} onChange={set("gender")} testid="patient-gender-select" />
               <TextField label="Phone / contact" testid="patient-phone-input" value={f.phone} onChange={(e) => set("phone")(e.target.value)} />
-              <TextField label="Email" type="email" testid="patient-email-input" value={f.email} onChange={(e) => set("email")(e.target.value)} placeholder="name@example.pg" />
-              <SelectField label="Blood group" options={BLOOD_GROUPS} value={f.bloodGroup} onChange={set("bloodGroup")} testid="patient-blood-select" />
-            </div>
-            {female && (
-              <div className="grid gap-5 sm:grid-cols-2">
-                <ChoiceRow label="Pregnancy" options={["Yes", "No", "Unknown"]} value={f.pregnancy} onChange={set("pregnancy")} testid="patient-pregnancy" />
-                <ChoiceRow label="Lactating" options={["Yes", "No"]} value={f.lactating} onChange={set("lactating")} testid="patient-lactating" />
+              <TextField label="Email" type="email" testid="patient-email-input" value={f.email} onChange={(e) => set("email")(e.target.value)} />
+              <div className="sm:col-span-2">
+                <ChoiceRow label="Blood group" options={BLOOD_GROUPS} value={f.bloodGroup} onChange={set("bloodGroup")} testid="patient-blood-select" />
               </div>
-            )}
+              <div className="sm:col-span-2">
+                <SelectField
+                  label="Registered at"
+                  options={registeredAtOptions}
+                  value={registeredAtDisplay}
+                  onChange={(v) => set("registeredAt")(v.split(" — ")[0])}
+                  testid="patient-registeredAt-select"
+                  hint="Links this patient to registeredAt contact tracing"
+                />
+              </div>
+            </div>
           </SectionCard>
 
-          <SectionCard title="Location &amp; facility" desc="Drives the MIS geography filters">
-            <div className="grid gap-5 sm:grid-cols-2">
-              <SelectField label="Facility (registration site)" options={facilities.map((x) => x.name)} value={f.facility} onChange={set("facility")} testid="patient-facility-select" />
-              <SelectField label="Country" options={["Papua New Guinea"]} value={f.country} onChange={set("country")} testid="patient-country-select" />
-              <SelectField label="Province" options={Object.keys(GEO)} value={f.province} onChange={(v) => setF({ ...f, province: v, district: "", village: "" })} testid="patient-province-select" />
-              <SelectField label="District" options={districts} value={f.district} onChange={(v) => setF({ ...f, district: v, village: "" })} testid="patient-district-select" />
-              <SelectField label="Village / residence" options={villages} value={f.village} onChange={set("village")} testid="patient-village-select" />
-              <SelectField label="Registered at" options={REGISTERED_ATS.map((h) => `${h.id} — ${h.name}`)} value={f.registeredAt} onChange={(v) => set("registeredAt")(v.split(" — ")[0])} testid="patient-registeredAt-select" hint="Links this patient to registeredAt contact tracing" />
+          <SectionCard title="Location" desc="Drives the MIS geography filters">
+            <div className="space-y-4">
+              {f.addresses.map((addr, index) => {
+                const districts = addr.province ? Object.keys(GEO[addr.province] || {}) : [];
+                const villages = addr.province && addr.district ? GEO[addr.province]?.[addr.district] || [] : [];
+                return (
+                  <div
+                    key={index}
+                    className="space-y-4 rounded-md border border-border p-4"
+                    data-testid={`patient-address-${index}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold text-muted-foreground">
+                        Address {index + 1}
+                      </p>
+                      {f.addresses.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-9 px-2 text-muted-foreground"
+                          data-testid={`patient-address-remove-${index}`}
+                          onClick={() => removeAddress(index)}
+                        >
+                          <Trash2 className="mr-1 h-4 w-4" /> Remove
+                        </Button>
+                      )}
+                    </div>
+                    <ChoiceRow
+                      label="Address recorded"
+                      options={["By origin", "By residency"]}
+                      value={addr.type}
+                      onChange={(v) => patchAddress(index, { type: v })}
+                      testid={`patient-address-type-${index}`}
+                    />
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <SelectField
+                        label="Country"
+                        options={["Papua New Guinea"]}
+                        value={addr.country}
+                        onChange={(v) => patchAddress(index, { country: v })}
+                        testid={`patient-country-select-${index}`}
+                      />
+                      <SelectField
+                        label="Province"
+                        options={Object.keys(GEO)}
+                        value={addr.province}
+                        onChange={(v) => patchAddress(index, { province: v, district: "", village: "" })}
+                        testid={`patient-province-select-${index}`}
+                      />
+                      <SelectField
+                        label="District"
+                        options={districts}
+                        value={addr.district}
+                        onChange={(v) => patchAddress(index, { district: v, village: "" })}
+                        testid={`patient-district-select-${index}`}
+                      />
+                      <SelectField
+                        label="Village / residence"
+                        options={villages}
+                        value={addr.village}
+                        onChange={(v) => patchAddress(index, { village: v })}
+                        testid={`patient-village-select-${index}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 w-full text-base"
+                data-testid="patient-address-add"
+                onClick={addAddress}
+              >
+                <Plus className="mr-2 h-4 w-4" /> Add address
+              </Button>
             </div>
           </SectionCard>
 
@@ -125,7 +240,6 @@ export default function PatientNew() {
                 testid="patient-consent-doc"
               />
             )}
-            <ChoiceRow label="Address recorded" options={["By origin", "By residency"]} value={f.addressType} onChange={set("addressType")} testid="patient-address-type" />
           </SectionCard>
 
           <SectionCard title="Unique identification" desc="Photo and up to 10 fingerprint templates help identify returning patients in the field">

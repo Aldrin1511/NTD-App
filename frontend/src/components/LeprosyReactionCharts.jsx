@@ -53,14 +53,14 @@ function LegendBar({ options, activeCode, onSelect, testid }) {
 function SidePair({ title, left, right }) {
   return (
     <div className="space-y-2">
-      {title && <p className="text-center text-xs font-semibold uppercase tracking-wider text-white/80">{title}</p>}
+      {title && <p className="text-center text-xs font-semibold text-white/80">{title}</p>}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <p className="mb-1 text-center text-[10px] font-semibold uppercase tracking-wider text-white/60">Right</p>
+          <p className="mb-1 text-center text-[10px] font-semibold text-white/60">Right</p>
           {right}
         </div>
         <div>
-          <p className="mb-1 text-center text-[10px] font-semibold uppercase tracking-wider text-white/60">Left</p>
+          <p className="mb-1 text-center text-[10px] font-semibold text-white/60">Left</p>
           {left}
         </div>
       </div>
@@ -164,33 +164,33 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
   };
 
   return (
-    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4" data-testid={id}>
+    <div className="space-y-6 rounded-lg border border-border bg-muted/20 p-4" data-testid={id}>
       <div>
         <p className="font-head text-base font-semibold">Sensory Testing (ST)</p>
         <p className="text-xs text-muted-foreground">1. Choose a finding · 2. Tap a checkbox on the chart</p>
       </div>
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Eyes (blink)</p>
+
+      <div className="space-y-3" data-testid={`${id}-eyes`}>
+        <p className="text-xs font-semibold text-muted-foreground">Eyes (blink)</p>
         <LegendBar options={SENSORY_EYE} activeCode={activeCode} onSelect={setActiveCode} testid={`${id}-eye-legend`} />
+        <div className="rounded-lg bg-black p-4">
+          <SidePair
+            title=""
+            right={<StFigure artKey="right-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} />}
+            left={<StFigure artKey="left-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} />}
+          />
+        </div>
       </div>
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Hands &amp; feet (sensation)</p>
+
+      <div className="space-y-3" data-testid={`${id}-hands-feet`}>
+        <p className="text-xs font-semibold text-muted-foreground">Hands &amp; feet (sensation)</p>
         <LegendBar options={SENSORY_HAND_FOOT} activeCode={activeCode} onSelect={setActiveCode} testid={`${id}-hf-legend`} />
-      </div>
-      <div className="rounded-lg bg-black p-4">
-        <p className="mb-3 text-center text-sm font-semibold text-white">Sensory Testing(ST)</p>
-        <SidePair
-          title=""
-          right={<StFigure artKey="right-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} />}
-          left={<StFigure artKey="left-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} />}
-        />
-        <div className="my-4 border-t border-white/20" />
-        <SidePair
-          title="Hands"
-          right={<StFigure artKey="right-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} />}
-          left={<StFigure artKey="left-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} />}
-        />
-        <div className="mt-6">
+        <div className="rounded-lg bg-black p-4 space-y-6">
+          <SidePair
+            title="Hands"
+            right={<StFigure artKey="right-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} />}
+            left={<StFigure artKey="left-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} />}
+          />
           <SidePair
             title="Feet"
             right={<StFigure artKey="right-foot" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-foot`} />}
@@ -198,8 +198,9 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
           />
         </div>
       </div>
+
       {!activeCode && !readOnly && (
-        <p className="text-xs text-muted-foreground">Select a legend option above, then tap chart points.</p>
+        <p className="text-xs text-muted-foreground">Select a finding in the subsection, then tap the image.</p>
       )}
     </div>
   );
@@ -286,7 +287,7 @@ function VmtSideButton({ pointId, side, code, onClick, testid }) {
           }}
         />
       </span>
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-white/70">{side}</span>
+      <span className="text-[10px] font-semibold text-white/70">{side}</span>
     </button>
   );
 }
@@ -312,7 +313,7 @@ export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
       <LegendBar options={VMT_OPTS} activeCode={activeCode} onSelect={setActiveCode} testid={`${id}-legend`} />
       <div className="space-y-2 rounded-lg bg-black p-3 sm:p-5">
         <p className="text-center text-sm font-semibold text-white">Voluntary Muscle Testing(VMT)</p>
-        <div className="mb-1 grid grid-cols-[1fr_auto_1fr] text-center text-[10px] font-semibold uppercase tracking-wider text-white/60">
+        <div className="mb-1 grid grid-cols-[1fr_auto_1fr] text-center text-[10px] font-semibold text-white/60">
           <span>Right</span>
           <span />
           <span>Left</span>
@@ -328,7 +329,7 @@ export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
                 testid={`${id}-${right.id}`}
                 onClick={() => place(right.id)}
               />
-              <p className="max-w-[5.5rem] px-1 text-center text-[11px] font-semibold uppercase leading-tight tracking-wider text-white/85">
+              <p className="max-w-[5.5rem] px-1 text-center text-[11px] font-semibold text-white/85">
                 {test.name}
               </p>
               <VmtSideButton
@@ -341,7 +342,7 @@ export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
             </div>
           );
         })}
-        <div className="grid grid-cols-[1fr_auto_1fr] text-center text-[10px] font-semibold uppercase tracking-wider text-white/60">
+        <div className="grid grid-cols-[1fr_auto_1fr] text-center text-[10px] font-semibold text-white/60">
           <span>Right</span>
           <span />
           <span>Left</span>
@@ -405,7 +406,7 @@ export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision
                     onClick={() => place(eyeId)}
                   />
                 </div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-white/70">{art.label}</span>
+                <span className="text-[10px] font-semibold text-white/70">{art.label}</span>
               </div>
             );
           })}

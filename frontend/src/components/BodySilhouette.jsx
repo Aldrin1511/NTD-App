@@ -206,7 +206,7 @@ const NERVE_MARKERS = [
   { id: "n-knee-bl", label: "Left nerve behind the knee", cx: 122, cy: 268, view: "back" },
 ];
 
-export default function BodySilhouette({ sex = "Male", view = "front", marks = {}, onPlace, showNerves = false }) {
+export default function BodySilhouette({ sex = "Male", view = "front", marks = {}, onPlace, showNerves = false, nerveOnly = false }) {
   const base = sex === "Female" ? FEMALE : MALE;
   const regions = bodyRegions(sex, view);
   const nerves = showNerves ? NERVE_MARKERS.filter((n) => n.view === (view === "back" ? "back" : "front")) : [];
@@ -227,7 +227,7 @@ export default function BodySilhouette({ sex = "Male", view = "front", marks = {
             <path
               d={r.d}
               data-testid={`body-region-${slug(r.label)}`}
-              onClick={() => onPlace?.(r.label)}
+              onClick={() => { if (!nerveOnly) onPlace?.(r.label); }}
               className={`silhouette-region ${m ? "marked" : ""}`}
             />
           </g>

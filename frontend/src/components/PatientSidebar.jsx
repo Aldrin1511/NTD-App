@@ -1,7 +1,11 @@
-import { Avatar, dobFromAge } from "@/components/Capture";
+import { Avatar, dobFromAge, patientAgeLabel } from "@/components/Capture";
 import { Button } from "@/components/ui/button";
 import { fmtDate, DISEASE_SPECS } from "@/mock/specs";
 import { scabiesTreatmentSummary } from "@/components/ScabiesMedications";
+import { yawsTreatmentSummary } from "@/components/YawsMedications";
+import { lfTreatmentSummary } from "@/components/LfMedications";
+import { buruliTreatmentSummary } from "@/components/BuruliMedications";
+import { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
 import { PanelLeftClose } from "lucide-react";
 
 export default function PatientSidebar({
@@ -26,12 +30,22 @@ export default function PatientSidebar({
   const lastDiagnosis = real(lastWithDx?.diagnosis) || real(lastWithDx?.data?.diagnosis) || "—";
   const lastTreatment =
     real(lastWithTx?.treatment) ||
-    scabiesTreatmentSummary(lastWithTx?.data || {}) ||
+    (lastWithTx?.disease === "scabies"
+      ? scabiesTreatmentSummary(lastWithTx?.data || {})
+      : lastWithTx?.disease === "yaws"
+        ? yawsTreatmentSummary(lastWithTx?.data || {})
+        : lastWithTx?.disease === "lf"
+          ? lfTreatmentSummary(lastWithTx?.data || {})
+          : lastWithTx?.disease === "buruli"
+            ? buruliTreatmentSummary(lastWithTx?.data || {})
+            : lastWithTx?.disease === "leprosy"
+              ? leprosyTreatmentSummary(lastWithTx?.data || {})
+              : "") ||
     [...(lastWithTx?.data?.topical || []), ...(lastWithTx?.data?.oral || [])].join(" + ") ||
     "—";
-  const diseaseNames = diseases.length
-    ? diseases.map((d) => (typeof d === "string" ? DISEASE_SPECS[d]?.name || d : d.name)).filter(Boolean)
-    : (p.diseases || []).map((id) => DISEASE_SPECS[id]?.name || id);
+  const diseaseNames = diseases
+    .map((d) => (typeof d === "string" ? DISEASE_SPECS[d]?.name || d : d.name))
+    .filter(Boolean);
 
   return (
     <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start" data-testid={testid}>
@@ -40,7 +54,7 @@ export default function PatientSidebar({
           <Avatar patient={p} size="h-16 w-16" testid={`${testid}-photo`} />
           <div className="min-w-0 flex-1">
             <p className="font-head text-lg font-bold leading-tight">{p.name}</p>
-            <p className="text-xs uppercase tracking-wider text-muted-foreground">{p.id}</p>
+            <p className="text-xs text-muted-foreground">{p.id}</p>
           </div>
           {onCollapse && (
             <Button variant="ghost" size="icon" className="h-9 w-9" data-testid="lhs-collapse-btn" onClick={onCollapse}>
@@ -50,8 +64,8 @@ export default function PatientSidebar({
         </div>
         <dl className="mt-3 space-y-1.5 text-sm">
           {[
-            ["DOB", fmtDate(p.dob || dobFromAge(p.age, p.createdAt))],
-            ["Age", `${p.age}y`],
+            ["Date of Birth", fmtDate(p.dob || dobFromAge(p.age, p.createdAt))],
+            ["Age", patientAgeLabel(p)],
             ["Gender", p.gender || p.sex || "—"],
             ["Blood", p.bloodGroup || "Unknown"],
             ["Weight", `${p.weight} kg`],
@@ -61,14 +75,14 @@ export default function PatientSidebar({
             ["Consent", p.consent || "By verbal"],
           ].map(([k, v]) => (
             <div key={k} className="flex justify-between gap-3 border-b border-border pb-1 last:border-0">
-              <dt className="text-xs uppercase tracking-wider text-muted-foreground">{k}</dt>
+              <dt className="text-xs text-muted-foreground">{k}</dt>
               <dd className="text-right font-semibold">{v}</dd>
             </div>
           ))}
         </dl>
       </section>
       <section className="rounded-lg border border-border bg-white p-4" data-testid="clinical-ready-reckoner">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clinical summary</p>
+        <p className="text-xs font-semibold text-muted-foreground">Clinical summary</p>
         <p className="mt-2 text-sm">
           <b>Last diagnosis:</b> {lastDiagnosis}
         </p>

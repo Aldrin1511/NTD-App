@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Field, TextField, AreaField, SelectField, ChoiceRow, CheckGrid, AlertPanel } from "@/components/Fields";
-import { RELATIONSHIPS, CONTACT_STATUS, CONSENT, AGE_SEX_GROUPS, fmtDate } from "@/mock/specs";
+import { Field, TextField, AreaField, SelectField, ChoiceRow, CheckGrid, AlertPanel, ItemActions } from "@/components/Fields";
+import { RELATIONSHIPS, CONTACT_STATUS, CONSENT, AGE_SEX_GROUPS, fmtDate, localISODate, parseDate } from "@/mock/specs";
 import { Plus, Trash2, Check } from "lucide-react";
 import BodySilhouette from "@/components/BodySilhouette";
 import LfStageHelp from "@/components/LfStageHelp";
 import LeprosyHouseholdMonitoring from "@/components/LeprosyHouseholdMonitoring";
+import { mdtAdherenceConfig } from "@/components/LeprosyMedications";
 import {
   SensoryTestingChart,
   VmtChart,
@@ -92,7 +93,19 @@ export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sou
             />
           );
         }
-        if (f.type === "groupCount") return <GroupCount key={f.k} label={f.label} note={f.note} options={f.options} value={v || {}} onChange={set(f.k)} id={id} />;
+        if (f.type === "groupCount") {
+          const all = visible.filter((x) => x.type === "groupCount");
+          if (f.k !== all[0]?.k) return null;
+          return (
+            <HouseholdCountTable
+              key="hh-count-table"
+              questions={all}
+              data={data}
+              onChange={(k, next) => set(k)(next)}
+              prefix={prefix}
+            />
+          );
+        }
         if (f.type === "contactTable") return <ContactTable key={f.k} label={f.label} value={v || []} onChange={set(f.k)} id={id} prophylaxis={f.prophylaxis} />;
         if (f.type === "leprosyHousehold") return <LeprosyHouseholdMonitoring key={f.k} value={v || []} onChange={set(f.k)} id={id} sourcePatient={sourcePatient} />;
         if (f.type === "leprosyVmtChart") {
@@ -204,7 +217,6 @@ const RepeatChoice = ({ label, options, value, onChange, id, addLabel = "Add", d
     list[i] = withDate ? { ...entries[i], ...patch } : patch;
     onChange(list);
   };
-  const add = () => onChange([...entries, emptyLabEntry(withDate)]);
   const remove = (i) => {
     if (entries.length <= 1) return onChange([emptyLabEntry(withDate)]);
     onChange(entries.filter((_, j) => j !== i));
@@ -219,14 +231,20 @@ const RepeatChoice = ({ label, options, value, onChange, id, addLabel = "Add", d
           return (
             <div key={i} className="rounded-md border border-border bg-white p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="text-xs font-semibold text-muted-foreground">
                   Result {i + 1}
                 </p>
-                {entries.length > 1 && (
-                  <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" data-testid={`${id}-remove-${i}`} onClick={() => remove(i)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
+                <ItemActions
+                  onAdd={() => {
+                    const next = [...entries];
+                    next.splice(i + 1, 0, emptyLabEntry(withDate));
+                    onChange(next);
+                  }}
+                  addTestid={`${id}-add-${i}`}
+                  canRemove={entries.length > 1}
+                  onRemove={() => remove(i)}
+                  removeTestid={`${id}-remove-${i}`}
+                />
               </div>
               <div className="space-y-4">
                 <ChoiceRow
@@ -250,9 +268,6 @@ const RepeatChoice = ({ label, options, value, onChange, id, addLabel = "Add", d
             </div>
           );
         })}
-        <Button type="button" variant="outline" className="h-12" data-testid={`${id}-add`} onClick={add}>
-          <Plus className="mr-2 h-4 w-4" /> {addLabel}
-        </Button>
       </div>
     </Field>
   );
@@ -294,20 +309,94 @@ const Lines = ({ label, value, onChange, id, placeholder }) => {
   );
 };
 
-const GroupCount = ({ label, note, value, onChange, id, options = AGE_SEX_GROUPS }) => {
-  const groups = options?.length ? options : AGE_SEX_GROUPS;
-  const total = groups.reduce((a, g) => a + (Number(value[g]) || 0), 0);
+const parseHhGroup = (g) => {
+  const sex = /^Female/i.test(g) ? "Female" : /^Male/i.test(g) ? "Male" : "";
+  const band = /Below 15|Child/i.test(g)
+    ? "Below 15 Years"
+    : /15 Years and Above|15y\+|Adult/i.test(g)
+      ? "15 Years and Above"
+      : g;
+  return { key: g, sex, band };
+};
+
+export const HouseholdCountTable = ({ questions = [], data = {}, onChange, readOnly = false, prefix = "hh" }) => {
+  const groups = questions[0]?.options || AGE_SEX_GROUPS;
+  const parsed = groups.map(parseHhGroup);
+  const bands = [...new Set(parsed.map((p) => p.band))].sort((a, b) => {
+    const rank = (x) => (/Below 15/i.test(x) ? 0 : 1);
+    return rank(a) - rank(b);
+  });
+  const sexes = [...new Set(parsed.map((p) => p.sex).filter(Boolean))].sort((a, b) => (a === "Male" ? 0 : 1) - (b === "Male" ? 0 : 1));
+  const twoLevel = sexes.length === 2 && parsed.every((p) => p.sex);
+  const columns = twoLevel
+    ? bands.flatMap((band) => sexes.map((sex) => parsed.find((p) => p.band === band && p.sex === sex)?.key).filter(Boolean))
+    : groups;
+
+  const cellValue = (qk, g) => {
+    const raw = data[qk]?.[g];
+    if (raw === "" || raw == null) return "";
+    return raw;
+  };
+  const rowSum = (qk) => groups.reduce((a, g) => a + (Number(data[qk]?.[g]) || 0), 0);
+
   return (
-    <Field label={`${label} — total ${total}`} hint={note}>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {groups.map((g) => (
-          <div key={g} className="rounded-md border border-border p-3">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{g}</p>
-            <Input type="number" min="0" className="mt-1 h-11 bg-white" data-testid={`${id}-${slug(g)}`} value={value[g] ?? ""} onChange={(e) => onChange({ ...value, [g]: e.target.value })} />
-          </div>
-        ))}
-      </div>
-    </Field>
+    <div className="overflow-x-auto" data-testid={`${prefix}-count-table`}>
+      <table className="w-full min-w-[720px] text-left text-sm">
+        <thead>
+          {twoLevel ? (
+            <>
+              <tr className="border-b border-border text-xs text-muted-foreground">
+                <th className="py-2 pr-3 font-semibold" rowSpan={2}>Question</th>
+                {bands.map((band) => (
+                  <th key={band} colSpan={sexes.length} className="py-2 px-2 text-center font-semibold">{band}</th>
+                ))}
+                <th className="py-2 pl-3 font-semibold" rowSpan={2}>Total</th>
+              </tr>
+              <tr className="border-b border-border text-xs text-muted-foreground">
+                {bands.flatMap((band) => sexes.map((sex) => (
+                  <th key={`${band}-${sex}`} className="py-1 px-2 text-center font-semibold">{sex}</th>
+                )))}
+              </tr>
+            </>
+          ) : (
+            <tr className="border-b border-border text-xs text-muted-foreground">
+              <th className="py-2 pr-3 font-semibold">Question</th>
+              {groups.map((g) => (
+                <th key={g} className="py-2 px-2 text-center font-semibold">{g}</th>
+              ))}
+              <th className="py-2 pl-3 font-semibold">Total</th>
+            </tr>
+          )}
+        </thead>
+        <tbody>
+          {questions.map((q) => (
+            <tr key={q.k} className="border-b border-border/70 align-top">
+              <td className="py-2 pr-3">
+                <span className="font-medium">{q.label}</span>
+                {q.note ? <p className="mt-1 text-[11px] font-normal leading-snug text-muted-foreground">{q.note}</p> : null}
+              </td>
+              {columns.map((g) => (
+                <td key={`${q.k}-${g}`} className="py-2 px-2 text-center">
+                  {readOnly ? (
+                    <span className="font-medium">{cellValue(q.k, g) === "" ? "—" : cellValue(q.k, g)}</span>
+                  ) : (
+                    <Input
+                      type="number"
+                      min="0"
+                      className="mx-auto h-11 w-[4.5rem] bg-white text-center text-base"
+                      data-testid={`${prefix}-${slug(q.k)}-${slug(g)}`}
+                      value={cellValue(q.k, g)}
+                      onChange={(e) => onChange?.(q.k, { ...(data[q.k] || {}), [g]: e.target.value })}
+                    />
+                  )}
+                </td>
+              ))}
+              <td className="py-2 pl-3 font-semibold">{rowSum(q.k)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 };
 
@@ -348,12 +437,14 @@ const ContactTable = ({ label, value, onChange, id, prophylaxis = ["None"] }) =>
   );
 };
 
+export const NERVE_FINDING_CODES = ["G", "H", "I"];
+
 export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
   const [code, setCode] = useState(spec.bodyChart.codes[0][0]);
   const bodySex = sex === "Female" ? "Female" : "Male";
   const per = spec.bodyChart.perLesion;
   const views = spec.bodyChart.views || ["front"];
-  const showNerves = Boolean(spec.bodyChart.showNerves);
+  const nerveMode = Boolean(spec.bodyChart.showNerves) && NERVE_FINDING_CODES.includes(code);
   const defaultExtra = per?.default || (per ? per.options[0] : undefined);
 
   const place = (view) => (label) => {
@@ -395,14 +486,14 @@ export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
       <div className={`grid gap-4 ${views.length > 1 ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"}`}>
         {views.map((v) => (
           <div key={v} className="rounded-lg border border-border bg-muted/30 p-3" data-testid={`body-view-panel-${v}`}>
-            <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground">{v} view</p>
-            <BodySilhouette sex={bodySex} view={v} marks={marks} onPlace={place(v)} showNerves={showNerves} />
+            <p className="mb-2 text-center text-xs font-semibold text-muted-foreground">{v} view</p>
+            <BodySilhouette sex={bodySex} view={v} marks={marks} onPlace={place(v)} showNerves={nerveMode} nerveOnly={nerveMode} />
           </div>
         ))}
       </div>
       <p className="text-center text-xs text-muted-foreground">
         Hover a body section to highlight it · click to tag <b>{code}</b> · click again to clear
-        {showNerves ? " · yellow markers are peripheral nerves" : ""}
+        {nerveMode ? " · yellow markers are peripheral nerves — tag G, H or I on a nerve only" : ""}
         {per ? ` · set ${per.label || "details"} on each finding` : ""}
       </p>
 
@@ -414,11 +505,11 @@ export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
             {entries.map(([k, m]) => (
               <li key={k} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-white p-3 text-sm">
                 <span className="font-semibold">{m.region}</span>
-                <span className="text-xs uppercase tracking-wider text-muted-foreground">{m.view}</span>
+                <span className="text-xs text-muted-foreground">{m.view}</span>
                 <span className="rounded bg-secondary px-2 py-0.5 text-xs font-bold text-primary">{m.code} · {m.label}</span>
                 {per && (
                   <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{per.label}</span>
+                    <span className="text-xs font-semibold text-muted-foreground">{per.label}</span>
                     {per.options.map((o) => (
                       <button key={o} type="button" data-testid={`per-${slug(k)}-${slug(o)}`} onClick={() => onChange({ ...marks, [k]: { ...m, extra: o } })}
                         className={`h-9 rounded-md border px-2 text-xs font-semibold ${(m.extra || defaultExtra) === o ? "border-primary bg-primary text-white" : "border-border bg-white"}`}>{o}</button>
@@ -467,7 +558,6 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male" }) => {
     const next = rounds.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
     onChange(next);
   };
-  const add = () => onChange([...rounds, emptyExamRound()]);
   const remove = (i) => {
     if (rounds.length <= 1) return onChange([emptyExamRound()]);
     onChange(rounds.filter((_, j) => j !== i));
@@ -479,11 +569,17 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male" }) => {
         <div key={i} className="space-y-4 rounded-lg border border-border bg-white p-4" data-testid={`exam-round-${i}`}>
           <div className="flex items-center justify-between gap-2">
             <h4 className="font-head text-base font-semibold tracking-tight">Assessment {i + 1}</h4>
-            {rounds.length > 1 && (
-              <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" data-testid={`exam-round-remove-${i}`} onClick={() => remove(i)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+            <ItemActions
+              onAdd={() => {
+                const next = [...rounds];
+                next.splice(i + 1, 0, emptyExamRound());
+                onChange(next);
+              }}
+              addTestid={`exam-round-add-${i}`}
+              canRemove={rounds.length > 1}
+              onRemove={() => remove(i)}
+              removeTestid={`exam-round-remove-${i}`}
+            />
           </div>
           <DiseaseBodyChart
             spec={spec}
@@ -510,9 +606,6 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male" }) => {
           )}
         </div>
       ))}
-      <Button type="button" variant="outline" className="h-12" data-testid="exam-round-add" onClick={add}>
-        <Plus className="mr-2 h-4 w-4" /> Add assessment
-      </Button>
     </div>
   );
 };
@@ -523,7 +616,7 @@ export const LeprosyExamSummary = ({ classification, patches, nerves, scores, on
     <div className="space-y-4 rounded-lg border border-primary/30 bg-secondary/30 p-4" data-testid="leprosy-exam-summary">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Classification (from examination)</p>
+          <p className="text-xs font-semibold text-muted-foreground">Classification (from examination)</p>
           <p className="mt-1 font-head text-xl font-bold tracking-tight" data-testid="leprosy-classification">{classification}</p>
           <p className="mt-1 text-sm text-muted-foreground" data-testid="leprosy-counts">
             Patches: <b>{patches}</b> · Nerves affected: <b>{nerves}</b>
@@ -537,10 +630,10 @@ export const LeprosyExamSummary = ({ classification, patches, nerves, scores, on
       </div>
 
       <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">EHF disability table</p>
+        <p className="mb-2 text-xs font-semibold text-muted-foreground">EHF disability table</p>
         <div className="overflow-x-auto rounded-md border border-border bg-white">
           <table className="w-full text-sm" data-testid="ehf-table">
-            <thead className="bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
+            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
               <tr>
                 <th className="p-3">Site</th>
                 <th className="p-3">Right (0–2)</th>
@@ -577,9 +670,259 @@ export const LeprosyExamSummary = ({ classification, patches, nerves, scores, on
   );
 };
 
-export const AdherenceGrid = ({ spec, value = {}, onChange, startDate, onRestart }) => {
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const cycleAdherence = (st) => (st === true ? false : st === false ? undefined : true);
+
+const normalizeLeprosyAdherence = (value, diagnosis, fallbackStart) => {
+  const cfg = mdtAdherenceConfig(diagnosis);
+  if (value?.lines && Array.isArray(value.lines) && value.lines.length) {
+    return {
+      lines: value.lines.map((line) => ({
+        ...line,
+        count: line.count || cfg.checkboxMonths,
+        regimen: line.regimen || cfg.regimen,
+        months: line.months || {},
+        startDate: line.startDate || fallbackStart || localISODate(),
+      })),
+    };
+  }
+  // Migrate legacy flat { 0: true, count: 12 }
+  if (value && (value.count != null || Object.keys(value).some((k) => /^\d+$/.test(k)))) {
+    const months = {};
+    Object.keys(value).forEach((k) => {
+      if (/^\d+$/.test(k)) months[k] = value[k];
+    });
+    return {
+      lines: [
+        {
+          id: value.id || "mdt-legacy",
+          startDate: fallbackStart || localISODate(),
+          regimen: cfg.regimen || "MB",
+          count: Number(value.count) || cfg.checkboxMonths,
+          months,
+        },
+      ],
+    };
+  }
+  return { lines: [] };
+};
+
+const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readOnly = false }) => {
+  const cfg = mdtAdherenceConfig(diagnosis);
+  const normalized = normalizeLeprosyAdherence(value, diagnosis, startDate);
+  const lines = normalized.lines;
+
+  useEffect(() => {
+    if (readOnly) return;
+    if (value?.lines?.length) {
+      // Keep regimen/count in sync when diagnosis flips on the latest line if still empty
+      const latest = value.lines[value.lines.length - 1];
+      if (latest && (!latest.regimen || latest.regimen !== cfg.regimen) && Object.keys(latest.months || {}).length === 0) {
+        onChange({
+          lines: value.lines.map((l, i) =>
+            i === value.lines.length - 1
+              ? { ...l, regimen: cfg.regimen, count: cfg.checkboxMonths }
+              : l,
+          ),
+        });
+      }
+      return;
+    }
+    if (value && (value.count != null || Object.keys(value).some((k) => /^\d+$/.test(k)))) {
+      onChange(normalizeLeprosyAdherence(value, diagnosis, startDate));
+      return;
+    }
+    onChange({
+      lines: [
+        {
+          id: `mdt-${Date.now()}`,
+          startDate: startDate || localISODate(),
+          regimen: cfg.regimen,
+          count: cfg.checkboxMonths,
+          months: {},
+        },
+      ],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg.regimen, diagnosis, readOnly]);
+
+  const commit = (nextLines) => onChange({ lines: nextLines });
+
+  const updateLine = (lineId, patch) => {
+    commit(lines.map((l) => (l.id === lineId ? { ...l, ...patch } : l)));
+  };
+
+  const setMonth = (lineId, i, next) => {
+    const line = lines.find((l) => l.id === lineId);
+    if (!line) return;
+    const months = { ...(line.months || {}) };
+    if (next === undefined) delete months[i];
+    else months[i] = next;
+    updateLine(lineId, { months });
+  };
+
+  const restart = (line) => {
+    const missed = Object.values(line.months || {}).filter((v) => v === false).length;
+    const nextLine = {
+      id: `mdt-${Date.now()}`,
+      startDate: localISODate(),
+      regimen: cfg.regimen || line.regimen,
+      count: cfg.checkboxMonths,
+      months: {},
+      restartedFrom: line.id,
+      restartedAt: localISODate(),
+    };
+    commit([...lines, nextLine]);
+    toast.success(
+      missed
+        ? `New MDT adherence line started (${missed} months not taken retained above)`
+        : "New MDT adherence line started — previous line retained",
+    );
+  };
+
+  if (!cfg.regimen && !lines.length) {
+    return (
+      <AlertPanel level="info" title="MDT adherence" testid="mdt-adherence-need-dx">
+        Select a PB or MB diagnosis to generate the month-wise MDT supply schedule (PB: 6 months / 9 checkboxes; MB: 12 months / 18 checkboxes).
+      </AlertPanel>
+    );
+  }
+
+  const displayLines = (!lines.length && readOnly && cfg.regimen)
+    ? [{
+        id: "mdt-readonly",
+        startDate: startDate || "",
+        regimen: cfg.regimen,
+        count: cfg.checkboxMonths,
+        months: {},
+      }]
+    : lines;
+
+  if (!displayLines.length) {
+    return <p className="text-sm text-muted-foreground">Preparing MDT adherence schedule…</p>;
+  }
+
+  return (
+    <div className="space-y-5" data-testid="leprosy-mdt-adherence">
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground">Drug adherence — MDT</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {cfg.regimen ? `${cfg.regimen} course ${cfg.courseMonths} months · showing ${cfg.checkboxMonths} month checkboxes.` : "MDT month-wise drug adherence."}
+          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. Restart is highlighted after more than ${cfg.restartMissed} months not taken.`}
+        </p>
+      </div>
+
+      {displayLines.map((line, lineIdx) => {
+        const lineCfg = mdtAdherenceConfig(
+          line.regimen === "PB" ? "Paucibacillary (PB)" : line.regimen === "MB" ? "Multibacillary (MB)" : diagnosis,
+        );
+        const count = Number(line.count || lineCfg.checkboxMonths);
+        const start = parseDate(line.startDate) || new Date();
+        const missed = Object.values(line.months || {}).filter((v) => v === false).length;
+        const taken = Object.values(line.months || {}).filter((v) => v === true).length;
+        const highlightRestart = missed > lineCfg.restartMissed;
+        const isLatest = lineIdx === displayLines.length - 1;
+
+        return (
+          <div
+            key={line.id}
+            className={`rounded-lg border p-4 ${isLatest ? "border-primary/40 bg-white" : "border-border bg-muted/20"}`}
+            data-testid={`mdt-adherence-line-${lineIdx}`}
+          >
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-2">
+                <p className="text-sm font-semibold">
+                  {isLatest ? "Current regimen" : `Previous regimen #${lineIdx + 1}`}
+                  {line.regimen ? ` · ${line.regimen}` : ""}
+                  {line.restartedFrom ? " · restarted" : ""}
+                </p>
+                <Field label="Regimen start date">
+                  <Input
+                    type="date"
+                    className="h-11 max-w-xs bg-white text-base"
+                    data-testid={`mdt-start-${lineIdx}`}
+                    value={line.startDate || ""}
+                    onChange={(e) => updateLine(line.id, { startDate: e.target.value })}
+                    disabled={readOnly || !isLatest}
+                    readOnly={readOnly}
+                  />
+                </Field>
+                <p className="text-xs text-muted-foreground">
+                  Start {fmtDate(line.startDate) || "—"} · {taken} taken · {missed} not taken
+                </p>
+              </div>
+              {isLatest && !readOnly && (
+                <Button
+                  type="button"
+                  variant={highlightRestart ? "default" : "outline"}
+                  className={`h-11 ${highlightRestart ? "ring-2 ring-amber-400 ring-offset-2" : ""}`}
+                  data-testid="adherence-restart"
+                  onClick={() => restart(line)}
+                >
+                  Restart{highlightRestart ? " (recommended)" : ""}
+                </Button>
+              )}
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: count }, (_, i) => {
+                const d = new Date(start);
+                d.setMonth(d.getMonth() + i);
+                const monthName = `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+                const st = line.months?.[i];
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    data-testid={`adherence-${lineIdx}-${i}`}
+                    onClick={readOnly ? undefined : () => setMonth(line.id, i, cycleAdherence(st))}
+                    disabled={readOnly}
+                    className={`flex min-h-12 items-center gap-2 rounded-md border px-3 text-left text-sm font-semibold ${
+                      st === true
+                        ? "border-green-500 bg-green-50 text-green-800"
+                        : st === false
+                          ? "border-red-400 bg-red-50 text-red-800"
+                          : "border-border bg-white"
+                    } ${readOnly ? "cursor-default disabled:opacity-100" : ""}`}
+                  >
+                    {st === true ? <Check className="h-4 w-4" /> : <span className="h-4 w-4 rounded border border-input" />}
+                    <span className="flex-1">
+                      {monthName}
+                      <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">
+                        Month {i + 1}
+                        {i < lineCfg.courseMonths ? "" : " · extension"}
+                      </span>
+                    </span>
+                    <span className="text-[10px]">{st === true ? "Taken" : st === false ? "Not taken" : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+export const AdherenceGrid = ({ spec, value = {}, onChange, startDate, onRestart, diagnosis, readOnly = false }) => {
   const cfg = spec.adherence;
-  const start = startDate ? new Date(startDate) : new Date();
+  if (!cfg) return null;
+
+  if (spec.id === "leprosy" || cfg.mdt) {
+    return (
+      <LeprosyMdtAdherence
+        value={value}
+        onChange={onChange}
+        startDate={startDate}
+        diagnosis={diagnosis}
+        readOnly={readOnly}
+      />
+    );
+  }
+
+  const start = startDate ? parseDate(startDate) || new Date() : new Date();
   const cells = Array.from({ length: Number(value.count || cfg.count) }, (_, i) => {
     const d = new Date(start);
     cfg.unit === "week" ? d.setDate(d.getDate() + i * 7) : d.setMonth(d.getMonth() + i);
@@ -594,27 +937,30 @@ export const AdherenceGrid = ({ spec, value = {}, onChange, startDate, onRestart
           const st = value[c.i];
           return (
             <button key={c.i} type="button" data-testid={`adherence-${c.i}`}
-              onClick={() => onChange({ ...value, [c.i]: st === true ? false : st === false ? undefined : true })}
+              onClick={readOnly ? undefined : () => onChange({ ...value, [c.i]: cycleAdherence(st) })}
+              disabled={readOnly}
               className={`flex min-h-12 items-center gap-2 rounded-md border px-3 text-left text-sm font-semibold ${
-                st === true ? "border-green-500 bg-green-50 text-green-800" : st === false ? "border-red-400 bg-red-50 text-red-800" : "border-border bg-white"}`}>
+                st === true ? "border-green-500 bg-green-50 text-green-800" : st === false ? "border-red-400 bg-red-50 text-red-800" : "border-border bg-white"} ${readOnly ? "cursor-default disabled:opacity-100" : ""}`}>
               {st === true ? <Check className="h-4 w-4" /> : <span className="h-4 w-4 rounded border border-input" />}
               {c.label}
-              <span className="ml-auto text-[10px] uppercase">{st === true ? "taken" : st === false ? "not taken" : ""}</span>
+              <span className="ml-auto text-[10px]">{st === true ? "Taken" : st === false ? "Not taken" : ""}</span>
             </button>
           );
         })}
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="h-11" data-testid="adherence-extend" onClick={() => onChange({ ...value, count: Number(value.count || cfg.count) + (cfg.unit === "week" ? 4 : 3) })}>
-          Extend schedule
-        </Button>
-        {cfg.restart && (
-          <Button type="button" variant={missed > 3 ? "default" : "outline"} className="h-11" data-testid="adherence-restart"
-            onClick={() => { onRestart?.(); toast.success("New adherence line started — previous line retained"); }}>
-            Restart regimen{missed > 3 ? " (recommended)" : ""}
+      {!readOnly && (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" className="h-11" data-testid="adherence-extend" onClick={() => onChange({ ...value, count: Number(value.count || cfg.count) + (cfg.unit === "week" ? 4 : 3) })}>
+            Extend schedule
           </Button>
-        )}
-      </div>
+          {cfg.restart && (
+            <Button type="button" variant={missed > 3 ? "default" : "outline"} className="h-11" data-testid="adherence-restart"
+              onClick={() => { onRestart?.(); toast.success("New adherence line started — previous line retained"); }}>
+              Restart regimen{missed > 3 ? " (recommended)" : ""}
+            </Button>
+          )}
+        </div>
+      )}
     </Field>
   );
 };

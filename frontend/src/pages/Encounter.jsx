@@ -7,19 +7,32 @@ import { Progress } from "@/components/ui/progress";
 import PatientSidebar from "@/components/PatientSidebar";
 import StatusChips, { PendingSyncChip } from "@/components/StatusChips";
 import { FormRenderer, DiseaseBodyChart, AdherenceGrid, RepeatableBodyExam, normalizeExamRounds, LeprosyExamSummary } from "@/components/FormRenderer";
-import { AreaField, ChoiceRow, CheckGrid, AlertPanel, Field } from "@/components/Fields";
+import { AreaField, ChoiceRow, CheckGrid, AlertPanel, Field, ItemActions, withDrugCourse } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
 import LeprosyReaction from "@/components/LeprosyReaction";
-import ScabiesMedications, { scabiesTreatmentSummary } from "@/components/ScabiesMedications";
-import { DISEASE_SPECS, SPEC_LIST, leprosyScores, leprosyClass, yawsClass } from "@/mock/specs";
+import ScabiesMedications, { scabiesTreatmentSummary, SCABIES_DRUGS, ageInMonths } from "@/components/ScabiesMedications";
+import YawsMedications, { yawsTreatmentSummary } from "@/components/YawsMedications";
+import LfMedications, { lfTreatmentSummary } from "@/components/LfMedications";
+import BuruliMedications, { buruliTreatmentSummary } from "@/components/BuruliMedications";
+import LeprosyMedications, { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
+import { DISEASE_SPECS, assessmentSpecs, leprosyScores, leprosyClass, yawsClass, resolveEpisodeId, isEpisodeClosed } from "@/mock/specs";
+import { changedSectionKeys } from "@/sectionDiff";
+import { applyMatchingRegimens, matchingRegimens, formatDosePhysical } from "@/lib/medications";
+import { RegimenBanner, AddDrugSelect, ExtraSelectedDrugs, addCatalogueDrug } from "@/components/MedicationShared";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, PanelLeft, ChevronsDownUp, ChevronsUpDown, CircleHelp, Stethoscope, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, PanelLeft, ChevronsDownUp, ChevronsUpDown, CircleHelp, Stethoscope } from "lucide-react";
 
 const empty = {
   caseDetails: {}, history: {}, marks: {}, assessment: {}, examRounds: [], photos: [], lab: {}, diagnosis: "",
   topical: [], oral: [], topicalAntibiotics: [], oralAntibiotics: [], ivermectinTabletMg: 3, sulphurStrength: "5%",
+  azithromycinTabletMg: 500,
+  rifampicinTabletMg: 300, clarithromycinTabletMg: 500,
   adherence: {}, household: {}, reactions: [], notes: [""], outcome: "Open", recommendations: [],
+  medCourses: {},
+  regimenNames: [],
+  regimenIds: [],
+  regimenAppliedKey: "",
 };
 
 const normalizeNotes = (notes) => {
@@ -35,7 +48,11 @@ const VisitNotes = ({ value, onChange }) => {
     next[i] = text;
     onChange(next);
   };
-  const add = () => onChange([...entries, ""]);
+  const addAfter = (i) => {
+    const next = [...entries];
+    next.splice(i + 1, 0, "");
+    onChange(next);
+  };
   const remove = (i) => {
     if (entries.length <= 1) return onChange([""]);
     onChange(entries.filter((_, j) => j !== i));
@@ -46,14 +63,16 @@ const VisitNotes = ({ value, onChange }) => {
       {entries.map((note, i) => (
         <div key={i} className="rounded-md border border-border bg-white p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="text-xs font-semibold text-muted-foreground">
               Clinical note {i + 1}
             </p>
-            {entries.length > 1 && (
-              <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" data-testid={`visit-notes-remove-${i}`} onClick={() => remove(i)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+            <ItemActions
+              onAdd={() => addAfter(i)}
+              addTestid={`visit-notes-add-${i}`}
+              canRemove={entries.length > 1}
+              onRemove={() => remove(i)}
+              removeTestid={`visit-notes-remove-${i}`}
+            />
           </div>
           <AreaField
             label=""
@@ -64,11 +83,129 @@ const VisitNotes = ({ value, onChange }) => {
           />
         </div>
       ))}
-      <Button type="button" variant="outline" className="h-12" data-testid="visit-notes-add" onClick={add}>
-        <Plus className="mr-2 h-4 w-4" /> Add note
-      </Button>
     </div>
   );
+};
+
+const cloneData = (v) => {
+  try {
+    return JSON.parse(JSON.stringify(v));
+  } catch {
+    return v;
+  }
+};
+
+const latestOpenEncounter = (encounters, patientId, disease) => {
+  const latest = (encounters || [])
+    .filter((e) => e.patientId === patientId && e.disease === disease)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  if (!latest) return null;
+  if (isEpisodeClosed(latest.outcome || latest.data?.outcome)) return null;
+  return latest;
+};
+
+const applyLoadedEncounter = (source, disease) => {
+  const cloned = cloneData(source || {});
+  const base = { ...empty, ...cloned };
+  ["topical", "oral", "topicalAntibiotics", "oralAntibiotics", "photos", "recommendations", "reactions", "examRounds", "notes"].forEach((k) => {
+    if (base[k] == null) base[k] = cloneData(empty[k]);
+  });
+  if (!base.lab || typeof base.lab !== "object") base.lab = {};
+  if (!base.history || typeof base.history !== "object") base.history = {};
+  if (!base.caseDetails || typeof base.caseDetails !== "object") base.caseDetails = {};
+  if (!base.household || typeof base.household !== "object") base.household = {};
+  if (!base.adherence || typeof base.adherence !== "object") base.adherence = {};
+  if (!Array.isArray(base.topical)) base.topical = [];
+  if (!Array.isArray(base.oral)) base.oral = [];
+  base.notes = normalizeNotes(base.notes);
+  base.medCourses = base.medCourses && typeof base.medCourses === "object" ? base.medCourses : {};
+  const hasPriorMeds = (cloned.topical || []).length || (cloned.oral || []).length || cloned.regimenAppliedKey;
+  base.regimenAppliedKey = cloned.regimenAppliedKey || (hasPriorMeds ? "loaded" : "");
+  base.regimenNames = Array.isArray(cloned.regimenNames) ? cloned.regimenNames : [];
+  base.regimenIds = Array.isArray(cloned.regimenIds) ? cloned.regimenIds : [];
+  const spec = DISEASE_SPECS[disease];
+  if (spec?.repeatExam || base.examRounds?.length) {
+    base.examRounds = normalizeExamRounds(base);
+    if (disease === "leprosy" && !base.examRounds[0]?.assessment && base.assessment) {
+      base.examRounds = [{ ...base.examRounds[0], assessment: base.assessment, marks: base.marks || base.examRounds[0].marks }];
+    }
+  }
+  if ((disease === "scabies" || disease === "yaws" || disease === "lf" || disease === "buruli" || disease === "leprosy") && (!base.outcome || base.outcome === "Open")) {
+    base.outcome = "Active";
+  }
+  if (disease === "scabies") {
+    const rename = {
+      "Permethrin 5% cream (first-line)": SCABIES_DRUGS.permethrin,
+      "Permethrin 5% cream": SCABIES_DRUGS.permethrin,
+      "Permethrin 5% Cream": SCABIES_DRUGS.permethrin,
+    };
+    if (Array.isArray(base.topical)) {
+      base.topical = base.topical.map((n) => rename[n] || n);
+    }
+    if (Array.isArray(base.oral)) {
+      base.oral = base.oral.map((n) => (String(n).toLowerCase().includes("ivermectin") ? SCABIES_DRUGS.ivermectin : n));
+    }
+    if (base.diagnosis === "Clinical scabies") base.diagnosis = "Confirmed Scabies";
+  }
+  if (disease === "yaws" && Array.isArray(base.oral)) {
+    const rename = {
+      "Tab Azithromycin 500mg": "Tab Azithromycin 500mg (30mg per Kg)",
+      "Oral antibiotic": null,
+      "Topical antibiotic": null,
+    };
+    base.oral = base.oral
+      .map((n) => (Object.prototype.hasOwnProperty.call(rename, n) ? rename[n] : n))
+      .filter(Boolean);
+    if (Array.isArray(base.topical)) {
+      base.topical = base.topical.filter((n) => n !== "Topical antibiotic");
+    }
+  }
+  if (disease === "lf") {
+    if (Array.isArray(base.oral)) {
+      const rename = {
+        "Tab Ivermectin 3mg": "Tab Ivermectin (0.2 mg/kg)",
+        "Tab Albendazole": "Tab Albendazole 200mg",
+        "Tab DEC 50mg": "Tab DEC 100mg (6 mg/kg)",
+      };
+      base.oral = base.oral.map((n) => rename[n] || n);
+    }
+    if (Array.isArray(base.topical)) {
+      const rename = {
+        "Dressing material": "Dressing Material (Compression Bandage / Wound Care)",
+        "Self-care kit": "Self care kit",
+      };
+      base.topical = base.topical.map((n) => rename[n] || n);
+    }
+    if (Array.isArray(base.recommendations)) {
+      const rename = {
+        "Referred for Surgery": "Surgery for Hydrocele",
+      };
+      base.recommendations = base.recommendations.map((n) => rename[n] || n);
+    }
+  }
+  if (disease === "buruli" && Array.isArray(base.oral)) {
+    const rename = {
+      "Tab Rifampicin 300mg": "Tab Rifampicin 300mg (10mg per Kg)",
+      "Tab Clarithromycin 500mg": "Tab Clarithromycin 500mg (7.5mg per kg)",
+    };
+    base.oral = base.oral.map((n) => rename[n] || n);
+    if (base.rifampicinTabletMg == null) base.rifampicinTabletMg = 300;
+    if (base.clarithromycinTabletMg == null) base.clarithromycinTabletMg = 500;
+  }
+  if (disease === "leprosy" && Array.isArray(base.oral)) {
+    const hadMdtParts = base.oral.some((n) =>
+      /dapsone|rifampicin|clofazimine|mdt/i.test(String(n)) && !/prednisolone|sdr-pep/i.test(String(n)),
+    );
+    const keep = base.oral.filter((n) => /prednisolone/i.test(String(n)) || /mdt blister/i.test(String(n)));
+    const next = [...keep];
+    if (hadMdtParts && !next.some((n) => /mdt blister/i.test(String(n)))) {
+      next.push("Multi-Drug Therapy (MDT) Blister pack");
+    }
+    base.oral = [...new Set(next.map((n) =>
+      /prednisolone/i.test(String(n)) ? "Tab Prednisolone 5mg" : n,
+    ))];
+  }
+  return base;
 };
 
 const hasItchingComplaint = (symptoms = []) =>
@@ -131,35 +268,44 @@ export default function Encounter() {
   const { id, diseaseId } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, suspects, saveEncounter, user, addDisease } = useStore();
+  const { patients, encounters, suspects, saveEncounter, user, addDisease, settings, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.id === params.get("enc"));
   const spec = DISEASE_SPECS[existing?.disease || diseaseId] || DISEASE_SPECS.scabies;
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
-  const myDiseases = SPEC_LIST.filter((s) => (p?.diseases || []).includes(s.id));
+  const myDiseases = useMemo(() => {
+    const fromScreening = assessmentSpecs(id, { suspects, encounters: patientEncs });
+    if (fromScreening.some((d) => d.id === spec.id)) return fromScreening;
+    return spec.id ? [spec, ...fromScreening] : fromScreening;
+  }, [id, suspects, patientEncs, spec]);
 
   const [d, setD] = useState(() => {
-    const base = { ...empty, ...(existing?.data || {}) };
-    base.notes = normalizeNotes(base.notes);
-    if ((existing?.disease || diseaseId) === "yaws" || (existing?.disease || diseaseId) === "lf" || (existing?.disease || diseaseId) === "buruli" || (existing?.disease || diseaseId) === "leprosy" || base.examRounds?.length) {
-      base.examRounds = normalizeExamRounds(base);
-      if ((existing?.disease || diseaseId) === "leprosy" && !base.examRounds[0]?.assessment && base.assessment) {
-        base.examRounds = [{ ...base.examRounds[0], assessment: base.assessment, marks: base.marks || base.examRounds[0].marks }];
-      }
-    }
     const disease = existing?.disease || diseaseId;
-    if ((disease === "scabies" || disease === "yaws" || disease === "lf" || disease === "buruli" || disease === "leprosy") && (!base.outcome || base.outcome === "Open")) {
-      base.outcome = "Active";
+    const prior = !existing ? latestOpenEncounter(encounters, id, disease) : null;
+    const source = existing?.data || (prior ? prior.data : {});
+    const loaded = applyLoadedEncounter(source, disease);
+    const fromEnc = existing?.diagnosis || prior?.diagnosis || "";
+    if (!loaded.diagnosis && fromEnc) {
+      loaded.diagnosis = fromEnc === "Clinical scabies" ? "Confirmed Scabies" : fromEnc;
     }
-    return base;
+    return loaded;
   });
-  const [open, setOpen] = useState({ 1: true });
+  const requestedSection = Number(params.get("section")) || 0;
+  const [open, setOpen] = useState(() => (requestedSection ? { [requestedSection]: true } : { 1: true }));
   const [lhs, setLhs] = useState(true);
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "Encounter";
   const referral = params.get("ref") || existing?.referral || "No";
   const set = (k) => (v) => setD((s) => ({ ...s, [k]: v }));
+
+  useEffect(() => {
+    if (!requestedSection) return undefined;
+    const timer = window.setTimeout(() => {
+      document.querySelector(`[data-testid="section-${requestedSection}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [requestedSection]);
 
   useEffect(() => {
     if (spec.id !== "scabies") return;
@@ -219,13 +365,58 @@ export default function Encounter() {
     return a;
   }, [d, spec, scores, chartMarks, examRounds]);
 
+  const ageMonths = ageInMonths(p || {});
+  const ageYears = ageMonths != null ? ageMonths / 12 : Number(p?.age);
+
+  useEffect(() => {
+    const catalogue = settings.drugs || [];
+    const regimens = settings.regimens || [];
+    setD((s) => {
+      const matched = matchingRegimens({
+        regimens,
+        disease: spec.id,
+        diagnosis,
+        ageYears,
+        weight,
+      });
+      const key = matched.map((r) => r.id).sort().join("|");
+      const names = matched.map((r) => r.name);
+      const ids = matched.map((r) => r.id);
+      if (s.regimenAppliedKey === "loaded") {
+        return { ...s, regimenAppliedKey: key, regimenNames: names, regimenIds: ids };
+      }
+      if (s.regimenAppliedKey === key) {
+        if ((s.regimenNames || []).join("|") === names.join("|")) return s;
+        return { ...s, regimenNames: names, regimenIds: ids };
+      }
+      const patch = applyMatchingRegimens({
+        regimens,
+        catalogue,
+        disease: spec.id,
+        diagnosis,
+        ageYears,
+        weight,
+        topical: s.topical,
+        oral: s.oral,
+        appliedKey: s.regimenAppliedKey,
+      });
+      if (!patch) return { ...s, regimenNames: names, regimenIds: ids, regimenAppliedKey: key };
+      let medCourses = s.medCourses || {};
+      (patch.added || []).forEach((name) => {
+        medCourses = withDrugCourse(medCourses, name, true);
+      });
+      const { added: _added, ...rest } = patch;
+      return { ...s, ...rest, medCourses };
+    });
+  }, [diagnosis, weight, ageYears, spec.id, settings.drugs, settings.regimens]);
+
   if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate("/patients")}>Back</Button></AppShell>;
 
   const oralDose = (o) => {
     if (o.fixed) return o.fixed;
     if (!o.mgPerKg || !weight) return "enter weight";
     const mg = weight * o.mgPerKg;
-    return `${mg.toFixed(1)} mg${o.tablet ? ` · ${(Math.round((mg / o.tablet) * 2) / 2)} tab(s) of ${o.tablet}mg` : ""}`;
+    return `${formatDosePhysical(mg, o.tablet ? Math.round((mg / o.tablet) * 2) / 2 : null)}`;
   };
 
   const persist = (close) => {
@@ -250,21 +441,45 @@ export default function Encounter() {
       }
     }
     saveEncounter({
-      id: existing?.id, patientId: p.id, episodeId: existing?.episodeId || p.episodeId, disease: spec.id,
+      id: existing?.id, patientId: p.id, episodeId: resolveEpisodeId({
+        existingId: existing?.episodeId,
+        disease: spec.id,
+        patientEpisodeId: p.episodeId,
+        diseaseEncounters: encounters.filter((e) => e.patientId === p.id && e.disease === spec.id),
+      }), disease: spec.id,
       facility, worker: user?.name, type: visitType, referral, status: "Complete",
       diagnosis: diagnosis || "",
-      treatment: (spec.id === "scabies" ? scabiesTreatmentSummary(d) : [...d.topical, ...d.oral].join(" + ")) || "",
+      treatment: (
+        spec.id === "scabies"
+          ? scabiesTreatmentSummary(d)
+          : spec.id === "yaws"
+            ? yawsTreatmentSummary(d)
+            : spec.id === "lf"
+              ? lfTreatmentSummary(d)
+              : spec.id === "buruli"
+                ? buruliTreatmentSummary(d)
+                : spec.id === "leprosy"
+                  ? leprosyTreatmentSummary(d)
+                  : [...d.topical, ...d.oral].join(" + ")
+      ) || "",
       outcome: outcome || "",
       data: payload,
+      ...(existing ? {
+        editedSections: [...new Set([
+          ...(existing.editedSections || []),
+          ...changedSectionKeys(existing, { ...existing, data: payload, diagnosis, outcome }),
+        ])],
+      } : {}),
     });
     setSavedAt(new Date().toLocaleTimeString());
-    if (close) { toast.success("Encounter saved · queued for cloud sync"); navigate(`/patients/${p.id}`); }
-    else toast.success("Saved to device");
+    if (close) navigate(`/patients/${p.id}`);
+    if (online) toast.success(close ? "Encounter saved" : "Saved to device");
+    else toast.success(close ? "Encounter saved · queued until you are online" : "Saved to device · queued until you are online");
   };
 
   const sections = [
-    { n: 1, title: `${spec.name} case details`, done: !!d.caseDetails.mode, body: <FormRenderer fields={spec.caseDetails} data={d.caseDetails} onChange={set("caseDetails")} prefix="case" gender={p.gender || p.sex} /> },
-    { n: 2, title: "Clinical history", done: Object.keys(d.history).length > 0, body: <FormRenderer fields={spec.history} data={d.history} onChange={set("history")} prefix="hist" /> },
+    { n: 1, title: `Case details`, done: !!d.caseDetails.mode, body: <FormRenderer fields={spec.caseDetails} data={d.caseDetails} onChange={set("caseDetails")} prefix="case" gender={p.gender || p.sex} /> },
+    { n: 2, title: `${spec.name} Clinical history`, done: Object.keys(d.history).length > 0, body: <FormRenderer fields={spec.history} data={d.history} onChange={set("history")} prefix="hist" /> },
     { n: 3, title: spec.id === "scabies" ? "Scabies Examination"
       : spec.id === "yaws" ? "Yaws Examination"
       : spec.id === "lf" ? "Lymphatic Filariasis Examination"
@@ -319,10 +534,12 @@ export default function Encounter() {
           <ChoiceRow label="Diagnosis" options={spec.diagnosis} value={d.diagnosis} onChange={set("diagnosis")} testid="diagnosis" />
         </div>
       ) },
-    { n: 6, title: "Medications / drugs",
-      done: d.topical.length + d.oral.length + (d.topicalAntibiotics || []).length + (d.oralAntibiotics || []).length > 0,
+    { n: 6, title: "Medications",
+      done: d.topical.length + d.oral.length + (d.topicalAntibiotics || []).length + (d.oralAntibiotics || []).length
+        + (spec.id === "lf" ? (d.recommendations || []).length : 0) > 0,
       body: (
         <div className="space-y-6">
+          <RegimenBanner names={d.regimenNames || []} />
           {spec.id === "scabies" ? (
             <ScabiesMedications
               topical={d.topical}
@@ -335,6 +552,46 @@ export default function Encounter() {
               caseDetails={d.caseDetails}
               history={d.history}
               weight={weight}
+              medCourses={d.medCourses || {}}
+              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+            />
+          ) : spec.id === "yaws" ? (
+            <YawsMedications
+              oral={d.oral}
+              patient={p}
+              weight={weight}
+              azithromycinTabletMg={d.azithromycinTabletMg ?? 500}
+              medCourses={d.medCourses || {}}
+              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+            />
+          ) : spec.id === "lf" ? (
+            <LfMedications
+              oral={d.oral}
+              topical={d.topical}
+              recommendations={d.recommendations || []}
+              ivermectinTabletMg={d.ivermectinTabletMg ?? 3}
+              patient={p}
+              history={d.history}
+              weight={weight}
+              medCourses={d.medCourses || {}}
+              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+            />
+          ) : spec.id === "buruli" ? (
+            <BuruliMedications
+              oral={d.oral}
+              rifampicinTabletMg={d.rifampicinTabletMg ?? 300}
+              clarithromycinTabletMg={d.clarithromycinTabletMg ?? 500}
+              weight={weight}
+              medCourses={d.medCourses || {}}
+              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+            />
+          ) : spec.id === "leprosy" ? (
+            <LeprosyMedications
+              oral={d.oral}
+              patient={p}
+              weight={weight}
+              reactions={d.reactions || []}
+              medCourses={d.medCourses || {}}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : (
@@ -358,10 +615,42 @@ export default function Encounter() {
               </Field>
             </>
           )}
-          {spec.adherence && <AdherenceGrid spec={spec} value={d.adherence} onChange={set("adherence")} startDate={d.caseDetails?.treatmentStart} onRestart={() => set("adherence")({})} />}
+          <ExtraSelectedDrugs
+            diseaseId={spec.id}
+            topical={d.topical}
+            oral={d.oral}
+            catalogue={settings.drugs || []}
+            medCourses={d.medCourses || {}}
+            onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+          />
+          <AddDrugSelect
+            catalogue={settings.drugs || []}
+            diseaseId={spec.id}
+            selected={[...d.topical, ...d.oral]}
+            onAdd={(name) => setD((s) => ({
+              ...s,
+              ...addCatalogueDrug({
+                name,
+                catalogue: settings.drugs || [],
+                topical: s.topical,
+                oral: s.oral,
+                medCourses: s.medCourses,
+              }),
+            }))}
+          />
+          {spec.adherence && (
+            <AdherenceGrid
+              spec={spec}
+              value={d.adherence}
+              onChange={set("adherence")}
+              startDate={d.caseDetails?.treatmentStart || d.adherence?.lines?.[d.adherence.lines.length - 1]?.startDate}
+              diagnosis={diagnosis}
+              onRestart={() => set("adherence")({})}
+            />
+          )}
         </div>
       ) },
-    { n: 7, title: "Household contact tracing", done: Object.keys(d.household || {}).some((k) => {
+    { n: 7, title: "Household Contact Tracing", done: Object.keys(d.household || {}).some((k) => {
       const v = d.household[k];
       if (Array.isArray(v)) return v.length > 0;
       if (v && typeof v === "object") return Object.values(v).some((n) => Number(n) > 0);
@@ -438,7 +727,7 @@ export default function Encounter() {
             )}
             <div className="min-w-0 flex-1">
               <p className="font-head text-xl font-bold tracking-tight sm:text-2xl">{spec.name} encounter</p>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground" data-testid="encounter-context">
+              <p className="text-xs text-muted-foreground" data-testid="encounter-context">
                 {facility} · {visitType} · Referral {referral}
               </p>
             </div>
@@ -449,7 +738,7 @@ export default function Encounter() {
 
           <div className="rounded-lg border border-border bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Encounter completeness</p>
+              <p className="text-xs font-semibold text-muted-foreground">Encounter completeness</p>
               <span className="text-sm font-semibold" data-testid="completeness-label">{doneCount} of {sections.length} sections captured</span>
             </div>
             <Progress value={(doneCount / sections.length) * 100} className="mt-3 h-2.5" />
@@ -495,7 +784,7 @@ export default function Encounter() {
                 </span>
                 <span className="flex-1">
                   <span className="block font-head text-lg font-semibold tracking-tight">{s.title}</span>
-                  <span className="block text-xs uppercase tracking-wider text-muted-foreground">{s.done ? "Captured" : "Not started"}</span>
+                  <span className="block text-xs text-muted-foreground">{s.done ? "Captured" : "Not started"}</span>
                 </span>
                 <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open[s.n] ? "rotate-180" : ""}`} />
               </button>

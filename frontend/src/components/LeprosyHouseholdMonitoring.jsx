@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { TextField, SelectField, ChoiceRow, CheckGrid } from "@/components/Fields";
+import { TextField, SelectField, ChoiceRow, CheckGrid, capitalizeName } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
 import { fmtDate, localISODate } from "@/mock/specs";
 import { useStore } from "@/store";
@@ -102,7 +102,7 @@ const ageGenderLine = (c) => {
   const m = c.ageM !== "" && c.ageM != null ? c.ageM : "0";
   const d = c.ageD !== "" && c.ageD != null ? c.ageD : "0";
   const g = c.gender === "Female" ? "F" : c.gender === "Others" ? "O" : "M";
-  return `${y}Y${m}M${d}D | ${g}`;
+  return `${y}y ${m}m ${d}d | ${g}`;
 };
 
 const yearsFromDob = (dob) => {
@@ -125,7 +125,7 @@ const SectionTitle = ({ children }) => (
   <h3 className="border-b border-border pb-2 font-head text-base font-bold tracking-tight">{children}</h3>
 );
 
-export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = "hh-contacts", sourcePatient = null }) {
+export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = "hh-contacts", sourcePatient = null, viewOnly = false }) {
   const { addPatient, addDisease, patients } = useStore();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState("add"); // add | edit | view
@@ -133,7 +133,7 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
   const [editIndex, setEditIndex] = useState(-1);
 
   const contacts = Array.isArray(value) ? value : [];
-  const readOnly = mode === "view";
+  const readOnly = viewOnly || mode === "view";
 
   const ageYears = useMemo(() => contactAgeYears(draft), [draft.ageY, draft.dob]);
   const ageSdr = useMemo(() => sdrForAgeYears(ageYears), [ageYears]);
@@ -246,24 +246,26 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
 
   return (
     <div className="space-y-4" data-testid={id}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="font-head text-lg font-semibold tracking-tight">Household Monitoring</p>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">
-            {contacts.length} contact{contacts.length === 1 ? "" : "s"} registered
-          </p>
+      {!viewOnly && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-head text-lg font-semibold tracking-tight">Household Monitoring</p>
+            <p className="text-xs text-muted-foreground">
+              {contacts.length} contact{contacts.length === 1 ? "" : "s"} registered
+            </p>
+          </div>
+          <Button type="button" className="h-11" data-testid={`${id}-add`} onClick={openAdd}>
+            <Plus className="mr-2 h-4 w-4" /> Add
+          </Button>
         </div>
-        <Button type="button" className="h-11" data-testid={`${id}-add`} onClick={openAdd}>
-          <Plus className="mr-2 h-4 w-4" /> Add
-        </Button>
-      </div>
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[920px] text-sm" data-testid={`${id}-table`}>
           <thead className="bg-muted">
             <tr>
               {["Name", "Relationship", "Consent", "Counselled", "Outcome", "Treatment", ""].map((h) => (
-                <th key={h || "actions"} className="p-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                <th key={h || "actions"} className="p-3 text-left text-xs font-semibold text-muted-foreground">{h}</th>
               ))}
             </tr>
           </thead>
@@ -303,15 +305,22 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
                   </td>
                   <td className="p-3">
                     <div className="flex items-center gap-1">
+                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-primary" data-testid={`${id}-add-row-${i}`} onClick={openAdd}>
+                        <Plus className="h-4 w-4" />
+                      </Button>
                       <Button type="button" variant="ghost" className="h-9 px-2 text-primary" data-testid={`${id}-view-${i}`} onClick={() => openRow(i, "view")}>
                         <Eye className="mr-1 h-4 w-4" /> View
                       </Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-primary" data-testid={`${id}-edit-${i}`} onClick={() => openRow(i, "edit")}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" data-testid={`${id}-remove-${i}`} onClick={() => remove(i)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {!viewOnly && (
+                        <>
+                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-primary" data-testid={`${id}-edit-${i}`} onClick={() => openRow(i, "edit")}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" data-testid={`${id}-remove-${i}`} onClick={() => remove(i)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -333,9 +342,9 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
               <div>
                 <p className="mb-2 text-sm font-medium">Name</p>
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <TextField label="First Name *" testid={`${id}-first`} value={draft.firstName} onChange={(e) => set("firstName")(e.target.value)} />
-                  <TextField label="Middle Name" testid={`${id}-middle`} value={draft.middleName} onChange={(e) => set("middleName")(e.target.value)} />
-                  <TextField label="Last Name *" testid={`${id}-last`} value={draft.lastName} onChange={(e) => set("lastName")(e.target.value)} />
+                  <TextField label="First Name *" testid={`${id}-first`} value={draft.firstName} onChange={(e) => set("firstName")(capitalizeName(e.target.value))} autoCapitalize="words" />
+                  <TextField label="Middle Name" testid={`${id}-middle`} value={draft.middleName} onChange={(e) => set("middleName")(capitalizeName(e.target.value))} autoCapitalize="words" />
+                  <TextField label="Last Name *" testid={`${id}-last`} value={draft.lastName} onChange={(e) => set("lastName")(capitalizeName(e.target.value))} autoCapitalize="words" />
                 </div>
               </div>
               <ChoiceRow label="Register Patient" options={["Yes", "No"]} value={draft.registerPatient} onChange={set("registerPatient")} testid={`${id}-register`} />
@@ -349,7 +358,7 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
               <div>
                 <p className="mb-2 text-sm font-medium">Age</p>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <TextField label="DOB" type="date" testid={`${id}-dob`} value={draft.dob} onChange={(e) => set("dob")(e.target.value)} />
+                  <TextField label="Date of Birth" type="date" testid={`${id}-dob`} value={draft.dob} onChange={(e) => set("dob")(e.target.value)} />
                   <div className="grid grid-cols-3 gap-2">
                     <TextField label="YY" type="number" testid={`${id}-age-y`} value={draft.ageY} onChange={(e) => set("ageY")(e.target.value)} />
                     <TextField label="MM" type="number" testid={`${id}-age-m`} value={draft.ageM} onChange={(e) => set("ageM")(e.target.value)} />

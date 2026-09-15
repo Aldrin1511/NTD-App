@@ -30,7 +30,7 @@ const Kpi = ({ label, value, sub, icon: Icon, tone = "primary", testid }) => {
   return (
     <div className="rounded-lg border border-border bg-white p-5" data-testid={testid}>
       <div className="flex items-start justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className="text-xs font-semibold text-muted-foreground">{label}</p>
         <span className={`grid h-9 w-9 place-items-center rounded-md ${tones[tone]}`}>
           <Icon className="h-4 w-4" />
         </span>

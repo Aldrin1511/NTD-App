@@ -13,7 +13,7 @@ import {
   emptyVision,
 } from "@/components/LeprosyReactionCharts";
 
-const REACTION_TYPES = [
+export const REACTION_TYPES = [
   "Reversal reaction (Type 1 reaction)",
   "ENL (Type 2 reaction)",
   "Drug reaction",
@@ -21,14 +21,14 @@ const REACTION_TYPES = [
 
 const OCCURRED = ["Before MDT", "During MDT", "After MDT"];
 
-const COLS = [
+export const REACTION_COLS = [
   { key: "type1", label: "Type 1 - Leprosy Reaction" },
   { key: "type2", label: "Type 2(ENL) - Leprosy Reaction" },
   { key: "drug", label: "Drug Reaction" },
 ];
 
 /** Grid options with Apex priority scores (1=Type1 cue, 2=ENL, 3=Drug). */
-const REACTION_GRID = [
+export const REACTION_GRID = [
   {
     category: "Skin",
     type1: [
@@ -180,7 +180,7 @@ const toggleInList = (list, item) =>
 const inferReactionType = (selections) => {
   const scores = new Set();
   REACTION_GRID.forEach((row) => {
-    COLS.forEach(({ key }) => {
+    REACTION_COLS.forEach(({ key }) => {
       (selections?.[row.category]?.[key] || []).forEach((label) => {
         const opt = (row[key] || []).find((o) => o.label === label);
         if (opt && opt.priority > 0) scores.add(opt.priority);
@@ -199,7 +199,7 @@ const inferReactionType = (selections) => {
 
 const countFindings = (selections) =>
   REACTION_GRID.reduce(
-    (n, row) => n + COLS.reduce((a, { key }) => a + (selections?.[row.category]?.[key] || []).length, 0),
+    (n, row) => n + REACTION_COLS.reduce((a, { key }) => a + (selections?.[row.category]?.[key] || []).length, 0),
     0,
   );
 
@@ -275,7 +275,7 @@ export default function LeprosyReaction({ value = [], onChange, id = "lep-reacti
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="font-head text-lg font-semibold tracking-tight">Leprosy Reaction</p>
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {rows.length} assessment{rows.length === 1 ? "" : "s"} recorded
           </p>
         </div>
@@ -289,7 +289,7 @@ export default function LeprosyReaction({ value = [], onChange, id = "lep-reacti
           <thead className="bg-muted">
             <tr>
               {["Reaction type", "Occurred", "Diagnosis date", "Findings", "Charts", ""].map((h) => (
-                <th key={h || "a"} className="p-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                <th key={h || "a"} className="p-3 text-left text-xs font-semibold text-muted-foreground">{h}</th>
               ))}
             </tr>
           </thead>
@@ -379,9 +379,9 @@ export default function LeprosyReaction({ value = [], onChange, id = "lep-reacti
               <table className="w-full min-w-[900px] text-sm" data-testid={`${id}-grid`}>
                 <thead className="bg-muted">
                   <tr>
-                    <th className="sticky left-0 z-10 bg-muted p-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reaction</th>
-                    {COLS.map((c) => (
-                      <th key={c.key} className="p-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">{c.label}</th>
+                    <th className="sticky left-0 z-10 bg-muted p-3 text-left text-xs font-semibold text-muted-foreground">Reaction</th>
+                    {REACTION_COLS.map((c) => (
+                      <th key={c.key} className="p-3 text-left text-xs font-semibold text-muted-foreground">{c.label}</th>
                     ))}
                   </tr>
                 </thead>
@@ -389,7 +389,7 @@ export default function LeprosyReaction({ value = [], onChange, id = "lep-reacti
                   {REACTION_GRID.map((row) => (
                     <tr key={row.category} className="border-t border-border align-top">
                       <td className="sticky left-0 z-10 bg-white p-3 font-semibold">{row.category}</td>
-                      {COLS.map((col) => (
+                      {REACTION_COLS.map((col) => (
                         <td key={col.key} className="p-3">
                           <div className="space-y-2">
                             {(row[col.key] || []).map((opt) => {
