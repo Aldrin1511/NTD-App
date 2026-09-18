@@ -59,7 +59,7 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
     canvas.height = video.videoHeight;
     canvas.getContext("2d").drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    onChange([...photos, dataUrl].slice(0, max));
+    onChange([dataUrl, ...photos].slice(0, max));
     toast.success("Photo captured — stored on the device until sync");
     closeCamera();
   };
@@ -68,7 +68,7 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
     const files = [...(e.target.files || [])].slice(0, max - photos.length);
     files.forEach((f) => {
       const r = new FileReader();
-      r.onload = () => onChange([...photos, r.result].slice(0, max));
+      r.onload = () => onChange([r.result, ...photos].slice(0, max));
       r.readAsDataURL(f);
     });
     if (files.length) toast.success(`${files.length} photo(s) attached — stored on the device until sync`);
@@ -381,4 +381,50 @@ export const dobFromAge = (age, refDate) => {
   const r = refDate ? new Date(refDate) : new Date();
   const d = new Date(r.getFullYear() - Number(age), r.getMonth(), r.getDate());
   return d.toISOString().slice(0, 10);
+};
+
+const localISO = (d) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const parseLocalDate = (value) => {
+  if (!value) return null;
+  const d = new Date(/T/.test(value) ? value : `${value}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/** Age as separate years / months / days from a date of birth. */
+export const ageYmdFromDob = (dob, refDate) => {
+  const birth = parseLocalDate(dob);
+  if (!birth) return { y: "", m: "", d: "" };
+  const ref = refDate ? new Date(refDate) : new Date();
+  if (birth > ref) return { y: "", m: "", d: "" };
+
+  let y = ref.getFullYear() - birth.getFullYear();
+  let m = ref.getMonth() - birth.getMonth();
+  let d = ref.getDate() - birth.getDate();
+
+  if (d < 0) {
+    m -= 1;
+    d += new Date(ref.getFullYear(), ref.getMonth(), 0).getDate();
+  }
+  if (m < 0) {
+    y -= 1;
+    m += 12;
+  }
+  if (y < 0) return { y: "", m: "", d: "" };
+  return { y: String(y), m: String(m), d: String(d) };
+};
+
+/** Date of birth from years / months / days of age, using today as the reference. */
+export const dobFromAgeYmd = ({ y = "", m = "", d = "" } = {}, refDate) => {
+  if (y === "" && m === "" && d === "") return "";
+  const years = Number(y) || 0;
+  const months = Number(m) || 0;
+  const days = Number(d) || 0;
+  const r = refDate ? new Date(refDate) : new Date();
+  const birth = new Date(r.getFullYear() - years, r.getMonth() - months, r.getDate() - days);
+  if (Number.isNaN(birth.getTime())) return "";
+  return localISO(birth);
 };

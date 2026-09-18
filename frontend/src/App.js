@@ -29,6 +29,7 @@ function Shell() {
       <Route path="/appointments" element={<Guard><Patients /></Guard>} />
 
       <Route path="/patients/new" element={<Guard><PatientNew /></Guard>} />
+      <Route path="/patients/:id/edit" element={<Guard><PatientNew /></Guard>} />
       <Route path="/patients/:id" element={<Guard><PatientRecord /></Guard>} />
       <Route path="/patients/:id/suspect" element={<Guard><SuspectScreen /></Guard>} />
       <Route path="/patients/:id/encounter/:diseaseId" element={<Guard><ScabiesEncounter /></Guard>} />

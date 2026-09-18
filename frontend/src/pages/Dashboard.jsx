@@ -127,8 +127,8 @@ export default function Dashboard() {
           <SelectField label="Clinician" options={users.map((u) => u.name)} value={f.clinician} onChange={(v) => setF({ ...f, clinician: v })} testid="filter-clinician" />
           {f.period === "Custom" && (
             <>
-              <TextField label="From" type="date" testid="filter-from" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} />
-              <TextField label="To" type="date" testid="filter-to" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} />
+              <TextField label="From" type="date" testid="filter-from" value={f.from} allowEmpty onChange={(e) => setF({ ...f, from: e.target.value })} />
+              <TextField label="To" type="date" testid="filter-to" value={f.to} allowEmpty onChange={(e) => setF({ ...f, to: e.target.value })} />
             </>
           )}
         </div>

@@ -1,3 +1,5 @@
+import { markFindings, markCodes, flattenMarks } from "@/lib/markFindings";
+
 export const SUSPECT_SYMPTOMS = [
   "Red or white skin patch",
   "Skin patch with loss of feeling",
@@ -66,9 +68,9 @@ const commonInterrogation = [
 ];
 
 const caseDetails = [
-  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "select", options: REFERRED_BY, when: ["mode", "Referral"] },
-  { k: "caseType", label: "Case type", type: "select", options: CASE_TYPES },
+  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "choice", options: REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "caseType", label: "Case type", type: "choice", options: CASE_TYPES },
   { k: "height", label: "Height (cms)", type: "number" },
   { k: "weight", label: "Weight (kgs)", type: "number" },
 ];
@@ -77,10 +79,10 @@ const SCABIES_REFERRED_BY = [...REFERRED_BY, "Others"];
 const SCABIES_CASE_TYPES = [...CASE_TYPES, "Chronic/Persistent"];
 
 const scabiesCaseDetails = [
-  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "choice", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
   { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
-  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "caseType", label: "Case type", type: "choice", options: SCABIES_CASE_TYPES },
   { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
   { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
   { k: "height", label: "Height (cms)", type: "number" },
@@ -88,10 +90,10 @@ const scabiesCaseDetails = [
 ];
 
 const yawsCaseDetails = [
-  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "choice", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
   { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
-  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "caseType", label: "Case type", type: "choice", options: SCABIES_CASE_TYPES },
   { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
   { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
   { k: "height", label: "Height (cms)", type: "number" },
@@ -99,10 +101,10 @@ const yawsCaseDetails = [
 ];
 
 const lfCaseDetails = [
-  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "choice", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
   { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
-  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "caseType", label: "Case type", type: "choice", options: SCABIES_CASE_TYPES },
   { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
   { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
   { k: "height", label: "Height (cms)", type: "number" },
@@ -110,10 +112,10 @@ const lfCaseDetails = [
 ];
 
 const buruliCaseDetails = [
-  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "choice", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
   { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
-  { k: "caseType", label: "Case type", type: "select", options: SCABIES_CASE_TYPES },
+  { k: "caseType", label: "Case type", type: "choice", options: SCABIES_CASE_TYPES },
   { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
   { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
   { k: "height", label: "Height (cms)", type: "number" },
@@ -123,10 +125,10 @@ const buruliCaseDetails = [
 const LEPROSY_CASE_TYPES = ["New", "Relapse", "Transfer in", "Chronic", "Old", "Return after default"];
 
 const leprosyCaseDetails = [
-  { k: "mode", label: "Mode of detection", type: "select", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "select", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
+  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
+  { k: "referredBy", label: "Referred by", type: "choice", options: SCABIES_REFERRED_BY, when: ["mode", "Referral"] },
   { k: "referredByOther", label: "Referred by (specify)", type: "text", whenAll: [["mode", "Referral"], ["referredBy", "Others"]] },
-  { k: "caseType", label: "Case type", type: "select", options: LEPROSY_CASE_TYPES },
+  { k: "caseType", label: "Case type", type: "choice", options: LEPROSY_CASE_TYPES },
   { k: "pregnant", label: "Are you pregnant?", type: "yesno", whenGender: "Female" },
   { k: "breastfeeding", label: "Are you breastfeeding?", type: "yesno", whenGender: "Female" },
   { k: "height", label: "Height (cms)", type: "number" },
@@ -466,13 +468,13 @@ export const DISEASE_SPECS = {
     bodyChart: {
       views: ["front"],
       codes: [
-        ["S1", "Stage 1 (Reversible Swelling) — pitting edema that subsides overnight"],
-        ["S2", "Stage 2 (Persistent swelling) — pitting edema remains, does not fully resolve with rest"],
-        ["S3", "Stage 3 (Early skin changes) — shallow folds, beginning fibrosis"],
-        ["S4", "Stage 4 (Moderate fibrosis) — skin thickening, deeper folds, early nodules"],
-        ["S5", "Stage 5 (Severe fibrosis) — papillomatosis, wart-like growths, recurrent infections"],
-        ["S6", "Stage 6 (Advanced elephantiasis) — gross enlargement, skin hardening, deformity"],
-        ["S7", "Stage 7 (End-stage elephantiasis) — extreme deformity, disability, loss of function"],
+        ["S1", "Stage 1 (Swelling is reversible overnight)"],
+        ["S2", "Stage 2 (Swelling is not reversible)"],
+        ["S3", "Stage 3 (Shallow skin folds)"],
+        ["S4", "Stage 4 (Knobs)"],
+        ["S5", "Stage 5 (Deep skin folds)"],
+        ["S6", "Stage 6 (Mossy lesions)"],
+        ["S7", "Stage 7 (Unable to care for self)"],
       ],
       perLesion: {
         k: "secondary",
@@ -695,6 +697,7 @@ export const DISEASE_SPECS = {
         ["V", "Foot drop / Wrist drop"],
       ],
       showNerves: true,
+      patchCountCodes: ["A", "B", "C", "D"],
     },
     caseDetails: leprosyCaseDetails,
     history: [
@@ -746,7 +749,7 @@ export const DISEASE_SPECS = {
       { k: "vmtChart", type: "leprosyVmtChart" },
       { k: "sensoryChart", type: "leprosySensoryChart" },
       { k: "visionChart", type: "leprosyVisionChart" },
-      { k: "patches", label: "Number of anaesthetic patches A+C (override if needed)", type: "number" },
+      { k: "patches", label: "Number of patches A–D (override if needed)", type: "number" },
       { k: "nerves", label: "Nerves affected — max(body chart, NFA) override (max 18 for NFA / 12 body)", type: "number" },
     ],
     repeatExam: true,
@@ -806,16 +809,22 @@ export const DISEASE_SPECS = {
 
 export const SPEC_LIST = Object.values(DISEASE_SPECS);
 
-/** Disease assessment tabs come from suspect screening (or a saved encounter), never from registration. */
-export const assessmentSpecs = (patientId, { suspects = [], encounters = [] } = {}) => {
+/** Disease assessment tabs come from a started encounter, never from registration or suspect screening alone. */
+export const assessmentSpecs = (patientId, { encounters = [] } = {}) => {
+  const ids = new Set();
+  for (const e of encounters) {
+    if (patientId && e.patientId && e.patientId !== patientId) continue;
+    if (e.disease && DISEASE_SPECS[e.disease]) ids.add(e.disease);
+  }
+  return SPEC_LIST.filter((d) => ids.has(d.id));
+};
+
+/** Suspected NTDs from screening — used to start an assessment, not to show disease chips. */
+export const suspectedSpecs = (patientId, { suspects = [] } = {}) => {
   const ids = new Set();
   for (const s of suspects) {
     if (patientId && s.patientId && s.patientId !== patientId) continue;
     if (s.suspect && DISEASE_SPECS[s.suspect]) ids.add(s.suspect);
-  }
-  for (const e of encounters) {
-    if (patientId && e.patientId && e.patientId !== patientId) continue;
-    if (e.disease && DISEASE_SPECS[e.disease]) ids.add(e.disease);
   }
   return SPEC_LIST.filter((d) => ids.has(d.id));
 };
@@ -900,8 +909,8 @@ export const groupDiseaseEpisodes = (encounters, diseaseId, fallbackEpisodeId) =
     .sort((a, b) => String(b.last).localeCompare(String(a.last)));
 };
 
-/** Diagnosis patches: Well defined (A) + Ill defined (C) without sensation only. */
-const DIAGNOSIS_PATCH_CODES = new Set(["A", "C"]);
+/** Diagnosis patches: A/B/C/D, summing the count entered for each body part. */
+const DIAGNOSIS_PATCH_CODES = new Set(["A", "B", "C", "D"]);
 /** Body-chart nerve findings: enlarged / tender / abscess — each nerve site = 1 pt max. */
 const BODY_NERVE_CODES = new Set(["G", "H", "I"]);
 
@@ -945,13 +954,20 @@ const vmtPointScore = (code) => {
 };
 const vmtAffected = (code) => code === "WEAK" || code === "PARALYZED";
 
-/** Patches (A+C) and body-chart nerves (unique G/H/I nerve sites, max 12). */
+/** Patches (A–D counts) and body-chart nerves (unique G/H/I nerve sites, max 12). */
 export const countLeprosyFindings = (marks = {}) => {
   const entries = Object.values(marks || {});
-  const patches = entries.filter((m) => DIAGNOSIS_PATCH_CODES.has(m.code)).length;
+  const patches = entries.reduce((n, m) => {
+    markFindings(m).forEach((f) => {
+      if (!DIAGNOSIS_PATCH_CODES.has(f.code)) return;
+      const c = Number(f.count);
+      n += Number.isFinite(c) && c > 0 ? c : 1;
+    });
+    return n;
+  }, 0);
   const nerveSites = new Set();
   entries.forEach((m) => {
-    if (!BODY_NERVE_CODES.has(m.code)) return;
+    if (!markCodes(m).some((code) => BODY_NERVE_CODES.has(code))) return;
     if (!isNerveRegion(m.region)) return;
     nerveSites.add(`${m.view || ""}:${m.region}`);
   });
@@ -1000,12 +1016,13 @@ export const leprosyScores = (d = {}) => {
   marks.forEach((m) => {
     const side = regionSide(m.region);
     if (!side) return;
-    const code = m.code;
-    // Blind eye → 2
-    if (code === "R" && isEyeRegion(m.region)) body.eye[side] = Math.max(body.eye[side], 2);
-    // Claw / bone loss / ulcer on hand or foot → 2
-    if (["J", "N", "P"].includes(code) && isHandRegion(m.region)) body.hand[side] = Math.max(body.hand[side], 2);
-    if (["J", "N", "P"].includes(code) && isFootRegion(m.region)) body.foot[side] = Math.max(body.foot[side], 2);
+    markCodes(m).forEach((code) => {
+      // Blind eye → 2
+      if (code === "R" && isEyeRegion(m.region)) body.eye[side] = Math.max(body.eye[side], 2);
+      // Claw / bone loss / ulcer on hand or foot → 2
+      if (["J", "N", "P"].includes(code) && isHandRegion(m.region)) body.hand[side] = Math.max(body.hand[side], 2);
+      if (["J", "N", "P"].includes(code) && isFootRegion(m.region)) body.foot[side] = Math.max(body.foot[side], 2);
+    });
   });
 
   const sensoryEye = (id) => (st[id] === "BLINKNOTNORM" ? 1 : 0);
@@ -1080,7 +1097,7 @@ export const leprosyClass = (d = {}) => {
 };
 
 export const yawsClass = (marks = {}) => {
-  const codes = Object.values(marks).map((m) => m.code);
+  const codes = flattenMarks(marks).map((m) => m.code);
   if (codes.includes("BC")) return "Tertiary Yaws (Clinical / confirmed)";
   const p = codes.filter((c) => c === "P").length;
   const u = codes.filter((c) => c === "U").length;

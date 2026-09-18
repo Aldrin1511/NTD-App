@@ -17,7 +17,7 @@ export default function SuspectScreen() {
   const { patients, encounters, suspects, addSuspect, addDisease, settings, user, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
-  const myDiseases = useMemo(() => assessmentSpecs(id, { suspects, encounters: patientEncs }), [id, suspects, patientEncs]);
+  const myDiseases = useMemo(() => assessmentSpecs(id, { encounters: patientEncs }), [id, patientEncs]);
 
   const [symptoms, setSymptoms] = useState([]);
   const [photos, setPhotos] = useState([]);

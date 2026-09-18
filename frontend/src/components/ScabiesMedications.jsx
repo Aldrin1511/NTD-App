@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AlertPanel, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
-import { DosePhysicalBox, DoseUnitSelect } from "@/components/MedicationShared";
-import { formatDosePhysical } from "@/lib/medications";
+import { AlertPanel, withDrugCourse } from "@/components/Fields";
+import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
 import {
   Dialog,
   DialogContent,
@@ -123,6 +123,7 @@ export default function ScabiesMedications({
   history = {},
   weight = 0,
   medCourses = {},
+  posology = {},
 }) {
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age) || null;
@@ -160,11 +161,19 @@ export default function ScabiesMedications({
 
   const setTopical = (name, on) => {
     const next = on ? [...new Set([...topical, name])] : topical.filter((x) => x !== name);
-    onChange({ topical: next, medCourses: withDrugCourse(medCourses, name, on) });
+    onChange({
+      topical: next,
+      medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
+    });
   };
   const setOral = (name, on) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
-    onChange({ oral: next, medCourses: withDrugCourse(medCourses, name, on) });
+    onChange({
+      oral: next,
+      medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
+    });
   };
 
   const toggleIvermectin = () => {
@@ -215,7 +224,20 @@ export default function ScabiesMedications({
             5% permethrin cream or lotion is considered safe in pregnancy and while lactating.
           </AlertPanel>
         )}
-        {selected.permethrin && <DrugCourseBlock name={SCABIES_DRUGS.permethrin} medCourses={medCourses} onChange={onChange} />}
+        {selected.permethrin && (
+          <DrugVisitFields
+            name={SCABIES_DRUGS.permethrin}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: "Apply to body below the neck",
+              frequency: "Once at night",
+              duration: "Overnight; repeat in 7 days if needed",
+            }}
+          />
+        )}
       </DrugCard>
 
       {/* ii. Benzyl Benzoate */}
@@ -246,7 +268,24 @@ export default function ScabiesMedications({
             ]}
           />
         </div>
-        {selected.benzyl && <DrugCourseBlock name={SCABIES_DRUGS.benzyl} medCourses={medCourses} onChange={onChange} />}
+        {selected.benzyl && (
+          <DrugVisitFields
+            name={SCABIES_DRUGS.benzyl}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: months != null && months < 24
+                ? "Dilute 1:3 (10 ml + 30 ml water)"
+                : months != null && months < 144
+                  ? "Dilute 1:1 (25 ml + 25 ml water)"
+                  : "Undiluted",
+              frequency: months != null && months >= 24 && months < 144 ? "Twice" : "Once",
+              duration: months != null && months >= 24 && months < 144 ? "24 hours apart" : "12 hours contact",
+            }}
+          />
+        )}
       </DrugCard>
 
       {/* iii. Sulphur */}
@@ -283,7 +322,20 @@ export default function ScabiesMedications({
             Malodorous (rotten eggs), greasy, can stain clothing or bed sheets. May cause mild skin dryness or localized irritation (sulfur dermatitis).
           </p>
         </div>
-        {selected.sulphur && <DrugCourseBlock name={SCABIES_DRUGS.sulphur} medCourses={medCourses} onChange={onChange} />}
+        {selected.sulphur && (
+          <DrugVisitFields
+            name={SCABIES_DRUGS.sulphur}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: sulphurStrength || "5%",
+              frequency: "Every night",
+              duration: "3–5 consecutive nights",
+            }}
+          />
+        )}
       </DrugCard>
 
       {/* iv. Ivermectin */}
@@ -320,7 +372,20 @@ export default function ScabiesMedications({
             ]}
           />
         </div>
-        {selected.ivermectin && <DrugCourseBlock name={SCABIES_DRUGS.ivermectin} medCourses={medCourses} onChange={onChange} />}
+        {selected.ivermectin && (
+          <DrugVisitFields
+            name={SCABIES_DRUGS.ivermectin}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: dose ? formatDosePhysical(dose.mg, dose.tabs) : "0.2 mg/kg",
+              frequency: "Once",
+              duration: "2 doses (today + after 2 weeks)",
+            }}
+          />
+        )}
       </DrugCard>
 
       <Dialog open={iverDialog} onOpenChange={setIverDialog}>

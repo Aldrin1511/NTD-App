@@ -1,8 +1,9 @@
 import { useState } from "react";
 
 /** Shared interactive point — checkbox/circle on the chart image. */
-function ChartPoint({ label, code, color, active, onClick, shape = "circle", testid, x, y }) {
+function ChartPoint({ label, code, color, active, onClick, shape = "circle", testid, x, y, highlightMissing }) {
   const marked = !!code;
+  const missing = highlightMissing && !marked;
   return (
     <button
       type="button"
@@ -11,10 +12,12 @@ function ChartPoint({ label, code, color, active, onClick, shape = "circle", tes
       onClick={onClick}
       className={`absolute grid place-items-center border-2 shadow-sm transition ${
         shape === "square" ? "h-[18px] w-[18px] rounded-[2px]" : "h-[18px] w-[18px] rounded-full"
-      } ${active ? "ring-2 ring-offset-1 ring-offset-black ring-white" : ""}`}
+      } ${active ? "ring-2 ring-offset-1 ring-offset-black ring-white" : ""} ${
+        missing ? "ring-2 ring-red-500 ring-offset-1 ring-offset-black" : ""
+      }`}
       style={{
         background: marked ? color || "#fff" : "#fff",
-        borderColor: marked ? (color || "#94a3b8") : "#94a3b8",
+        borderColor: marked ? (color || "#94a3b8") : missing ? "#dc2626" : "#94a3b8",
         left: x,
         top: y,
         transform: "translate(-50%, -50%)",
@@ -127,7 +130,12 @@ const ST_ART = {
   },
 };
 
-function StFigure({ artKey, value, options, onPlace, prefix }) {
+export const ST_REQUIRED_IDS = Object.values(ST_ART).flatMap((a) => a.points.map((p) => p.id));
+
+export const missingChartPoints = (points = {}, requiredIds = []) =>
+  requiredIds.filter((id) => !points?.[id]);
+
+function StFigure({ artKey, value, options, onPlace, prefix, highlightMissing }) {
   const art = ST_ART[artKey];
   return (
     <div className="relative mx-auto w-full max-w-[9.5rem]">
@@ -139,6 +147,7 @@ function StFigure({ artKey, value, options, onPlace, prefix }) {
           code={value[p.id]}
           color={value[p.id] ? colorFor(value[p.id], options) : undefined}
           active={!!value[p.id]}
+          highlightMissing={highlightMissing}
           shape={p.shape}
           x={p.x}
           y={p.y}
@@ -150,9 +159,11 @@ function StFigure({ artKey, value, options, onPlace, prefix }) {
   );
 }
 
-export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-chart" }) {
+export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-chart", highlightMissing = false }) {
   const [activeCode, setActiveCode] = useState("");
   const points = value.points || {};
+  const missing = missingChartPoints(points, ST_REQUIRED_IDS);
+  const showGaps = highlightMissing && missing.length > 0;
 
   const place = (pointId, options) => {
     if (readOnly) return;
@@ -164,10 +175,15 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
   };
 
   return (
-    <div className="space-y-6 rounded-lg border border-border bg-muted/20 p-4" data-testid={id}>
+    <div className={`scroll-mt-32 space-y-6 rounded-lg border p-4 ${showGaps ? "border-red-500 bg-red-50/40" : "border-border bg-muted/20"}`} data-testid={id}>
       <div>
-        <p className="font-head text-base font-semibold">Sensory Testing (ST)</p>
+        <p className="font-head text-base font-semibold">Sensory Testing (ST) <span className="text-red-600">*</span></p>
         <p className="text-xs text-muted-foreground">1. Choose a finding · 2. Tap a checkbox on the chart</p>
+        {showGaps && (
+          <p className="mt-2 text-sm font-semibold text-red-600" data-testid={`${id}-required-hint`}>
+            Mark every eye circle and every hand/foot checkbox. {missing.length} remaining.
+          </p>
+        )}
       </div>
 
       <div className="space-y-3" data-testid={`${id}-eyes`}>
@@ -176,8 +192,8 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
         <div className="rounded-lg bg-black p-4">
           <SidePair
             title=""
-            right={<StFigure artKey="right-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} />}
-            left={<StFigure artKey="left-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} />}
+            right={<StFigure artKey="right-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} highlightMissing={showGaps} />}
+            left={<StFigure artKey="left-eye" value={points} options={SENSORY_EYE} onPlace={place} prefix={`${id}-eye`} highlightMissing={showGaps} />}
           />
         </div>
       </div>
@@ -188,13 +204,13 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
         <div className="rounded-lg bg-black p-4 space-y-6">
           <SidePair
             title="Hands"
-            right={<StFigure artKey="right-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} />}
-            left={<StFigure artKey="left-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} />}
+            right={<StFigure artKey="right-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} highlightMissing={showGaps} />}
+            left={<StFigure artKey="left-hand" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-hand`} highlightMissing={showGaps} />}
           />
           <SidePair
             title="Feet"
-            right={<StFigure artKey="right-foot" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-foot`} />}
-            left={<StFigure artKey="left-foot" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-foot`} />}
+            right={<StFigure artKey="right-foot" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-foot`} highlightMissing={showGaps} />}
+            left={<StFigure artKey="left-foot" value={points} options={SENSORY_HAND_FOOT} onPlace={place} prefix={`${id}-foot`} highlightMissing={showGaps} />}
           />
         </div>
       </div>
@@ -264,9 +280,26 @@ const VMT_TESTS = [
   },
 ];
 
-function VmtSideButton({ pointId, side, code, onClick, testid }) {
+export const VMT_REQUIRED_IDS = VMT_TESTS.flatMap((t) => t.points.map((p) => p.id));
+export const VISION_REQUIRED_IDS = ["right-eye", "left-eye"];
+
+export const leprosyNfaGaps = (assessment = {}) => {
+  const vmt = missingChartPoints(assessment?.vmtChart?.points, VMT_REQUIRED_IDS);
+  const st = missingChartPoints(assessment?.sensoryChart?.points, ST_REQUIRED_IDS);
+  const vision = missingChartPoints(assessment?.visionChart?.points, VISION_REQUIRED_IDS);
+  return {
+    vmt,
+    st,
+    vision,
+    incomplete: vmt.length > 0 || st.length > 0 || vision.length > 0,
+    target: vmt.length ? "vmt" : st.length ? "st" : vision.length ? "vision" : null,
+  };
+};
+
+function VmtSideButton({ pointId, side, code, onClick, testid, highlightMissing }) {
   const art = VMT_ART[pointId];
   const opt = VMT_OPTS.find((o) => o.code === code);
+  const missing = highlightMissing && !code;
   return (
     <button
       type="button"
@@ -278,7 +311,7 @@ function VmtSideButton({ pointId, side, code, onClick, testid }) {
       <span className={`relative block w-full max-w-[10.5rem] ${art.h}`}>
         <img src={art.src} alt="" className="h-full w-full object-contain" draggable={false} />
         <span
-          className="absolute h-4 w-4 rounded-full border-2 border-black shadow"
+          className={`absolute h-4 w-4 rounded-full border-2 shadow ${missing ? "border-red-500 ring-2 ring-red-400" : "border-black"}`}
           style={{
             left: art.x,
             top: art.y,
@@ -292,9 +325,11 @@ function VmtSideButton({ pointId, side, code, onClick, testid }) {
   );
 }
 
-export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
+export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart", highlightMissing = false }) {
   const [activeCode, setActiveCode] = useState("");
   const points = value.points || {};
+  const missing = missingChartPoints(points, VMT_REQUIRED_IDS);
+  const showGaps = highlightMissing && missing.length > 0;
 
   const place = (pointId) => {
     if (readOnly || !activeCode) return;
@@ -305,10 +340,15 @@ export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
   };
 
   return (
-    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4" data-testid={id}>
+    <div className={`scroll-mt-32 space-y-4 rounded-lg border p-4 ${showGaps ? "border-red-500 bg-red-50/40" : "border-border bg-muted/20"}`} data-testid={id}>
       <div>
-        <p className="font-head text-base font-semibold">Voluntary Muscle Testing (VMT)</p>
+        <p className="font-head text-base font-semibold">Voluntary Muscle Testing (VMT) <span className="text-red-600">*</span></p>
         <p className="text-xs text-muted-foreground">1. Choose Strong / Weak / Paralyzed · 2. Tap the marker on each diagram</p>
+        {showGaps && (
+          <p className="mt-2 text-sm font-semibold text-red-600" data-testid={`${id}-required-hint`}>
+            Mark every circle on Right and Left. {missing.length} remaining.
+          </p>
+        )}
       </div>
       <LegendBar options={VMT_OPTS} activeCode={activeCode} onSelect={setActiveCode} testid={`${id}-legend`} />
       <div className="space-y-2 rounded-lg bg-black p-3 sm:p-5">
@@ -327,6 +367,7 @@ export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
                 side="Right"
                 code={points[right.id]}
                 testid={`${id}-${right.id}`}
+                highlightMissing={showGaps}
                 onClick={() => place(right.id)}
               />
               <p className="max-w-[5.5rem] px-1 text-center text-[11px] font-semibold text-white/85">
@@ -337,6 +378,7 @@ export function VmtChart({ value = {}, onChange, readOnly, id = "vmt-chart" }) {
                 side="Left"
                 code={points[left.id]}
                 testid={`${id}-${left.id}`}
+                highlightMissing={showGaps}
                 onClick={() => place(left.id)}
               />
             </div>
@@ -365,9 +407,11 @@ const VISION_ART = {
   "left-eye": { src: "/leprosy/vision/left.svg?v=1", x: "31.8%", y: "34.5%", label: "Left" },
 };
 
-export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision-chart" }) {
+export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision-chart", highlightMissing = false }) {
   const [activeCode, setActiveCode] = useState("");
   const points = value.points || {};
+  const missing = missingChartPoints(points, VISION_REQUIRED_IDS);
+  const showGaps = highlightMissing && missing.length > 0;
 
   const place = (pointId) => {
     if (readOnly || !activeCode) return;
@@ -378,16 +422,21 @@ export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision
   };
 
   return (
-    <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4" data-testid={id}>
+    <div className={`scroll-mt-32 space-y-4 rounded-lg border p-4 ${showGaps ? "border-red-500 bg-red-50/40" : "border-border bg-muted/20"}`} data-testid={id}>
       <div>
-        <p className="font-head text-base font-semibold">Vision Acuity</p>
+        <p className="font-head text-base font-semibold">Vision Acuity <span className="text-red-600">*</span></p>
         <p className="text-xs text-muted-foreground">1. Choose acuity result · 2. Tap the circle on Right or Left</p>
+        {showGaps && (
+          <p className="mt-2 text-sm font-semibold text-red-600" data-testid={`${id}-required-hint`}>
+            Mark both Right and Left circles. {missing.length} remaining.
+          </p>
+        )}
       </div>
       <LegendBar options={VISION_OPTS} activeCode={activeCode} onSelect={setActiveCode} testid={`${id}-legend`} />
       <div className="rounded-lg bg-black p-4">
         <p className="mb-4 text-center text-sm font-semibold text-white">Vision acuity</p>
         <div className="grid grid-cols-2 gap-4">
-          {["right-eye", "left-eye"].map((eyeId) => {
+          {VISION_REQUIRED_IDS.map((eyeId) => {
             const art = VISION_ART[eyeId];
             const code = points[eyeId];
             return (
@@ -399,6 +448,7 @@ export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision
                     code={code}
                     color={code ? colorFor(code, VISION_OPTS) : undefined}
                     active={!!code}
+                    highlightMissing={showGaps}
                     shape="circle"
                     x={art.x}
                     y={art.y}

@@ -2,8 +2,17 @@ import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Field, SelectField, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
-import { catalogueForDisease, extraDrugNames, isTopicalForm, parseTabletOptions } from "@/lib/medications";
+import { Field, SelectField, TextField, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
+import { DRUG_FREQUENCIES } from "@/mock/data";
+import {
+  catalogueForDisease,
+  extraDrugNames,
+  isTopicalForm,
+  parseTabletOptions,
+  dropVisitPosology,
+  setVisitPosology,
+  slugDrug,
+} from "@/lib/medications";
 
 export function RegimenBanner({ names = [] }) {
   if (!names.length) return null;
@@ -84,12 +93,93 @@ export function AddDrugSelect({
   );
 }
 
+export function VisitPosology({
+  name,
+  defaults = {},
+  posology = {},
+  onChange,
+}) {
+  const override = posology?.[name] || {};
+  const dosage = override.dosage ?? defaults.dosage ?? "";
+  const frequency = override.frequency ?? defaults.frequency ?? "";
+  const duration = override.duration ?? defaults.duration ?? "";
+  const freqOptions = [...new Set([frequency, defaults.frequency, ...DRUG_FREQUENCIES].filter(Boolean))];
+  const slug = slugDrug(name);
+  const patch = (next) => {
+    onChange({ posology: setVisitPosology(posology, name, next, defaults) });
+  };
+  const reset = () => {
+    onChange({ posology: dropVisitPosology(posology, name) });
+  };
+  const hasOverride = Boolean(posology?.[name]);
+
+  return (
+    <div className="space-y-3 rounded-md border border-dashed border-border bg-white p-3" data-testid={`visit-posology-${slug}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground">Posology for this visit</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Edits apply only to this encounter. The drug and regimen masters are not changed.
+          </p>
+        </div>
+        {hasOverride && (
+          <Button type="button" variant="ghost" className="h-8 shrink-0 px-2 text-xs" data-testid={`visit-posology-reset-${slug}`} onClick={reset}>
+            Reset
+          </Button>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <TextField
+          label="Dosage"
+          testid={`visit-posology-dosage-${slug}`}
+          value={dosage}
+          placeholder={defaults.dosage || "Dosage"}
+          onChange={(e) => patch({ dosage: e.target.value })}
+        />
+        <SelectField
+          label="Frequency"
+          options={freqOptions}
+          value={frequency}
+          onChange={(v) => patch({ frequency: v })}
+          testid={`visit-posology-frequency-${slug}`}
+        />
+        <TextField
+          label="Duration"
+          testid={`visit-posology-duration-${slug}`}
+          value={duration}
+          placeholder={defaults.duration || "Duration"}
+          onChange={(e) => patch({ duration: e.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function DrugVisitFields({
+  name,
+  selected,
+  medCourses,
+  posology = {},
+  defaults = {},
+  onChange,
+}) {
+  if (!selected) return null;
+  return (
+    <>
+      <VisitPosology name={name} defaults={defaults} posology={posology} onChange={onChange} />
+      <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
+    </>
+  );
+}
+
 export function ExtraSelectedDrugs({
   diseaseId,
   topical = [],
   oral = [],
   catalogue = [],
   medCourses = {},
+  posology = {},
+  defaults = {},
   onChange,
 }) {
   const extras = extraDrugNames(diseaseId, topical, oral);
@@ -102,6 +192,7 @@ export function ExtraSelectedDrugs({
       topical: isTopicalForm(drug?.form) ? topicalNext : topical.filter((x) => x !== name),
       oral: isTopicalForm(drug?.form) ? oral.filter((x) => x !== name) : oralNext,
       medCourses: withDrugCourse(medCourses, name, false),
+      posology: dropVisitPosology(posology, name),
     });
   };
   return (
@@ -123,7 +214,8 @@ export function ExtraSelectedDrugs({
             {tabs.length > 1 && (
               <p className="mt-2 text-xs text-muted-foreground">Available strengths: {tabs.map((t) => `${t} mg`).join(", ")}</p>
             )}
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
+              <VisitPosology name={name} defaults={defaults} posology={posology} onChange={onChange} />
               <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
             </div>
           </div>

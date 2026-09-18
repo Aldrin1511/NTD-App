@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Plus, Trash2, X } from "lucide-react";
+import { localISODate } from "@/mock/specs";
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -41,11 +43,32 @@ export const Field = ({ label, hint, children, className = "" }) => (
   </div>
 );
 
-export const TextField = ({ label, hint, testid, className, placeholder, ...rest }) => (
-  <Field label={label} hint={hint} className={className}>
-    <Input data-testid={testid} className="h-12 w-full min-w-0 bg-white text-base" placeholder={placeholder ?? label} {...rest} />
-  </Field>
-);
+export const TextField = ({ label, hint, testid, className, placeholder, type, value, onChange, allowEmpty, ...rest }) => {
+  const defaultToday = type === "date" && !allowEmpty;
+  const shown = defaultToday ? (value || localISODate()) : value;
+  const handleChange = (e) => {
+    if (!onChange) return;
+    if (defaultToday) {
+      const next = e.target.value || localISODate();
+      onChange({ ...e, target: { ...e.target, value: next } });
+      return;
+    }
+    onChange(e);
+  };
+  return (
+    <Field label={label} hint={hint} className={className}>
+      <Input
+        data-testid={testid}
+        className="h-12 w-full min-w-0 bg-white text-base"
+        placeholder={placeholder ?? label}
+        type={type}
+        {...rest}
+        value={shown ?? ""}
+        onChange={handleChange}
+      />
+    </Field>
+  );
+};
 
 export const AreaField = ({ label, testid, rows = 5, placeholder, ...rest }) => (
   <Field label={label}>
@@ -55,7 +78,7 @@ export const AreaField = ({ label, testid, rows = 5, placeholder, ...rest }) => 
 
 export const SelectField = ({ label, value, onChange, options, placeholder = "Select…", testid, hint }) => (
   <Field label={label} hint={hint}>
-    <Select value={value ?? ""} onValueChange={onChange}>
+    <Select key={value || "none"} value={value || undefined} onValueChange={onChange}>
       <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
@@ -69,6 +92,71 @@ export const SelectField = ({ label, value, onChange, options, placeholder = "Se
     </Select>
   </Field>
 );
+
+/** Dropdown to add items; selected values show as chips with an X to remove. */
+export const MultiSelectField = ({
+  label,
+  options = [],
+  value = [],
+  onChange,
+  placeholder = "Select…",
+  testid,
+  hint,
+}) => {
+  const [nonce, setNonce] = useState(0);
+  const selected = Array.isArray(value) ? value : [];
+  const remaining = options.filter((o) => !selected.includes(o));
+  const add = (v) => {
+    if (!v || selected.includes(v)) return;
+    onChange([...selected, v]);
+    setNonce((n) => n + 1);
+  };
+  const remove = (name) => onChange(selected.filter((x) => x !== name));
+  return (
+    <Field label={label} hint={hint}>
+      {remaining.length ? (
+        <Select key={nonce} onValueChange={add}>
+          <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid}>
+            <SelectValue placeholder={placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            {remaining.map((o) => (
+              <SelectItem key={o} value={o} className="text-base" data-testid={`${testid}-opt-${o}`}>
+                {o}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <p className="rounded-md border border-dashed border-border bg-white px-3 py-3 text-sm text-muted-foreground" data-testid={`${testid}-empty`}>
+          {options.length ? "All options are selected." : "No options available."}
+        </p>
+      )}
+      {selected.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2" data-testid={`${testid}-chips`}>
+          {selected.map((name) => (
+            <span
+              key={name}
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/30 bg-secondary px-3 py-1.5 text-sm font-semibold"
+              data-testid={`${testid}-chip-${slug(name)}`}
+            >
+              <span className="min-w-0 truncate">{name}</span>
+              <button
+                type="button"
+                className="ml-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-white hover:text-red-600"
+                aria-label={`Remove ${name}`}
+                data-testid={`${testid}-remove-${slug(name)}`}
+                onClick={() => remove(name)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </Field>
+  );
+};
 
 export const ChoiceRow = ({ label, options, value, onChange, testid, hint }) => (
   <Field label={label} hint={hint}>
@@ -174,7 +262,7 @@ export const ItemActions = ({ onAdd, onRemove, addTestid, removeTestid, canRemov
 
 export function withDrugCourse(medCourses, name, on) {
   const courses = { ...(medCourses || {}) };
-  if (on && !courses[name]?.length) courses[name] = [{ id: `mc-${Date.now()}`, date: "" }];
+  if (on && !courses[name]?.length) courses[name] = [{ id: `mc-${Date.now()}`, date: localISODate() }];
   if (!on) delete courses[name];
   return courses;
 }
@@ -190,15 +278,13 @@ export function DrugCourseBlock({ name, medCourses, onChange }) {
 }
 
 export const MedCourses = ({ courses = [], onChange, testid = "med-course" }) => {
-  const rows = Array.isArray(courses) && courses.length ? courses : [{ id: "mc-0", date: "" }];
-  const update = (i, date) => onChange(rows.map((r, j) => (j === i ? { ...r, date } : r)));
-  const addAfter = (i) => {
-    const next = [...rows];
-    next.splice(i + 1, 0, { id: `mc-${Date.now()}`, date: "" });
-    onChange(next);
+  const rows = Array.isArray(courses) && courses.length ? courses : [{ id: "mc-0", date: localISODate() }];
+  const update = (i, date) => onChange(rows.map((r, j) => (j === i ? { ...r, date: date || localISODate() } : r)));
+  const addAtTop = () => {
+    onChange([{ id: `mc-${Date.now()}`, date: localISODate() }, ...rows]);
   };
   const remove = (i) => {
-    if (rows.length <= 1) return onChange([{ id: `mc-${Date.now()}`, date: "" }]);
+    if (rows.length <= 1) return onChange([{ id: `mc-${Date.now()}`, date: localISODate() }]);
     onChange(rows.filter((_, j) => j !== i));
   };
   return (
@@ -207,7 +293,7 @@ export const MedCourses = ({ courses = [], onChange, testid = "med-course" }) =>
         <div key={row.id || i} className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
             <TextField
-              label={rows.length > 1 ? `Date given (${i + 1})` : "Date given"}
+              label={rows.length > 1 ? `Date given (${rows.length - i})` : "Date given"}
               type="date"
               testid={`${testid}-date-${i}`}
               value={row.date || ""}
@@ -216,7 +302,7 @@ export const MedCourses = ({ courses = [], onChange, testid = "med-course" }) =>
           </div>
           <div className="mb-1">
             <ItemActions
-              onAdd={() => addAfter(i)}
+              onAdd={addAtTop}
               addTestid={`${testid}-add-${i}`}
               canRemove={rows.length > 1}
               onRemove={() => remove(i)}

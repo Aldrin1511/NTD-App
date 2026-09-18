@@ -15,13 +15,27 @@ import YawsMedications, { yawsTreatmentSummary } from "@/components/YawsMedicati
 import LfMedications, { lfTreatmentSummary } from "@/components/LfMedications";
 import BuruliMedications, { buruliTreatmentSummary } from "@/components/BuruliMedications";
 import LeprosyMedications, { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
-import { DISEASE_SPECS, assessmentSpecs, leprosyScores, leprosyClass, yawsClass, resolveEpisodeId, isEpisodeClosed } from "@/mock/specs";
+import { DISEASE_SPECS, assessmentSpecs, leprosyScores, leprosyClass, yawsClass, resolveEpisodeId, isEpisodeClosed, localISODate } from "@/mock/specs";
+import { flattenMarks } from "@/lib/markFindings";
 import { changedSectionKeys } from "@/sectionDiff";
-import { applyMatchingRegimens, matchingRegimens, formatDosePhysical } from "@/lib/medications";
-import { RegimenBanner, AddDrugSelect, ExtraSelectedDrugs, addCatalogueDrug } from "@/components/MedicationShared";
+import { applyMatchingRegimens, matchingRegimens, formatDosePhysical, formatRegimenDurationValue, dropVisitPosology } from "@/lib/medications";
+import { RegimenBanner, AddDrugSelect, ExtraSelectedDrugs, addCatalogueDrug, DrugVisitFields } from "@/components/MedicationShared";
+import { leprosyNfaGaps } from "@/components/LeprosyReactionCharts";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, PanelLeft, ChevronsDownUp, ChevronsUpDown, CircleHelp, Stethoscope } from "lucide-react";
+import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, PanelLeft, CircleHelp, Stethoscope } from "lucide-react";
+
+const UnfoldMoreIcon = ({ className = "h-5 w-5" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 5.83 15.17 9l1.41-1.41L12 3 7.41 7.59 8.83 9 12 5.83zm0 12.34L8.83 15l-1.41 1.41L12 21l4.59-4.59L15.17 15 12 18.17z" />
+  </svg>
+);
+
+const UnfoldLessIcon = ({ className = "h-5 w-5" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="m7.41 18.59 1.42 1.41L12 16.83 15.17 20l1.41-1.41L12 14l-4.59 4.59zm9.18-13.18L15.17 4 12 7.17 8.83 4 7.41 5.41 12 10l4.59-4.59z" />
+  </svg>
+);
 
 const empty = {
   caseDetails: {}, history: {}, marks: {}, assessment: {}, examRounds: [], photos: [], lab: {}, diagnosis: "",
@@ -30,6 +44,7 @@ const empty = {
   rifampicinTabletMg: 300, clarithromycinTabletMg: 500,
   adherence: {}, household: {}, reactions: [], notes: [""], outcome: "Open", recommendations: [],
   medCourses: {},
+  posology: {},
   regimenNames: [],
   regimenIds: [],
   regimenAppliedKey: "",
@@ -48,10 +63,8 @@ const VisitNotes = ({ value, onChange }) => {
     next[i] = text;
     onChange(next);
   };
-  const addAfter = (i) => {
-    const next = [...entries];
-    next.splice(i + 1, 0, "");
-    onChange(next);
+  const addAtTop = () => {
+    onChange(["", ...entries]);
   };
   const remove = (i) => {
     if (entries.length <= 1) return onChange([""]);
@@ -64,10 +77,10 @@ const VisitNotes = ({ value, onChange }) => {
         <div key={i} className="rounded-md border border-border bg-white p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-xs font-semibold text-muted-foreground">
-              Clinical note {i + 1}
+              Clinical note {entries.length - i}
             </p>
             <ItemActions
-              onAdd={() => addAfter(i)}
+              onAdd={addAtTop}
               addTestid={`visit-notes-add-${i}`}
               canRemove={entries.length > 1}
               onRemove={() => remove(i)}
@@ -119,6 +132,7 @@ const applyLoadedEncounter = (source, disease) => {
   if (!Array.isArray(base.oral)) base.oral = [];
   base.notes = normalizeNotes(base.notes);
   base.medCourses = base.medCourses && typeof base.medCourses === "object" ? base.medCourses : {};
+  base.posology = base.posology && typeof base.posology === "object" ? base.posology : {};
   const hasPriorMeds = (cloned.topical || []).length || (cloned.oral || []).length || cloned.regimenAppliedKey;
   base.regimenAppliedKey = cloned.regimenAppliedKey || (hasPriorMeds ? "loaded" : "");
   base.regimenNames = Array.isArray(cloned.regimenNames) ? cloned.regimenNames : [];
@@ -274,10 +288,10 @@ export default function Encounter() {
   const spec = DISEASE_SPECS[existing?.disease || diseaseId] || DISEASE_SPECS.scabies;
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
   const myDiseases = useMemo(() => {
-    const fromScreening = assessmentSpecs(id, { suspects, encounters: patientEncs });
-    if (fromScreening.some((d) => d.id === spec.id)) return fromScreening;
-    return spec.id ? [spec, ...fromScreening] : fromScreening;
-  }, [id, suspects, patientEncs, spec]);
+    const fromStarted = assessmentSpecs(id, { encounters: patientEncs });
+    if (fromStarted.some((d) => d.id === spec.id)) return fromStarted;
+    return spec.id ? [spec, ...fromStarted] : fromStarted;
+  }, [id, patientEncs, spec]);
 
   const [d, setD] = useState(() => {
     const disease = existing?.disease || diseaseId;
@@ -291,9 +305,10 @@ export default function Encounter() {
     return loaded;
   });
   const requestedSection = Number(params.get("section")) || 0;
-  const [open, setOpen] = useState(() => (requestedSection ? { [requestedSection]: true } : { 1: true }));
+  const [open, setOpen] = useState({});
   const [lhs, setLhs] = useState(true);
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
+  const [nfaGate, setNfaGate] = useState(null);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "Encounter";
   const referral = params.get("ref") || existing?.referral || "No";
@@ -308,6 +323,7 @@ export default function Encounter() {
   }, [requestedSection]);
 
   useEffect(() => {
+    if (existing) return;
     if (spec.id !== "scabies") return;
     if (d.history?.itching) return;
     const fromSuspect = suspects
@@ -316,7 +332,7 @@ export default function Encounter() {
     if (fromSuspect) {
       setD((prev) => ({ ...prev, history: { ...prev.history, itching: "Yes" } }));
     }
-  }, [spec.id, id, suspects, d.history?.itching]);
+  }, [existing, spec.id, id, suspects, d.history?.itching]);
 
   const weight = Number(d.caseDetails?.weight || p?.weight || 0);
   const examRounds = spec.repeatExam ? normalizeExamRounds(d) : null;
@@ -328,6 +344,12 @@ export default function Encounter() {
     const latest = examRounds?.[examRounds.length - 1];
     return { ...(latest?.assessment || d.assessment || {}), marks: latest?.marks || chartMarks };
   })();
+
+  useEffect(() => {
+    if (!nfaGate || spec.id !== "leprosy") return;
+    const round = examRounds?.[nfaGate.round];
+    if (round && !leprosyNfaGaps(round.assessment).incomplete) setNfaGate(null);
+  }, [examRounds, nfaGate, spec.id]);
   const lepClass = spec.id === "leprosy" ? leprosyClass({ ...leprosyAssessment, ...d.lab, marks: chartMarks }) : null;
   const scores = spec.id === "leprosy" ? leprosyScores({ ...leprosyAssessment, marks: chartMarks }) : null;
   const autoDx = spec.id === "leprosy"
@@ -351,7 +373,7 @@ export default function Encounter() {
 
   const alerts = useMemo(() => {
     const a = [];
-    const codes = Object.values(chartMarks).map((m) => m.code);
+    const codes = flattenMarks(chartMarks).map((m) => m.code);
     if (spec.id === "scabies" && codes.includes("C")) a.push(["urgent", "🔴 Crusted skin recorded", "Consider crusted scabies — urgent clinician review and intensified treatment."]);
     if (spec.id === "buruli" && Object.values(chartMarks).some((m) => m.extra === "Category 3")) a.push(["urgent", "🔴 Category 3 lesion", "Refer for surgical assessment alongside antibiotic therapy."]);
     if (spec.id === "leprosy" && scores?.g2d === 2) a.push(["urgent", "🔴 WHO Grade 2 disability", `EHF score ${scores.ehf} — refer for MMDP and self-care.`]);
@@ -419,7 +441,42 @@ export default function Encounter() {
     return `${formatDosePhysical(mg, o.tablet ? Math.round((mg / o.tablet) * 2) / 2 : null)}`;
   };
 
+  const matchedRegimens = matchingRegimens({
+    regimens: settings.regimens || [],
+    disease: spec.id,
+    diagnosis,
+    ageYears,
+    weight,
+  });
+  const regimenPosologyDefaults = matchedRegimens[0]
+    ? {
+      frequency: matchedRegimens[0].frequency || "",
+      duration: formatRegimenDurationValue(matchedRegimens[0]) || "",
+    }
+    : {};
+
   const persist = (close) => {
+    if (spec.id === "leprosy") {
+      const rounds = examRounds?.length ? examRounds : [{}];
+      const idx = rounds.findIndex((r) => leprosyNfaGaps(r.assessment).incomplete);
+      const gapIdx = idx >= 0 ? idx : 0;
+      const gaps = leprosyNfaGaps(rounds[gapIdx]?.assessment);
+      if (gaps.incomplete) {
+        setNfaGate({ round: gapIdx, target: gaps.target });
+        setOpen((o) => ({ ...o, 3: true }));
+        toast.error("Complete Voluntary Muscle Testing, Sensory Testing and Vision Acuity — every circle and checkbox is required.");
+        window.setTimeout(() => {
+          const testid = gaps.target === "vmt"
+            ? `exam-${gapIdx}-assess-vmtchart`
+            : gaps.target === "st"
+              ? `exam-${gapIdx}-assess-sensorychart`
+              : `exam-${gapIdx}-assess-visionchart`;
+          document.querySelector(`[data-testid="${testid}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 220);
+        return;
+      }
+      setNfaGate(null);
+    }
     addDisease(p.id, spec.id);
     const payload = { ...d, diagnosis: diagnosis || "", outcome: outcome || "", scores };
     if (examRounds) {
@@ -494,6 +551,9 @@ export default function Encounter() {
             <RepeatableBodyExam
               spec={spec}
               value={examRounds}
+              encounterDate={existing?.date || localISODate()}
+              highlightNfa={Boolean(nfaGate)}
+              focusRound={nfaGate?.round}
               onChange={(rounds) => setD((s) => ({
                 ...s,
                 examRounds: rounds,
@@ -553,6 +613,7 @@ export default function Encounter() {
               history={d.history}
               weight={weight}
               medCourses={d.medCourses || {}}
+              posology={d.posology || {}}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : spec.id === "yaws" ? (
@@ -562,6 +623,7 @@ export default function Encounter() {
               weight={weight}
               azithromycinTabletMg={d.azithromycinTabletMg ?? 500}
               medCourses={d.medCourses || {}}
+              posology={d.posology || {}}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : spec.id === "lf" ? (
@@ -574,6 +636,7 @@ export default function Encounter() {
               history={d.history}
               weight={weight}
               medCourses={d.medCourses || {}}
+              posology={d.posology || {}}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : spec.id === "buruli" ? (
@@ -583,6 +646,7 @@ export default function Encounter() {
               clarithromycinTabletMg={d.clarithromycinTabletMg ?? 500}
               weight={weight}
               medCourses={d.medCourses || {}}
+              posology={d.posology || {}}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : spec.id === "leprosy" ? (
@@ -592,23 +656,50 @@ export default function Encounter() {
               weight={weight}
               reactions={d.reactions || []}
               medCourses={d.medCourses || {}}
+              posology={d.posology || {}}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : (
             <>
               {spec.drugs.topical && <CheckGrid label="Topical / supportive" options={spec.drugs.topical} value={d.topical} onChange={set("topical")} testid="topical" cols="sm:grid-cols-2" />}
               <Field label={`Oral / injectable — dose calculated from ${weight || "?"} kg`}>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {spec.drugs.oral.map((o) => {
                     const on = d.oral.includes(o.name);
+                    const doseText = oralDose(o);
                     return (
-                      <button key={o.name} type="button" data-testid={`oral-${o.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                        onClick={() => set("oral")(on ? d.oral.filter((x) => x !== o.name) : [...d.oral, o.name])}
-                        className={`flex min-h-12 w-full items-center gap-3 rounded-md border px-4 text-left text-sm font-semibold ${on ? "border-primary bg-secondary" : "border-border bg-white hover:bg-muted"}`}>
-                        <span className={`grid h-6 w-6 place-items-center rounded border ${on ? "border-primary bg-primary text-white" : "border-input"}`}>{on && <Check className="h-4 w-4" />}</span>
-                        <span className="flex-1">{o.name}</span>
-                        <span className="text-xs font-normal text-muted-foreground">{oralDose(o)}</span>
-                      </button>
+                      <div key={o.name} className="space-y-2">
+                        <button type="button" data-testid={`oral-${o.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                          onClick={() => setD((s) => {
+                            const nextOn = !s.oral.includes(o.name);
+                            const oral = nextOn ? [...s.oral, o.name] : s.oral.filter((x) => x !== o.name);
+                            return {
+                              ...s,
+                              oral,
+                              medCourses: withDrugCourse(s.medCourses, o.name, nextOn),
+                              posology: nextOn ? s.posology : dropVisitPosology(s.posology, o.name),
+                            };
+                          })}
+                          className={`flex min-h-12 w-full items-center gap-3 rounded-md border px-4 text-left text-sm font-semibold ${on ? "border-primary bg-secondary" : "border-border bg-white hover:bg-muted"}`}>
+                          <span className={`grid h-6 w-6 place-items-center rounded border ${on ? "border-primary bg-primary text-white" : "border-input"}`}>{on && <Check className="h-4 w-4" />}</span>
+                          <span className="flex-1">{o.name}</span>
+                          <span className="text-xs font-normal text-muted-foreground">{doseText}</span>
+                        </button>
+                        {on && (
+                          <DrugVisitFields
+                            name={o.name}
+                            selected
+                            medCourses={d.medCourses || {}}
+                            posology={d.posology || {}}
+                            onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+                            defaults={{
+                              dosage: doseText === "enter weight" ? "" : doseText,
+                              frequency: /BID/i.test(String(o.schedule)) ? "Twice daily" : /\bOD\b/i.test(String(o.schedule)) ? "Once daily" : "",
+                              duration: o.schedule || "",
+                            }}
+                          />
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -621,6 +712,8 @@ export default function Encounter() {
             oral={d.oral}
             catalogue={settings.drugs || []}
             medCourses={d.medCourses || {}}
+            posology={d.posology || {}}
+            defaults={regimenPosologyDefaults}
             onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
           />
           <AddDrugSelect
@@ -703,7 +796,7 @@ export default function Encounter() {
 
   const doneCount = sections.filter((s) => s.done).length;
   const recordedOutcome = outcome && outcome !== "Open" ? outcome : "";
-  const allExpanded = sections.every((s) => open[s.n]);
+  const allExpanded = sections.every((s) => open[s.n] !== false);
 
   return (
     <AppShell>
@@ -719,9 +812,9 @@ export default function Encounter() {
         )}
 
         <div className="min-w-0 space-y-4">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="sticky top-[65px] z-30 -mx-1 mb-0 flex flex-wrap items-center gap-3 bg-background px-1 py-3 lg:top-[69px]">
             {!lhs && (
-              <Button variant="outline" size="icon" className="h-11 w-11" data-testid="lhs-expand-btn" onClick={() => setLhs(true)}>
+              <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" data-testid="lhs-expand-btn" onClick={() => setLhs(true)}>
                 <PanelLeft className="h-4 w-4" />
               </Button>
             )}
@@ -731,7 +824,17 @@ export default function Encounter() {
                 {facility} · {visitType} · Referral {referral}
               </p>
             </div>
-            <Button variant="outline" className="h-11" data-testid="exit-encounter-btn" onClick={() => navigate(`/patients/${p.id}`)}>
+            <button
+              type="button"
+              data-testid="toggle-all-sections-btn"
+              aria-label={allExpanded ? "Unfold less" : "Unfold more"}
+              title={allExpanded ? "Collapse all" : "Expand all"}
+              onClick={() => setOpen(Object.fromEntries(sections.map((s) => [s.n, !allExpanded])))}
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border text-primary hover:bg-secondary"
+            >
+              {allExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
+            </button>
+            <Button variant="outline" className="h-11 shrink-0" data-testid="exit-encounter-btn" onClick={() => navigate(`/patients/${p.id}`)}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Exit to record
             </Button>
           </div>
@@ -755,30 +858,9 @@ export default function Encounter() {
 
           {alerts.map(([lvl, t, b], i) => <AlertPanel key={i} level={lvl} title={t} testid={`encounter-alert-${lvl}-${i}`}>{b}</AlertPanel>)}
 
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              className="h-11"
-              data-testid="toggle-all-sections-btn"
-              onClick={() =>
-                setOpen(Object.fromEntries(sections.map((s) => [s.n, !allExpanded])))
-              }
-            >
-              {allExpanded ? (
-                <>
-                  <ChevronsDownUp className="mr-2 h-4 w-4" /> Collapse all
-                </>
-              ) : (
-                <>
-                  <ChevronsUpDown className="mr-2 h-4 w-4" /> Expand all
-                </>
-              )}
-            </Button>
-          </div>
-
           {sections.map((s) => (
             <section key={s.n} className="rounded-lg border border-border bg-white" data-testid={`section-${s.n}`}>
-              <button type="button" data-testid={`section-toggle-${s.n}`} onClick={() => setOpen((o) => ({ ...o, [s.n]: !o[s.n] }))} className="flex w-full items-center gap-3 px-5 py-4 text-left">
+              <button type="button" data-testid={`section-toggle-${s.n}`} onClick={() => setOpen((o) => ({ ...o, [s.n]: o[s.n] === false }))} className="flex w-full items-center gap-3 px-5 py-4 text-left">
                 <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md text-sm font-bold ${s.done ? "bg-green-50 text-green-700" : "bg-secondary text-primary"}`}>
                   {s.done ? <CircleCheck className="h-5 w-5" /> : s.n}
                 </span>
@@ -786,9 +868,9 @@ export default function Encounter() {
                   <span className="block font-head text-lg font-semibold tracking-tight">{s.title}</span>
                   <span className="block text-xs text-muted-foreground">{s.done ? "Captured" : "Not started"}</span>
                 </span>
-                <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open[s.n] ? "rotate-180" : ""}`} />
+                <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open[s.n] !== false ? "rotate-180" : ""}`} />
               </button>
-              {open[s.n] && <div className="border-t border-border p-5">{s.body}</div>}
+              {open[s.n] !== false && <div className="border-t border-border p-5">{s.body}</div>}
             </section>
           ))}
         </div>

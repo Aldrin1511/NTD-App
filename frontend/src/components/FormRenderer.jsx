@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, TextField, AreaField, SelectField, ChoiceRow, CheckGrid, AlertPanel, ItemActions } from "@/components/Fields";
 import { RELATIONSHIPS, CONTACT_STATUS, CONSENT, AGE_SEX_GROUPS, fmtDate, localISODate, parseDate } from "@/mock/specs";
+import { markFindings, packMark, isExclusiveFinding, findingPatchCount } from "@/lib/markFindings";
 import { Plus, Trash2, Check } from "lucide-react";
 import BodySilhouette from "@/components/BodySilhouette";
 import LfStageHelp from "@/components/LfStageHelp";
@@ -17,10 +18,17 @@ import {
   applyVisionChart,
 } from "@/components/LeprosyReactionCharts";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sourcePatient }) => {
+export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sourcePatient, highlightNfa }) => {
   const set = (k) => (v) => onChange({ ...data, [k]: v });
   const patientGender = gender || "";
   const selectedComplaints = (key) => Object.keys(data[key] || {}).filter((c) => data[key][c] != null);
@@ -57,7 +65,7 @@ export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sou
         }
         if (f.type === "text") return <TextField key={f.k} label={f.label} testid={id} value={v || ""} onChange={(e) => set(f.k)(e.target.value)} />;
         if (f.type === "number") return <TextField key={f.k} label={f.label} type="number" testid={id} value={v ?? ""} onChange={(e) => set(f.k)(e.target.value)} />;
-        if (f.type === "date") return <TextField key={f.k} label={f.label} type="date" testid={id} value={v || ""} onChange={(e) => set(f.k)(e.target.value)} hint={v ? fmtDate(v) : undefined} />;
+        if (f.type === "date") return <TextField key={f.k} label={f.label} type="date" testid={id} value={v || localISODate()} onChange={(e) => set(f.k)(e.target.value)} hint={fmtDate(v || localISODate())} />;
         if (f.type === "textarea") return <AreaField key={f.k} label={f.label} rows={3} testid={id} value={v || ""} onChange={(e) => set(f.k)(e.target.value)} />;
         if (f.type === "select") return <SelectField key={f.k} label={f.label} options={f.options} value={v} onChange={set(f.k)} testid={id} />;
         if (f.type === "yesno") return <ChoiceRow key={f.k} label={f.label} options={["Yes", "No"]} value={v} onChange={set(f.k)} testid={id} />;
@@ -114,6 +122,7 @@ export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sou
               key={f.k}
               id={id}
               value={v || {}}
+              highlightMissing={highlightNfa}
               onChange={(chart) => onChange(applyVmtChart(data, chart))}
             />
           );
@@ -124,6 +133,7 @@ export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sou
               key={f.k}
               id={id}
               value={v || {}}
+              highlightMissing={highlightNfa}
               onChange={(chart) => onChange(applySensoryChart(data, chart))}
             />
           );
@@ -134,6 +144,7 @@ export const FormRenderer = ({ fields, data, onChange, prefix = "f", gender, sou
               key={f.k}
               id={id}
               value={v || {}}
+              highlightMissing={highlightNfa}
               onChange={(chart) => onChange(applyVisionChart(data, chart))}
             />
           );
@@ -209,6 +220,12 @@ const normalizeLabEntries = (value, withDate) => {
   return list.map((x) => (typeof x === "string" ? { result: x, date: "" } : { result: x?.result || "", date: x?.date || "" }));
 };
 
+const resultNeedsSpecimenDate = (result) => {
+  const r = String(result || "").trim();
+  if (!r) return false;
+  return !/^(pending|not done)$/i.test(r);
+};
+
 const RepeatChoice = ({ label, options, value, onChange, id, addLabel = "Add", dateLabel }) => {
   const withDate = Boolean(dateLabel);
   const entries = normalizeLabEntries(value, withDate);
@@ -228,17 +245,16 @@ const RepeatChoice = ({ label, options, value, onChange, id, addLabel = "Add", d
         {entries.map((entry, i) => {
           const result = withDate ? entry.result : entry;
           const date = withDate ? entry.date : "";
+          const showDate = withDate && resultNeedsSpecimenDate(result);
           return (
             <div key={i} className="rounded-md border border-border bg-white p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold text-muted-foreground">
-                  Result {i + 1}
+                  Result {entries.length - i}
                 </p>
                 <ItemActions
                   onAdd={() => {
-                    const next = [...entries];
-                    next.splice(i + 1, 0, emptyLabEntry(withDate));
-                    onChange(next);
+                    onChange([emptyLabEntry(withDate), ...entries]);
                   }}
                   addTestid={`${id}-add-${i}`}
                   canRemove={entries.length > 1}
@@ -251,17 +267,21 @@ const RepeatChoice = ({ label, options, value, onChange, id, addLabel = "Add", d
                   label="Result"
                   options={options}
                   value={result}
-                  onChange={(v) => update(i, withDate ? { result: v } : v)}
+                  onChange={(v) => {
+                    if (!withDate) return update(i, v);
+                    const show = resultNeedsSpecimenDate(v);
+                    update(i, { result: v, date: show ? (date || localISODate()) : "" });
+                  }}
                   testid={`${id}-${i}`}
                 />
-                {withDate && (
+                {showDate && (
                   <TextField
                     label={dateLabel}
                     type="date"
                     testid={`${id}-date-${i}`}
-                    value={date}
+                    value={date || localISODate()}
                     onChange={(e) => update(i, { date: e.target.value })}
-                    hint={date ? fmtDate(date) : undefined}
+                    hint={fmtDate(date || localISODate())}
                   />
                 )}
               </div>
@@ -291,7 +311,7 @@ const Lines = ({ label, value, onChange, id, placeholder }) => {
     <Field label={label}>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input className="h-12 w-full min-w-0 bg-white text-base" placeholder={placeholder} data-testid={`${id}-input`} value={t} onChange={(e) => setT(e.target.value)} />
-        <Button type="button" variant="outline" className="h-12" data-testid={`${id}-add`} onClick={() => { if (t.trim()) { onChange([...value, t.trim()]); setT(""); } }}>
+        <Button type="button" variant="outline" className="h-12" data-testid={`${id}-add`} onClick={() => { if (t.trim()) { onChange([t.trim(), ...value]); setT(""); } }}>
           <Plus className="mr-2 h-4 w-4" /> Add
         </Button>
       </div>
@@ -401,7 +421,7 @@ export const HouseholdCountTable = ({ questions = [], data = {}, onChange, readO
 };
 
 const ContactTable = ({ label, value, onChange, id, prophylaxis = ["None"] }) => {
-  const add = () => onChange([...value, { name: "", age: "", sex: "Male", rel: "Household member", status: "Asymptomatic", consent: "No", prophylaxis: "None", date: new Date().toISOString().slice(0, 10) }]);
+  const add = () => onChange([{ name: "", age: "", sex: "Male", rel: "Household member", status: "Asymptomatic", consent: "No", prophylaxis: "None", date: localISODate() }, ...value]);
   const upd = (i, k, v) => onChange(value.map((c, j) => (j === i ? { ...c, [k]: v } : c)));
   return (
     <Field label={`${label} (${value.length})`}>
@@ -415,7 +435,7 @@ const ContactTable = ({ label, value, onChange, id, prophylaxis = ["None"] }) =>
             {value.length === 0 && <tr><td colSpan={10} className="p-4 text-center text-muted-foreground">No contacts added yet.</td></tr>}
             {value.map((c, i) => (
               <tr key={i} className="border-t border-border">
-                <td className="p-2 font-semibold">{i + 1}</td>
+                <td className="p-2 font-semibold">{value.length - i}</td>
                 <td className="p-2"><Input className="h-10 w-36 bg-white" data-testid={`${id}-name-${i}`} value={c.name} onChange={(e) => upd(i, "name", e.target.value)} /></td>
                 <td className="p-2"><Input type="number" className="h-10 w-16 bg-white" data-testid={`${id}-age-${i}`} value={c.age} onChange={(e) => upd(i, "age", e.target.value)} /></td>
                 {[["sex", ["Male", "Female", "Others"]], ["rel", RELATIONSHIPS], ["status", CONTACT_STATUS], ["consent", CONSENT], ["prophylaxis", prophylaxis]].map(([k, opts]) => (
@@ -439,30 +459,94 @@ const ContactTable = ({ label, value, onChange, id, prophylaxis = ["None"] }) =>
 
 export const NERVE_FINDING_CODES = ["G", "H", "I"];
 
-export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
+const cloneFinding = (f) => ({
+  code: f.code,
+  label: f.label || f.type,
+  ...(f.count != null && f.count !== "" ? { count: f.count } : {}),
+});
+
+export const DiseaseBodyChart = ({ spec, marks = {}, onChange, sex = "Male" }) => {
   const [code, setCode] = useState(spec.bodyChart.codes[0][0]);
+  const [patchAsk, setPatchAsk] = useState(null);
+  const [patchCount, setPatchCount] = useState("1");
   const bodySex = sex === "Female" ? "Female" : "Male";
   const per = spec.bodyChart.perLesion;
   const views = spec.bodyChart.views || ["front"];
   const nerveMode = Boolean(spec.bodyChart.showNerves) && NERVE_FINDING_CODES.includes(code);
   const defaultExtra = per?.default || (per ? per.options[0] : undefined);
+  const patchCountCodes = new Set(spec.bodyChart.patchCountCodes || []);
+
+  const applyPlace = (view, label, { count, findingCode } = {}) => {
+    const useCode = findingCode || code;
+    const key = `${view}:${label}`;
+    const existing = marks[key];
+    const current = markFindings(existing);
+    const findingLabel = spec.bodyChart.codes.find((c) => c[0] === useCode)?.[1];
+    const has = current.some((f) => f.code === useCode);
+    const nextFindings = has
+      ? current.filter((f) => f.code !== useCode).map(cloneFinding)
+      : isExclusiveFinding(useCode)
+        ? [{ code: useCode, label: findingLabel }]
+        : [
+            ...current.filter((f) => !isExclusiveFinding(f.code)).map(cloneFinding),
+            {
+              code: useCode,
+              label: findingLabel,
+              ...(patchCountCodes.has(useCode) ? { count: findingPatchCount({ count }) } : {}),
+            },
+          ];
+    const n = { ...marks };
+    const packed = packMark({
+      view,
+      region: label,
+      findings: nextFindings,
+      extra: per ? existing?.extra || defaultExtra : undefined,
+    });
+    if (!packed) delete n[key];
+    else n[key] = packed;
+    onChange(n);
+  };
 
   const place = (view) => (label) => {
     const key = `${view}:${label}`;
-    if (marks[key]?.code === code) { const n = { ...marks }; delete n[key]; return onChange(n); }
-    onChange({
-      ...marks,
-      [key]: {
-        region: label,
-        view,
-        code,
-        label: spec.bodyChart.codes.find((c) => c[0] === code)?.[1],
-        ...(per ? { extra: marks[key]?.extra || defaultExtra } : {}),
-      },
+    const has = markFindings(marks[key]).some((f) => f.code === code);
+    if (has || !patchCountCodes.has(code) || isExclusiveFinding(code)) {
+      applyPlace(view, label);
+      return;
+    }
+    setPatchCount("1");
+    setPatchAsk({
+      view,
+      label,
+      code,
+      findingLabel: spec.bodyChart.codes.find((c) => c[0] === code)?.[1] || code,
     });
   };
 
+  const confirmPatchCount = () => {
+    if (!patchAsk) return;
+    const n = Math.max(1, Math.round(Number(patchCount)) || 1);
+    applyPlace(patchAsk.view, patchAsk.label, { count: n, findingCode: patchAsk.code });
+    setPatchAsk(null);
+  };
+
+  const removeFinding = (key, findingCode) => {
+    const existing = marks[key];
+    const nextFindings = markFindings(existing).filter((f) => f.code !== findingCode).map(cloneFinding);
+    const n = { ...marks };
+    const packed = packMark({
+      view: existing?.view,
+      region: existing?.region,
+      findings: nextFindings,
+      extra: existing?.extra,
+    });
+    if (!packed) delete n[key];
+    else n[key] = packed;
+    onChange(n);
+  };
+
   const entries = Object.entries(marks);
+  const findingCount = entries.reduce((n, [, m]) => n + markFindings(m).length, 0);
 
   return (
     <div className="space-y-4">
@@ -492,12 +576,12 @@ export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
         ))}
       </div>
       <p className="text-center text-xs text-muted-foreground">
-        Hover a body section to highlight it · click to tag <b>{code}</b> · click again to clear
+        Hover a body section to highlight it · click to add <b>{code}</b> with any other findings on that part · click again to remove only <b>{code}</b>
         {nerveMode ? " · yellow markers are peripheral nerves — tag G, H or I on a nerve only" : ""}
         {per ? ` · set ${per.label || "details"} on each finding` : ""}
       </p>
 
-      <Field label={`Recorded findings (${entries.length})`}>
+      <Field label={`Recorded findings (${findingCount})`}>
         {entries.length === 0 ? (
           <p className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">No findings marked yet.</p>
         ) : (
@@ -506,7 +590,19 @@ export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
               <li key={k} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-white p-3 text-sm">
                 <span className="font-semibold">{m.region}</span>
                 <span className="text-xs text-muted-foreground">{m.view}</span>
-                <span className="rounded bg-secondary px-2 py-0.5 text-xs font-bold text-primary">{m.code} · {m.label}</span>
+                {markFindings(m).map((f) => (
+                  <button
+                    key={f.code || f.label}
+                    type="button"
+                    data-testid={`lesion-chip-${slug(k)}-${slug(f.code || f.label || "")}`}
+                    onClick={() => removeFinding(k, f.code)}
+                    className="rounded bg-secondary px-2 py-0.5 text-xs font-bold text-primary"
+                    title="Remove this finding"
+                  >
+                    {f.code} · {f.label || f.type}
+                    {findingPatchCount(f) > 1 || patchCountCodes.has(f.code) ? ` ×${findingPatchCount(f)}` : ""}
+                  </button>
+                ))}
                 {per && (
                   <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                     <span className="text-xs font-semibold text-muted-foreground">{per.label}</span>
@@ -525,11 +621,47 @@ export const DiseaseBodyChart = ({ spec, marks, onChange, sex = "Male" }) => {
           </ul>
         )}
       </Field>
+
+      <Dialog open={Boolean(patchAsk)} onOpenChange={(o) => { if (!o) setPatchAsk(null); }}>
+        <DialogContent className="sm:max-w-md" data-testid="patch-count-dialog">
+          <DialogHeader>
+            <DialogTitle>How many patches?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {patchAsk ? `${patchAsk.code} — ${patchAsk.findingLabel} on ${patchAsk.label} (${patchAsk.view})` : ""}
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmPatchCount();
+            }}
+            className="space-y-4"
+          >
+            <TextField
+              label="Number of patches"
+              type="number"
+              min="1"
+              step="1"
+              testid="patch-count-input"
+              value={patchCount}
+              onChange={(e) => setPatchCount(e.target.value)}
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button type="button" variant="outline" data-testid="patch-count-cancel" onClick={() => setPatchAsk(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" data-testid="patch-count-confirm">
+                Add
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
-const emptyExamRound = () => ({ marks: {}, secondaryInfection: "", assessment: {} });
+const emptyExamRound = () => ({ marks: {}, secondaryInfection: "", assessment: {}, date: localISODate() });
 
 export const normalizeExamRounds = (data = {}) => {
   if (Array.isArray(data.examRounds) && data.examRounds.length) return data.examRounds;
@@ -549,63 +681,101 @@ export const mergedExamMarks = (rounds = []) =>
     return acc;
   }, {});
 
-/** Repeatable body exam rounds (Yaws / LF / Buruli / Leprosy). */
-export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male" }) => {
+/** Repeatable body exam rounds (Yaws / LF / Buruli / Leprosy / Scabies). */
+export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encounterDate, highlightNfa, focusRound }) => {
   const rounds = value?.length ? value : [emptyExamRound()];
+  const [sel, setSel] = useState(0);
+  const i = Math.min(sel, rounds.length - 1);
+  const round = rounds[i] || emptyExamRound();
   const showRoundSi = !spec.bodyChart?.perLesion && !spec.repeatExamIncludesAssessment;
   const includeAssessment = Boolean(spec.repeatExamIncludesAssessment && spec.assessmentExtra?.length);
-  const update = (i, patch) => {
-    const next = rounds.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+  useEffect(() => {
+    if (focusRound == null || focusRound < 0 || focusRound >= rounds.length) return;
+    setSel(focusRound);
+  }, [focusRound, rounds.length]);
+  const update = (idx, patch) => {
+    const next = rounds.map((r, rIdx) => (rIdx === idx ? { ...r, ...patch } : r));
     onChange(next);
   };
-  const remove = (i) => {
+  const add = () => {
+    onChange([emptyExamRound(), ...rounds]);
+    setSel(0);
+  };
+  const remove = () => {
     if (rounds.length <= 1) return onChange([emptyExamRound()]);
     onChange(rounds.filter((_, j) => j !== i));
+    setSel(0);
   };
 
   return (
-    <div className="space-y-6" data-testid="repeatable-exam">
-      {rounds.map((round, i) => (
-        <div key={i} className="space-y-4 rounded-lg border border-border bg-white p-4" data-testid={`exam-round-${i}`}>
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="font-head text-base font-semibold tracking-tight">Assessment {i + 1}</h4>
-            <ItemActions
-              onAdd={() => {
-                const next = [...rounds];
-                next.splice(i + 1, 0, emptyExamRound());
-                onChange(next);
-              }}
-              addTestid={`exam-round-add-${i}`}
-              canRemove={rounds.length > 1}
-              onRemove={() => remove(i)}
-              removeTestid={`exam-round-remove-${i}`}
-            />
-          </div>
-          <DiseaseBodyChart
-            spec={spec}
-            marks={round.marks || {}}
-            onChange={(marks) => update(i, { marks })}
-            sex={sex}
-          />
-          {includeAssessment && (
-            <FormRenderer
-              fields={spec.assessmentExtra}
-              data={round.assessment || {}}
-              onChange={(assessment) => update(i, { assessment })}
-              prefix={`exam-${i}-assess`}
-            />
-          )}
-          {showRoundSi && (
-            <ChoiceRow
-              label="Secondary infection?"
-              options={["Yes", "No"]}
-              value={round.secondaryInfection}
-              onChange={(v) => update(i, { secondaryInfection: v })}
-              testid={`exam-round-si-${i}`}
-            />
-          )}
+    <div className="space-y-4" data-testid="repeatable-exam">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1" data-testid="exam-round-chips">
+          {rounds.map((r, idx) => {
+            const selected = idx === i;
+            return (
+              <button
+                key={idx}
+                type="button"
+                data-testid={`exam-round-chip-${idx}`}
+                onClick={() => setSel(idx)}
+                className="shrink-0 text-left"
+              >
+                <span
+                  className={`flex h-8 items-center rounded-full border px-3 text-xs font-semibold ${
+                    selected
+                      ? "border-primary bg-primary text-white"
+                      : "border-border bg-white text-foreground hover:bg-muted"
+                  }`}
+                >
+                  Assessment {rounds.length - idx}
+                </span>
+                <span className="mt-1 block text-center text-[11px] font-medium text-muted-foreground">
+                  {fmtDate(r.date || encounterDate)}
+                </span>
+              </button>
+            );
+          })}
         </div>
-      ))}
+        <ItemActions
+          onAdd={add}
+          addTestid="exam-round-add"
+          canRemove={rounds.length > 1}
+          onRemove={remove}
+          removeTestid="exam-round-remove"
+        />
+      </div>
+      <div className="space-y-4 rounded-lg border border-border bg-white p-4" data-testid={`exam-round-${i}`}>
+        <DiseaseBodyChart
+          spec={spec}
+          marks={round.marks || {}}
+          onChange={(marks) => update(i, {
+            marks,
+            assessment: spec.id === "leprosy"
+              ? { ...(round.assessment || {}), patches: "" }
+              : round.assessment,
+          })}
+          sex={sex}
+        />
+        {includeAssessment && (
+          <FormRenderer
+            fields={spec.assessmentExtra}
+            data={round.assessment || {}}
+            onChange={(assessment) => update(i, { assessment })}
+            prefix={`exam-${i}-assess`}
+            highlightNfa={highlightNfa}
+          />
+        )}
+        {showRoundSi && (
+          <ChoiceRow
+            label="Secondary infection?"
+            options={["Yes", "No"]}
+            value={round.secondaryInfection}
+            onChange={(v) => update(i, { secondaryInfection: v })}
+            testid={`exam-round-si-${i}`}
+          />
+        )}
+      </div>
     </div>
   );
 };
@@ -809,7 +979,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         <p className="text-xs font-semibold text-muted-foreground">Drug adherence — MDT</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {cfg.regimen ? `${cfg.regimen} course ${cfg.courseMonths} months · showing ${cfg.checkboxMonths} month checkboxes.` : "MDT month-wise drug adherence."}
-          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. Restart is highlighted after more than ${cfg.restartMissed} months not taken.`}
+          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. Restart appears on the current regimen after ${cfg.restartMissed} months not taken.`}
         </p>
       </div>
 
@@ -821,8 +991,8 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         const start = parseDate(line.startDate) || new Date();
         const missed = Object.values(line.months || {}).filter((v) => v === false).length;
         const taken = Object.values(line.months || {}).filter((v) => v === true).length;
-        const highlightRestart = missed > lineCfg.restartMissed;
         const isLatest = lineIdx === displayLines.length - 1;
+        const showRestart = isLatest && !readOnly && missed >= lineCfg.restartMissed;
 
         return (
           <div
@@ -842,8 +1012,8 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                     type="date"
                     className="h-11 max-w-xs bg-white text-base"
                     data-testid={`mdt-start-${lineIdx}`}
-                    value={line.startDate || ""}
-                    onChange={(e) => updateLine(line.id, { startDate: e.target.value })}
+                    value={line.startDate || localISODate()}
+                    onChange={(e) => updateLine(line.id, { startDate: e.target.value || localISODate() })}
                     disabled={readOnly || !isLatest}
                     readOnly={readOnly}
                   />
@@ -852,15 +1022,15 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                   Start {fmtDate(line.startDate) || "—"} · {taken} taken · {missed} not taken
                 </p>
               </div>
-              {isLatest && !readOnly && (
+              {showRestart && (
                 <Button
                   type="button"
-                  variant={highlightRestart ? "default" : "outline"}
-                  className={`h-11 ${highlightRestart ? "ring-2 ring-amber-400 ring-offset-2" : ""}`}
+                  variant="default"
+                  className="h-11 ring-2 ring-amber-400 ring-offset-2"
                   data-testid="adherence-restart"
                   onClick={() => restart(line)}
                 >
-                  Restart{highlightRestart ? " (recommended)" : ""}
+                  Restart
                 </Button>
               )}
             </div>

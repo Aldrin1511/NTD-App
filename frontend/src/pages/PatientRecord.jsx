@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertPanel, SelectField, TextField, ChoiceRow } from "@/components/Fields";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DISEASE_SPECS, assessmentSpecs, fmtDate, fmtDateTime, visitLabel, groupDiseaseEpisodes, leprosyScores, leprosyClass } from "@/mock/specs";
+import { DISEASE_SPECS, SPEC_LIST, assessmentSpecs, fmtDate, fmtDateTime, visitLabel, groupDiseaseEpisodes, leprosyScores, leprosyClass, localISODate } from "@/mock/specs";
+import { markFindings, findingPatchCount } from "@/lib/markFindings";
 import { GEO } from "@/mock/data";
 import { compactValue, sectionFingerprint } from "@/sectionDiff";
 import { toast } from "sonner";
@@ -31,8 +32,6 @@ const FEATURES = [
   ["household", "Household Contact Tracing"], ["reactions", "Lepra reactions"], ["notes", "Visit notes"], ["outcome", "Final case outcome"],
 ];
 
-const EDITABLE_FEATURES = new Set(["marks", "lab", "drugs", "notes"]);
-
 const featureSectionNumber = (key, diseaseId) => {
   if (key === "reactions") return 8;
   if (key === "notes") return diseaseId === "leprosy" ? 9 : 8;
@@ -40,14 +39,23 @@ const featureSectionNumber = (key, diseaseId) => {
   return { caseDetails: 1, history: 2, marks: 3, lab: 4, diagnosis: 5, drugs: 6, adherence: 6, household: 7 }[key] || 1;
 };
 
-const isPastEditedSection = (visit, latestId, featureKey) =>
-  !!(visit?.id && visit.id !== latestId && (visit.editedSections || []).includes(featureKey));
+const isEditedSection = (visit, featureKey) =>
+  !!visit && (visit.editedSections || []).includes(featureKey);
 
 const EditedBadge = () => (
   <Badge variant="outline" className="rounded border-amber-300 bg-amber-50 text-amber-800" data-testid="edited-badge">
     Edited
   </Badge>
 );
+
+const newestFirst = (items, getDate = (x) => (x && typeof x === "object" ? x.date : "")) => {
+  const arr = Array.isArray(items) ? [...items] : [];
+  if (arr.length < 2) return arr;
+  if (arr.some((x) => getDate(x))) {
+    return arr.sort((a, b) => String(getDate(b) || "0000").localeCompare(String(getDate(a) || "0000")));
+  }
+  return arr.reverse();
+};
 
 /** Keep a visit in a dashboard section only when that section’s data changed vs the previous visit. */
 const rowsForChangedSection = (visits, key, spec, patient) => {
@@ -65,6 +73,7 @@ const rowsForChangedSection = (visits, key, spec, patient) => {
   });
   return (visits || [])
     .filter((e) => keep.has(e.id))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
     .map((e) => ({ e, s: summarise(key, e, spec, patient) }))
     .filter((r) => r.s);
 };
@@ -79,16 +88,16 @@ const examChipFingerprint = (exam) => JSON.stringify(compactValue({
 
 const uniqueExamChips = (rows) => {
   const seen = new Set();
-  const oldestFirst = [];
-  [...rows].reverse().forEach((r) => {
-    (r.s?.kind === "exam" ? r.s.exams : []).slice().reverse().forEach((exam) => {
+  const out = [];
+  (rows || []).forEach((r) => {
+    (r.s?.kind === "exam" ? r.s.exams : []).forEach((exam) => {
       const fp = examChipFingerprint(exam);
       if (!fp || seen.has(fp)) return;
       seen.add(fp);
-      oldestFirst.push(exam);
+      out.push(exam);
     });
   });
-  return oldestFirst.reverse();
+  return out;
 };
 
 const hasValue = (v) => {
@@ -226,20 +235,30 @@ const findingNameOf = (m, spec) => {
   return "";
 };
 
-const bodyPartOf = (m) => m.region || (m.code ? "" : m.label) || "";
+const bodyPartOf = (m) => {
+  if (m.region) return m.region;
+  if (m.code || (Array.isArray(m.findings) && m.findings.length)) return "";
+  return m.label || "";
+};
 
 const groupExamFindings = (marks, spec) => {
   const order = (spec?.bodyChart?.codes || []).map((c) => c[1]);
   const groups = new Map();
   Object.values(marks || {}).forEach((m) => {
-    const name = findingNameOf(m, spec);
     const part = bodyPartOf(m);
-    if (!name && !part) return;
-    const key = name || "Finding";
     const extra = m.extra && m.extra !== "None" ? m.extra : "";
-    const loc = [part, extra].filter(Boolean).join(" · ");
-    if (!groups.has(key)) groups.set(key, []);
-    if (!groups.get(key).includes(loc)) groups.get(key).push(loc);
+    markFindings(m).forEach((f) => {
+      const name = findingNameOf({ ...m, ...f }, spec);
+      if (!name && !part) return;
+      const key = name || "Finding";
+      const loc = (() => {
+        const n = findingPatchCount(f);
+        const partLabel = part && n > 1 ? `${part} ×${n}` : part;
+        return [partLabel, extra].filter(Boolean).join(" · ");
+      })();
+      if (!groups.has(key)) groups.set(key, []);
+      if (!groups.get(key).includes(loc)) groups.get(key).push(loc);
+    });
   });
   const names = [...groups.keys()].sort((a, b) => {
     const ia = order.indexOf(a);
@@ -258,7 +277,7 @@ const groupExamFindings = (marks, spec) => {
 const formatExamExtraValue = (field, value) => {
   if (field.type === "repeatChoice") {
     const list = Array.isArray(value) ? value : value != null && value !== "" ? [value] : [];
-    return list
+    return newestFirst(list)
       .map((item) => {
         if (item == null || item === "") return "";
         if (typeof item === "string") return item;
@@ -281,16 +300,22 @@ const examExtras = (assessment, spec) =>
     })
     .filter(Boolean);
 
+const hasClock = (v) => /T\d{2}:\d{2}/.test(String(v || ""));
+
+const entryDateTime = (primary, fallback) =>
+  fmtDateTime(hasClock(primary) ? primary : (hasClock(fallback) ? fallback : primary || fallback));
+
 const examChipLabel = (exam) => {
-  const base = `${fmtDate(exam.date)} · ${exam.type || "Examination"}`;
-  return exam.roundCount > 1 ? `${base} · ${exam.roundIndex + 1}` : base;
+  const base = `${entryDateTime(exam.date, exam.editedAt || exam.encounterDate)} · ${exam.type || "Examination"}`;
+  return exam.roundCount > 1 ? `${base} · Assessment ${exam.roundIndex + 1}` : base;
 };
 
 const summariseExam = (e, spec) => {
   const x = e.data || {};
-  const rounds = Array.isArray(x.examRounds) && x.examRounds.length
+  const raw = Array.isArray(x.examRounds) && x.examRounds.length
     ? x.examRounds
     : [{ marks: x.marks || {}, secondaryInfection: x.assessment?.secondaryInfection, assessment: x.assessment || {} }];
+  const rounds = newestFirst(raw);
 
   const exams = rounds
     .map((round, i) => {
@@ -324,10 +349,11 @@ const summariseExam = (e, spec) => {
         id: `${e.id}-${i}`,
         encounterId: e.id,
         editedAt: e.editedAt,
-        date: e.date,
+        encounterDate: e.date,
+        date: round.date || e.date,
         type: e.type,
         worker: e.worker,
-        roundIndex: i,
+        roundIndex: rounds.length - 1 - i,
         roundCount: rounds.length,
         findings,
         secondaryInfection: hasValue(si) ? si : "",
@@ -338,7 +364,7 @@ const summariseExam = (e, spec) => {
     .filter(Boolean);
 
   if (!exams.length) return "";
-  return { kind: "exam", exams: exams.slice().reverse() };
+  return { kind: "exam", exams };
 };
 
 const ExamSummary = ({ exam }) => {
@@ -373,7 +399,7 @@ const ExamSummary = ({ exam }) => {
           <p className="text-sm">
             <span className="text-muted-foreground">EHF score:</span>{" "}
             <span className="font-medium">
-              Eyes {lep.rightEye}, {lep.leftEye} · Hands {lep.rightHand}, {lep.leftHand} · Feet {lep.rightFoot}, {lep.leftFoot}
+              Eyes {lep.leftEye}(left), {lep.rightEye}(right) · Hands {lep.leftHand}(left), {lep.rightHand}(right) · Feet {lep.leftFoot}(left), {lep.rightFoot}(right)
             </span>
           </p>
           <p className="text-sm">
@@ -411,7 +437,7 @@ const summariseLab = (lab, spec, encounterDate) => {
   let anyRecorded = false;
 
   for (const field of fields) {
-    const entries = labEntries(lab?.[field.k]);
+    const entries = newestFirst(labEntries(lab?.[field.k]));
     const recorded = entries.filter((x) => String(x.result || "").trim());
     if (recorded.length) anyRecorded = true;
     const done = recorded.filter((x) => !isNotDoneResult(x.result));
@@ -463,18 +489,19 @@ const medicationRows = (e, spec, patient) => {
   const add = (row, names = [], courseKey) => {
     (names.length ? names : [row.name]).forEach((n) => used.add(n));
     const key = courseKey || row.name;
-    const list = Array.isArray(x.medCourses?.[key]) ? x.medCourses[key] : [];
+    const list = Array.isArray(x.medCourses?.[key]) ? newestFirst(x.medCourses[key]) : [];
     const stamps = list.some((c) => c?.date)
-      ? list.map((c) => (c?.date ? fmtDate(c.date) : date || "—"))
-      : [row.date || date || "—"];
-    stamps.forEach((stamp, i) => {
+      ? list.map((c, i) => ({ stamp: c?.date ? fmtDate(c.date) : date || "—", n: list.length - i }))
+      : [{ stamp: row.date || date || "—", n: 1 }];
+    stamps.forEach(({ stamp, n }) => {
+      const ov = (x.posology || {})[row.name] || {};
       rows.push({
-        name: stamps.length > 1 ? `${row.name} (${i + 1})` : row.name,
-        dosage: row.dosage || "—",
+        name: stamps.length > 1 ? `${row.name} (${n})` : row.name,
+        dosage: ov.dosage || row.dosage || "—",
         date: stamp,
-        frequency: row.frequency || "—",
-        duration: row.duration || "—",
-        advice: row.advice || "",
+        frequency: ov.frequency || row.frequency || "—",
+        duration: ov.duration || row.duration || "—",
+        advice: ov.advice || row.advice || "",
       });
     });
   };
@@ -732,7 +759,7 @@ const summariseHousehold = (e, spec) => {
   if (fields.some((f) => f.type === "leprosyHousehold")) {
     const contacts = Array.isArray(hh.contacts) ? hh.contacts : Array.isArray(hh) ? hh : [];
     if (!contacts.length) return "";
-    return { kind: "hh-leprosy", contacts };
+    return { kind: "hh-leprosy", contacts: newestFirst(contacts, (c) => c.examDate || c.administrationDate) };
   }
   const questions = fields.filter((f) => f.type === "groupCount");
   if (!questions.length || !householdHasCounts(hh, questions)) return "";
@@ -765,7 +792,10 @@ const formatReactionOnset = (r) => {
 };
 
 const summariseReactions = (e) => {
-  const list = Array.isArray(e.data?.reactions) ? e.data.reactions : [];
+  const list = newestFirst(
+    Array.isArray(e.data?.reactions) ? e.data.reactions : [],
+    (r) => r.diagnosisDate || r.onsetDate,
+  );
   if (!list.length) return "";
   const assessments = list.map((r) => {
     const details = [];
@@ -959,13 +989,12 @@ export default function PatientRecord() {
   const navigate = useNavigate();
   const { patients, encounters, user, suspects, facilities, settings } = useStore();
   const p = patients.find((x) => x.id === id);
-  const [tab, setTab] = useState("suspect");
+  const [tab, setTab] = useState("");
   const [lhs, setLhs] = useState(true);
   const [featureOpen, setFeatureOpen] = useState(() => Object.fromEntries(FEATURES.map(([k]) => [k, true])));
-  const [enc, setEnc] = useState({ show: false, facility: "", date: new Date().toISOString().slice(0, 10), visitType: "", referral: "No", disease: "", province: "", district: "" });
+  const [enc, setEnc] = useState({ show: false, facility: "", date: localISODate(), visitType: "", referral: "No", disease: "", province: "", district: "", prevFacility: "" });
   const [photoView, setPhotoView] = useState(null);
   const [episodeSel, setEpisodeSel] = useState({});
-  const [examSel, setExamSel] = useState({});
   const canEdit = user?.canEdit;
   const photoCount = photoView?.photos?.length || 0;
   const photoIndex = photoView?.index ?? 0;
@@ -979,27 +1008,33 @@ export default function PatientRecord() {
 
   const encs = useMemo(() => encounters.filter((e) => e.patientId === id).sort((a, b) => b.date.localeCompare(a.date)), [encounters, id]);
   const mySuspects = useMemo(() => suspects.filter((s) => s.patientId === id).sort((a, b) => b.date.localeCompare(a.date)), [suspects, id]);
-  const myDiseases = useMemo(() => assessmentSpecs(id, { suspects: mySuspects, encounters: encs }), [id, mySuspects, encs]);
+  const myDiseases = useMemo(() => assessmentSpecs(id, { encounters: encs }), [id, encs]);
+  const hasSuspects = mySuspects.length > 0;
+  const activeTab =
+    tab === "suspect" && hasSuspects
+      ? "suspect"
+      : myDiseases.some((d) => d.id === tab)
+        ? tab
+        : hasSuspects
+          ? "suspect"
+          : myDiseases[0]?.id || "";
   const episodesByDisease = useMemo(() => {
     const map = {};
     for (const d of myDiseases) map[d.id] = groupDiseaseEpisodes(encs, d.id, p?.episodeId);
     return map;
   }, [encs, myDiseases, p?.episodeId]);
-  useEffect(() => {
-    if (tab !== "suspect" && !myDiseases.some((d) => d.id === tab)) setTab("suspect");
-  }, [tab, myDiseases]);
 
-  const selectedEpisode = (episodesByDisease[tab] || []).find((e) => e.id === episodeSel[tab]) || (episodesByDisease[tab] || [])[0];
+  const selectedEpisode = (episodesByDisease[activeTab] || []).find((e) => e.id === episodeSel[activeTab]) || (episodesByDisease[activeTab] || [])[0];
   const featureRows = useMemo(() => {
-    if (!myDiseases.some((x) => x.id === tab)) return [];
+    if (!myDiseases.some((x) => x.id === activeTab)) return [];
     const visits = selectedEpisode?.visits || [];
-    const spec = DISEASE_SPECS[tab];
+    const spec = DISEASE_SPECS[activeTab];
     return FEATURES.map(([k, label]) => ({
       k,
       label,
       rows: rowsForChangedSection(visits, k, spec, p),
     })).filter((f) => f.rows.length);
-  }, [tab, selectedEpisode, myDiseases, p]);
+  }, [activeTab, selectedEpisode, myDiseases, p]);
 
   if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate("/patients")}>Back to patients</Button></AppShell>;
 
@@ -1011,20 +1046,19 @@ export default function PatientRecord() {
     navigate(enc.disease ? `/patients/${p.id}/encounter/${enc.disease}?${q}` : `/patients/${p.id}/suspect?${q}`);
   };
 
-  const latestVisitId = selectedEpisode?.visits?.[0]?.id;
   const openFeatureEncounter = (visit, featureKey) => {
     if (!canEdit) return;
     const target = visit || selectedEpisode?.visits?.[0];
     if (!target) {
-      setEnc((s) => ({ ...s, show: true, disease: tab !== "suspect" && DISEASE_SPECS[tab] ? tab : s.disease }));
+      setEnc((s) => ({ ...s, show: true, disease: activeTab !== "suspect" && DISEASE_SPECS[activeTab] ? activeTab : s.disease }));
       return;
     }
-    const disease = target.disease || tab;
+    const disease = target.disease || activeTab;
     const section = featureSectionNumber(featureKey, disease);
     navigate(`/patients/${p.id}/encounter/${disease}?enc=${encodeURIComponent(target.id)}&section=${section}`);
   };
 
-  const tabs = [["suspect", "Suspect"], ...myDiseases.map((d) => [d.id, d.name])];
+  const tabs = [...(hasSuspects ? [["suspect", "Suspect"]] : []), ...myDiseases.map((d) => [d.id, d.name])];
   const allExpanded = featureRows.length > 0 && featureRows.every((f) => featureOpen[f.k] !== false);
   const referralDistricts = enc.province ? Object.keys(GEO[enc.province] || {}) : [];
   const locationOptions = facilities
@@ -1039,7 +1073,7 @@ export default function PatientRecord() {
 
   const actions = (
     <div className="flex shrink-0 flex-wrap justify-end gap-2" data-testid="record-actions">
-      <Button className="h-11" data-testid="add-encounter-btn" disabled={!canEdit} onClick={() => setEnc({ ...enc, show: true, disease: tab !== "suspect" && DISEASE_SPECS[tab] ? tab : "" })}>
+      <Button className="h-11" data-testid="add-encounter-btn" disabled={!canEdit} onClick={() => setEnc({ ...enc, show: true, disease: activeTab !== "suspect" && DISEASE_SPECS[activeTab] ? activeTab : "" })}>
         <Plus className="h-4 w-4" /> Encounter
       </Button>
       {p.phone && (
@@ -1064,23 +1098,6 @@ export default function PatientRecord() {
           </a>
         </>
       )}
-      {featureRows.length > 0 && (
-        <button
-          type="button"
-          data-testid="toggle-all-features-btn"
-          aria-label={allExpanded ? "Unfold less" : "Unfold more"}
-          title={allExpanded ? "Collapse all" : "Expand all"}
-          onClick={() =>
-            setFeatureOpen((prev) => ({
-              ...prev,
-              ...Object.fromEntries(featureRows.map((f) => [f.k, !allExpanded])),
-            }))
-          }
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-border text-primary hover:bg-secondary"
-        >
-          {allExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
-        </button>
-      )}
       <Button variant="outline" className="h-11" data-testid="back-btn" onClick={() => navigate("/patients")}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
     </div>
   );
@@ -1094,6 +1111,7 @@ export default function PatientRecord() {
             encounters={encs}
             diseases={myDiseases}
             onCollapse={() => setLhs(false)}
+            onEdit={canEdit ? () => navigate(`/patients/${p.id}/edit`) : undefined}
             testid="lhs-panel"
           />
         )}
@@ -1116,13 +1134,13 @@ export default function PatientRecord() {
                 if (k === "suspect") {
                   return (
                     <button key={k} data-testid={`tab-${k}`} onClick={() => setTab(k)}
-                      className={`h-11 shrink-0 rounded-md border px-4 text-sm font-semibold ${tab === k ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"}`}>{label}</button>
+                      className={`h-11 shrink-0 rounded-md border px-4 text-sm font-semibold ${activeTab === k ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"}`}>{label}</button>
                   );
                 }
                 const episodes = episodesByDisease[k] || [];
                 const current = episodes.find((e) => e.id === episodeSel[k]) || episodes[0];
                 const visits = current ? visitLabel(current.visitCount) : "";
-                const active = tab === k;
+                const active = activeTab === k;
                 const tabCls = `h-11 shrink-0 rounded-md border text-sm font-semibold ${active ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"}`;
                 if (episodes.length > 1) {
                   return (
@@ -1182,12 +1200,14 @@ export default function PatientRecord() {
 
           {!canEdit && <div className="mb-4"><AlertPanel level="review" title="View-only access" testid="readonly-alert">Your access level allows viewing this record but not editing.</AlertPanel></div>}
 
-          {tab === "suspect" && (
+          {!hasSuspects && myDiseases.length === 0 && (
+            <AlertPanel level="info" title="No encounters yet" testid="no-encounters">
+              Click Encounter to start suspect screening, then continue with the procedure.
+            </AlertPanel>
+          )}
+
+          {activeTab === "suspect" && hasSuspects && (
             <div className="space-y-3" data-testid="suspect-tab">
-              {/* <Button className="h-11" data-testid="new-suspect-btn" disabled={!canEdit} onClick={() => navigate(`/patients/${p.id}/suspect`)}>
-                <Stethoscope className="mr-2 h-4 w-4" /> New suspect screening
-              </Button> */}
-              {mySuspects.length === 0 && <AlertPanel level="info" title="No suspect screening yet" testid="no-suspect">Record complaints, photos and the suspected NTD here first.</AlertPanel>}
               {mySuspects.map((s) => (
                 <div key={s.id} className="rounded-lg border border-border bg-white p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -1229,13 +1249,13 @@ export default function PatientRecord() {
             </div>
           )}
 
-          {myDiseases.some((x) => x.id === tab) && (
-            <div className="space-y-4" data-testid={`condition-tab-${tab}`}>
+          {myDiseases.some((x) => x.id === activeTab) && (
+            <div className="space-y-4" data-testid={`condition-tab-${activeTab}`}>
               {selectedEpisode && (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-white px-4 py-3" data-testid="episode-summary">
                   <div>
                     <p className="font-semibold">
-                      Episode {episodeNumber(episodesByDisease[tab], selectedEpisode.id)}
+                      Episode {episodeNumber(episodesByDisease[activeTab], selectedEpisode.id)}
                       {" · "}{visitLabel(selectedEpisode.visitCount)}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -1243,21 +1263,34 @@ export default function PatientRecord() {
                       {selectedEpisode.diagnosis ? ` · ${selectedEpisode.diagnosis}` : ""}
                     </p>
                   </div>
-                  <Badge variant="outline" className="rounded">{episodeStatus(selectedEpisode.outcome)}</Badge>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {featureRows.length > 0 && (
+                      <button
+                        type="button"
+                        data-testid="toggle-all-features-btn"
+                        aria-label={allExpanded ? "Unfold less" : "Unfold more"}
+                        title={allExpanded ? "Collapse all" : "Expand all"}
+                        onClick={() =>
+                          setFeatureOpen((prev) => ({
+                            ...prev,
+                            ...Object.fromEntries(featureRows.map((f) => [f.k, !allExpanded])),
+                          }))
+                        }
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-primary hover:bg-secondary"
+                      >
+                        {allExpanded ? <UnfoldLessIcon className="h-5 w-5" /> : <UnfoldMoreIcon className="h-5 w-5" />}
+                      </button>
+                    )}
+                    <Badge variant="outline" className="rounded">{episodeStatus(selectedEpisode.outcome)}</Badge>
+                  </div>
                 </div>
               )}
               {featureRows.map(({ k, label, rows }) => {
                 const isOpen = featureOpen[k] !== false;
                 const exams = k === "marks" ? uniqueExamChips(rows) : [];
-                const examKey = `${tab}:${selectedEpisode?.id || ""}`;
-                const selectedExam = exams.find((x) => x.id === examSel[examKey]) || exams[0];
                 const last = exams[0] || rows[0]?.e;
                 const lastAt = last?.date ? fmtDateTime(last.date) : "";
                 const entryCount = exams.length || rows.length;
-                const examVisit = selectedExam
-                  ? (selectedEpisode?.visits || []).find((v) => v.id === selectedExam.encounterId)
-                    || encounters.find((v) => v.id === selectedExam.encounterId)
-                  : null;
                 return (
                   <section key={k} className="rounded-lg border border-border bg-white" data-testid={`feature-${k}`}>
                     <div className="flex w-full items-center gap-3 px-4 py-3">
@@ -1275,18 +1308,6 @@ export default function PatientRecord() {
                             {lastAt}
                           </span>
                         )}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-primary"
-                          data-testid={`feature-add-${k}`}
-                          disabled={!canEdit}
-                          aria-label={`Add ${label}`}
-                          onClick={() => openFeatureEncounter(selectedEpisode?.visits?.[0], k)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
                         <Badge variant="outline" className="rounded">{entryCount} entr{entryCount === 1 ? "y" : "ies"}</Badge>
                         <button
                           type="button"
@@ -1301,59 +1322,43 @@ export default function PatientRecord() {
                     {isOpen && (
                       <div className="divide-y divide-border border-t border-border">
                         {k === "marks" && exams.length > 0 ? (
-                          <div className="px-4 py-3">
-                            {exams.length > 1 && (
-                              <div className="mb-3 flex gap-2 overflow-x-auto pb-1" data-testid="exam-chips">
-                                {exams.map((exam) => {
-                                  const selected = selectedExam?.id === exam.id;
-                                  return (
-                                    <button
-                                      key={exam.id}
+                          exams.map((exam) => {
+                            const examVisit = (selectedEpisode?.visits || []).find((v) => v.id === exam.encounterId)
+                              || encounters.find((v) => v.id === exam.encounterId);
+                            return (
+                              <div key={exam.id} className="px-4 py-3" data-testid={`exam-entry-${exam.id}`}>
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-primary">
+                                    <span>{examChipLabel(exam)} · {exam.worker}</span>
+                                    {isEditedSection(examVisit, "marks") && <EditedBadge />}
+                                  </p>
+                                  {canEdit && (
+                                    <Button
                                       type="button"
-                                      data-testid={`exam-chip-${exam.id}`}
-                                      onClick={() => setExamSel((s) => ({ ...s, [examKey]: exam.id }))}
-                                      className={`h-8 shrink-0 rounded-full border px-3 text-xs font-semibold ${
-                                        selected
-                                          ? "border-primary bg-primary text-white"
-                                          : "border-border bg-white text-foreground hover:bg-muted"
-                                      }`}
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-9 w-9 text-primary"
+                                      data-testid={`feature-edit-marks-${exam.id}`}
+                                      aria-label="Edit examination"
+                                      onClick={() => openFeatureEncounter(examVisit, "marks")}
                                     >
-                                      {examChipLabel(exam)}
-                                    </button>
-                                  );
-                                })}
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                                <ExamSummary exam={exam} />
                               </div>
-                            )}
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-primary">
-                                <span>{fmtDate(selectedExam.date)} · {selectedExam.worker} · {selectedExam.type}</span>
-                                {isPastEditedSection(examVisit || selectedExam, latestVisitId, "marks") && <EditedBadge />}
-                              </p>
-                              {canEdit && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-9 w-9 text-primary"
-                                  data-testid="feature-edit-marks"
-                                  aria-label="Edit examination"
-                                  onClick={() => openFeatureEncounter(examVisit, "marks")}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              )}
-                            </div>
-                            <ExamSummary exam={selectedExam} />
-                          </div>
+                            );
+                          })
                         ) : (
                           rows.map(({ e, s }) => (
                             <div key={e.id} className="px-4 py-3">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-primary">
-                                  <span>{fmtDate(e.date)} · {e.worker} · {e.type}</span>
-                                  {isPastEditedSection(e, latestVisitId, k) && <EditedBadge />}
+                                  <span>{entryDateTime(e.date, e.editedAt)} · {e.worker} · {e.type}</span>
+                                  {isEditedSection(e, k) && <EditedBadge />}
                                 </p>
-                                {canEdit && EDITABLE_FEATURES.has(k) && (
+                                {canEdit && (
                                   <Button
                                     type="button"
                                     variant="ghost"
@@ -1395,7 +1400,7 @@ export default function PatientRecord() {
                 );
               })}
               {!selectedEpisode && (
-                <AlertPanel level="info" title={`No ${DISEASE_SPECS[tab].name} data yet`} testid="empty-condition">Add an encounter to start this condition record.</AlertPanel>
+                <AlertPanel level="info" title={`No ${DISEASE_SPECS[activeTab].name} data yet`} testid="empty-condition">Add an encounter to start this condition record.</AlertPanel>
               )}
             </div>
           )}
@@ -1467,7 +1472,29 @@ export default function PatientRecord() {
               label="Referral"
               options={["Yes", "No"]}
               value={enc.referral}
-              onChange={(v) => setEnc({ ...enc, referral: v, province: "", district: "", facility: v === "Yes" ? "" : enc.facility })}
+              onChange={(v) =>
+                setEnc((s) => {
+                  const referral = v || "No";
+                  if (referral === "Yes") {
+                    return {
+                      ...s,
+                      referral,
+                      province: "",
+                      district: "",
+                      facility: "",
+                      prevFacility: s.facility || s.prevFacility,
+                    };
+                  }
+                  return {
+                    ...s,
+                    referral,
+                    province: "",
+                    district: "",
+                    facility: s.prevFacility || s.facility,
+                    prevFacility: "",
+                  };
+                })
+              }
               testid="encounter-referral"
             />
             {enc.referral === "Yes" && (
@@ -1496,9 +1523,9 @@ export default function PatientRecord() {
               testid="encounter-facility-select"
               hint={enc.referral === "Yes" && !enc.district ? "Select province and district to see referral locations" : enc.referral === "Yes" && locationOptions.length === 0 ? "No facilities listed for this district" : undefined}
             />
-            <SelectField label="Go to" options={["Suspect screening", ...myDiseases.map((s) => s.name)]}
-              value={enc.disease && myDiseases.some((d) => d.id === enc.disease) ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
-              onChange={(v) => setEnc({ ...enc, disease: myDiseases.find((s) => s.name === v)?.id || "" })} testid="encounter-target-select" />
+            <SelectField label="Go to" options={["Suspect screening", ...SPEC_LIST.map((s) => s.name)]}
+              value={enc.disease && DISEASE_SPECS[enc.disease] ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
+              onChange={(v) => setEnc({ ...enc, disease: SPEC_LIST.find((s) => s.name === v)?.id || "" })} testid="encounter-target-select" />
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" className="h-12" data-testid="encounter-cancel" onClick={() => setEnc({ ...enc, show: false })}>Cancel</Button>

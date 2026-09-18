@@ -23,6 +23,62 @@ const numOr = (v, fallback = null) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+export const COMPARE_OPS = [
+  { id: "lt", label: "Less than", symbol: "<" },
+  { id: "gt", label: "More than", symbol: ">" },
+  { id: "eq", label: "Equal to", symbol: "=" },
+  { id: "lte", label: "Less than or equal to", symbol: "≤" },
+  { id: "gte", label: "More than or equal to", symbol: "≥" },
+];
+
+export function matchesCompare(actual, op, target) {
+  if (!op || op === "any") return true;
+  const t = Number(target);
+  if (!Number.isFinite(t)) return true;
+  const n = Number(actual);
+  if (!Number.isFinite(n)) return true;
+  if (op === "lt") return n < t;
+  if (op === "gt") return n > t;
+  if (op === "eq") return n === t;
+  if (op === "lte") return n <= t;
+  if (op === "gte") return n >= t;
+  return true;
+}
+
+export function formatCompareRule(op, value, unit) {
+  if (!op || op === "any" || value === "" || value == null) return "Any";
+  const def = COMPARE_OPS.find((o) => o.id === op);
+  return `${def?.symbol || ""} ${value}${unit || ""}`.trim();
+}
+
+export function formatRegimenAge(x = {}) {
+  if (x.ageOp && x.ageValue !== "" && x.ageValue != null) return formatCompareRule(x.ageOp, x.ageValue, "y");
+  if ((x.ageMin != null && x.ageMin !== "") || (x.ageMax != null && x.ageMax !== "")) return `${x.ageMin || 0}–${x.ageMax || 120}y`;
+  return "Any";
+}
+
+export function formatRegimenWeight(x = {}) {
+  if (x.weightOp && x.weightValue !== "" && x.weightValue != null) return formatCompareRule(x.weightOp, x.weightValue, "kg");
+  if ((x.weightMin != null && x.weightMin !== "") || (x.weightMax != null && x.weightMax !== "")) return `${x.weightMin || 0}–${x.weightMax || 200}kg`;
+  return "Any";
+}
+
+const matchesAge = (r, age) => {
+  if (r.ageOp && r.ageValue !== "" && r.ageValue != null) return matchesCompare(age, r.ageOp, r.ageValue);
+  const minA = numOr(r.ageMin, 0);
+  const maxA = numOr(r.ageMax, 120);
+  if (!Number.isFinite(age)) return true;
+  return age >= minA && age <= maxA;
+};
+
+const matchesWeight = (r, wt) => {
+  if (r.weightOp && r.weightValue !== "" && r.weightValue != null) return matchesCompare(wt, r.weightOp, r.weightValue);
+  const minW = numOr(r.weightMin, 0);
+  const maxW = numOr(r.weightMax, 200);
+  if (!Number.isFinite(wt) || wt <= 0) return true;
+  return wt >= minW && wt <= maxW;
+};
+
 export function formatMg(n) {
   const x = Number(n);
   if (!Number.isFinite(x)) return "";
@@ -67,21 +123,22 @@ export function regimenDrugList(regimen, catalogue = []) {
     .filter(Boolean);
 }
 
+export function isRegimenActive(r) {
+  return !r?.status || r.status === "Active";
+}
+
 export function matchingRegimens({ regimens = [], disease, diagnosis, ageYears, weight } = {}) {
   const dx = String(diagnosis || "").trim();
   if (!dx || /^no\s/i.test(dx)) return [];
   const age = Number(ageYears);
   const wt = Number(weight);
   return (regimens || []).filter((r) => {
+    if (!isRegimenActive(r)) return false;
     if (r.disease && r.disease !== disease) return false;
     const rDx = String(r.diagnosis || "").trim();
     if (rDx && rDx !== dx) return false;
-    const minA = numOr(r.ageMin, 0);
-    const maxA = numOr(r.ageMax, 120);
-    if (Number.isFinite(age) && (age < minA || age > maxA)) return false;
-    const minW = numOr(r.weightMin, 0);
-    const maxW = numOr(r.weightMax, 200);
-    if (Number.isFinite(wt) && wt > 0 && (wt < minW || wt > maxW)) return false;
+    if (!matchesAge(r, age)) return false;
+    if (!matchesWeight(r, wt)) return false;
     return true;
   });
 }
@@ -135,6 +192,39 @@ export function applyMatchingRegimens({
 export function extraDrugNames(diseaseId, topical = [], oral = []) {
   const protocol = new Set(PROTOCOL_DRUG_NAMES[diseaseId] || []);
   return [...topical, ...oral].filter((n) => n && !protocol.has(n));
+}
+
+export function slugDrug(name) {
+  return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** Drop a visit posology override when the drug is unselected. Master is never written. */
+export function dropVisitPosology(posology, name) {
+  if (!posology || !Object.prototype.hasOwnProperty.call(posology, name)) return posology || {};
+  const next = { ...posology };
+  delete next[name];
+  return next;
+}
+
+export function setVisitPosology(posology, name, patch, defaults = {}) {
+  const current = posology?.[name] || {};
+  return {
+    ...(posology || {}),
+    [name]: {
+      dosage: current.dosage ?? defaults.dosage ?? "",
+      frequency: current.frequency ?? defaults.frequency ?? "",
+      duration: current.duration ?? defaults.duration ?? "",
+      ...current,
+      ...patch,
+    },
+  };
+}
+
+export function formatRegimenDurationValue(r = {}) {
+  if (["As needed", "Ongoing", "BOLUS"].includes(r.durationUnit) && (r.duration === "" || r.duration == null)) {
+    return r.durationUnit;
+  }
+  return [r.duration, r.durationUnit].filter((v) => v !== "" && v != null).join(" ");
 }
 
 export function catalogueForDisease(catalogue = [], diseaseId) {

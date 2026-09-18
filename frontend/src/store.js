@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU, DISEASES } from "@/mock/data";
+import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { SUSPECT_SYMPTOMS } from "@/mock/specs";
 import { USERS, PATIENTS, ENCOUNTERS, HOUSEHOLDS } from "@/mock/data";
 
@@ -76,8 +76,8 @@ export function StoreProvider({ children }) {
   }, []);
 
   const patch = (fn) => setState((s) => ({ ...s, ...fn(s) }));
-  const offerSyncAfterSave = (count) => {
-    if (online && count > 0) setSyncPrompt({ count });
+  const offerSyncAfterSave = (_count) => {
+    // Temporarily hide the "Sync pending items?" popup after Save / Save & close.
   };
 
   const api = useMemo(() => {
@@ -144,9 +144,14 @@ export function StoreProvider({ children }) {
       setLtfu: (diseaseId, days) =>
         patch((s) => ({ settings: { ...s.settings, ltfuByDisease: { ...s.settings.ltfuByDisease, [diseaseId]: Number(days) || 0 } } })),
       addRegimen: (r) =>
-        patch((s) => ({ settings: { ...s.settings, regimens: [...(s.settings.regimens || []), { id: `R-${String((s.settings.regimens || []).length + 101)}`, ...r }] } })),
-      removeRegimen: (id) =>
-        patch((s) => ({ settings: { ...s.settings, regimens: (s.settings.regimens || []).filter((r) => r.id !== id) } })),
+        patch((s) => ({ settings: { ...s.settings, regimens: [...(s.settings.regimens || []), { id: `R-${String((s.settings.regimens || []).length + 101)}`, ...r, status: r.status || "Active" }] } })),
+      setRegimenStatus: (id, status) =>
+        patch((s) => ({
+          settings: {
+            ...s.settings,
+            regimens: (s.settings.regimens || []).map((x) => (x.id === id ? { ...x, status } : x)),
+          },
+        })),
       addSuspect: (rec) => {
         const out = {
           id: `SUS-${String(Math.floor(Math.random() * 900000) + 100000)}`,
@@ -154,18 +159,14 @@ export function StoreProvider({ children }) {
           worker: state.users.find((u) => u.id === state.currentUserId)?.name,
           ...rec,
         };
-        const diseaseId = DISEASES.some((d) => d.id === rec.suspect) ? rec.suspect : "";
         const nextPending = queuedCount(state) + 1;
         patch((s) => ({
           suspects: [...s.suspects, out],
           pendingSync: nextPending,
-          patients: diseaseId
-            ? s.patients.map((p) =>
-                p.id === rec.patientId && !(p.diseases || []).includes(diseaseId)
-                  ? { ...p, diseases: [...(p.diseases || []), diseaseId] }
-                  : p
-              )
-            : s.patients,
+          patients: s.patients.map((p) => {
+            if (p.id !== rec.patientId) return p;
+            return { ...p, status: p.status || "Suspected" };
+          }),
         }));
         offerSyncAfterSave(nextPending);
         return out;
@@ -187,7 +188,7 @@ export function StoreProvider({ children }) {
           episodeId: `SCAB-2026-${String(1240 + nextNum).padStart(8, "0")}`,
           createdBy: state.currentUserId,
           createdAt: new Date().toISOString().slice(0, 10),
-          status: "Suspected",
+          status: "",
           diseases: [],
           ...data,
           sex: data.sex || data.gender || "",
@@ -197,6 +198,32 @@ export function StoreProvider({ children }) {
         patch((s) => ({ patients: [rec, ...s.patients], pendingSync: nextPending }));
         offerSyncAfterSave(nextPending);
         return rec;
+      },
+      updatePatient: (id, data) => {
+        const rec = state.patients.find((p) => p.id === id);
+        if (!rec) return null;
+        const next = {
+          ...rec,
+          ...data,
+          id: rec.id,
+          episodeId: rec.episodeId,
+          createdBy: rec.createdBy,
+          createdAt: rec.createdAt,
+          diseases: rec.diseases,
+          status: rec.status,
+          outcome: rec.outcome,
+          treatmentEnd: rec.treatmentEnd,
+          sex: data.sex || data.gender || rec.sex,
+          gender: data.gender || data.sex || rec.gender,
+          editedAt: new Date().toISOString(),
+        };
+        const nextPending = queuedCount(state) + 1;
+        patch((s) => ({
+          patients: s.patients.map((p) => (p.id === id ? next : p)),
+          pendingSync: nextPending,
+        }));
+        offerSyncAfterSave(nextPending);
+        return next;
       },
       addDisease: (patientId, diseaseId) =>
         patch((s) => ({

@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { TextField, SelectField, SectionCard, AlertPanel, CheckGrid } from "@/components/Fields";
+import { TextField, SelectField, Field, AreaField, SectionCard, AlertPanel, MultiSelectField } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { GEO, DISEASES } from "@/mock/data";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { GEO, DISEASES, DRUG_FREQUENCIES, DRUG_DURATION_UNITS } from "@/mock/data";
 import { DISEASE_SPECS, SPEC_LIST } from "@/mock/specs";
+import { COMPARE_OPS, formatRegimenAge, formatRegimenWeight, isRegimenActive } from "@/lib/medications";
 import { toast } from "sonner";
-import { UserPlus, Upload, Trash2, Plus, KeyRound, Building2, Users, Library } from "lucide-react";
+import { UserPlus, Trash2, Plus, KeyRound, Building2, Users, Library } from "lucide-react";
 
 const SCOPES = {
   own: "Own records only",
@@ -31,7 +33,6 @@ const MASTER_TABS = [
   { id: "symptoms", label: "Symptoms" },
   { id: "visits", label: "Visit type" },
   { id: "rules", label: "Programme rules" },
-  { id: "branding", label: "Client & branding" },
 ];
 
 export default function Admin() {
@@ -89,7 +90,6 @@ export default function Admin() {
           {master === "symptoms" && <SymptomsMaster s={s} />}
           {master === "visits" && <VisitTypeMaster s={s} />}
           {master === "rules" && <RulesMaster s={s} />}
-          {master === "branding" && <BrandingMaster s={s} />}
         </div>
       )}
     </AppShell>
@@ -98,6 +98,7 @@ export default function Admin() {
 
 const UsersTab = ({ s }) => {
   const [open, setOpen] = useState(false);
+  const [resetPopup, setResetPopup] = useState(null);
   const [nf, setNf] = useState({ name: "", email: "", password: "", role: "Health Worker", province: "", scope: "own", canEdit: true, photo: "" });
 
   const create = () => {
@@ -184,7 +185,7 @@ const UsersTab = ({ s }) => {
                       onClick={() => {
                         const temp = `Temp@${Math.floor(1000 + Math.random() * 9000)}`;
                         s.resetPassword(u.id, temp);
-                        toast.success(`Temporary password for ${u.name}: ${temp}`);
+                        setResetPopup({ name: u.name, password: temp });
                       }}
                     >
                       <KeyRound className="mr-2 h-3.5 w-3.5" /> Reset
@@ -228,6 +229,30 @@ const UsersTab = ({ s }) => {
           <DialogFooter className="gap-2">
             <Button variant="outline" className="h-12" onClick={() => setOpen(false)} data-testid="create-user-cancel">Cancel</Button>
             <Button className="h-12" onClick={create} data-testid="create-user-submit">Create user</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!resetPopup} onOpenChange={(next) => { if (!next) setResetPopup(null); }}>
+        <DialogContent
+          className="sm:max-w-md"
+          data-testid="reset-password-dialog"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="font-head text-xl">Temporary password</DialogTitle>
+            <DialogDescription>
+              Share this password with {resetPopup?.name}. It will not be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-md border border-border bg-muted px-4 py-3" data-testid="reset-password-value">
+            <p className="break-all font-mono text-lg font-semibold tracking-wide">{resetPopup?.password}</p>
+          </div>
+          <DialogFooter>
+            <Button className="h-12" data-testid="reset-password-close" onClick={() => setResetPopup(null)}>
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -324,22 +349,21 @@ const FacilitiesTab = ({ s }) => {
 };
 
 const DrugsMaster = ({ s }) => {
-  const [d, setD] = useState({ name: "", form: "Oral", strength: "", disease: "scabies" });
+  const [d, setD] = useState({ name: "", form: "Oral", strength: "" });
   return (
     <SectionCard title="Drugs" desc="Drug catalogue used by the treatment section — configurable per country protocol" right={<Badge variant="outline" className="rounded" data-testid="drug-count">{s.settings.drugs.length} drugs</Badge>}>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Drug name" testid="new-drug-name" value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} />
         <SelectField label="Form" options={["Oral", "Topical", "Injection"]} value={d.form} onChange={(v) => setD({ ...d, form: v })} testid="new-drug-form" />
         <TextField label="Strength" testid="new-drug-strength" value={d.strength} onChange={(e) => setD({ ...d, strength: e.target.value })} />
-        <SelectField label="Disease" options={DISEASES.map((x) => x.name)} value={DISEASES.find((x) => x.id === d.disease)?.name} onChange={(v) => setD({ ...d, disease: DISEASES.find((x) => x.name === v)?.id })} testid="new-drug-disease" />
       </div>
       <Button
         className="h-12"
         data-testid="add-drug-btn"
         onClick={() => {
           if (!d.name.trim()) return toast.error("Drug name is required");
-          s.addDrug({ name: d.name.trim(), form: d.form, strength: d.strength, diseases: [d.disease] });
-          setD({ name: "", form: "Oral", strength: "", disease: "scabies" });
+          s.addDrug({ name: d.name.trim(), form: d.form, strength: d.strength });
+          setD({ name: "", form: "Oral", strength: "" });
           toast.success("Drug added to the catalogue");
         }}
       >
@@ -348,7 +372,7 @@ const DrugsMaster = ({ s }) => {
       <div className="overflow-x-auto rounded-md border border-border">
         <table className="w-full min-w-[560px] text-sm" data-testid="drug-table">
           <thead className="bg-muted">
-            <tr>{["Drug", "Form", "Strength", "Disease", ""].map((h) => (<th key={h} className="p-3 text-left font-semibold">{h}</th>))}</tr>
+            <tr>{["Drug", "Form", "Strength", ""].map((h) => (<th key={h} className="p-3 text-left font-semibold">{h}</th>))}</tr>
           </thead>
           <tbody>
             {s.settings.drugs.map((x) => (
@@ -356,7 +380,6 @@ const DrugsMaster = ({ s }) => {
                 <td className="p-3 font-semibold">{x.name}</td>
                 <td className="p-3">{x.form}</td>
                 <td className="p-3">{x.strength}</td>
-                <td className="p-3">{(x.diseases || []).map((id) => DISEASES.find((y) => y.id === id)?.name).join(", ")}</td>
                 <td className="p-3">
                   <Button
                     variant="ghost"
@@ -380,8 +403,45 @@ const DrugsMaster = ({ s }) => {
   );
 };
 
+const EMPTY_REGIMEN = { name: "", disease: "scabies", diagnosis: "", ageOp: "", ageValue: "", weightOp: "", weightValue: "", frequency: "", duration: "", durationUnit: "", clinicianNotes: "", patientAdvice: "", drugs: [] };
+
+const CompareField = ({ label, op, value, onOp, onValue, unit, testid, className = "" }) => (
+  <Field label={label} className={className}>
+    <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,0.85fr)] gap-2">
+      <Select value={op || "any"} onValueChange={(v) => onOp(v === "any" ? "" : v)}>
+        <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={`${testid}-op`}>
+          <SelectValue placeholder="Any" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="any" className="text-base" data-testid={`${testid}-op-any`}>Any</SelectItem>
+          {COMPARE_OPS.map((o) => (
+            <SelectItem key={o.id} value={o.id} className="text-base" data-testid={`${testid}-op-${o.id}`}>
+              {o.symbol} {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        className="h-12 w-full min-w-0 bg-white text-base"
+        type="number"
+        min="0"
+        placeholder={unit}
+        data-testid={`${testid}-value`}
+        value={value}
+        onChange={(e) => onValue(e.target.value)}
+      />
+    </div>
+  </Field>
+);
+
+const formatRegimenDuration = (x) => {
+  if (!x?.durationUnit && (x?.duration === "" || x?.duration == null)) return "—";
+  if (["As needed", "Ongoing", "BOLUS"].includes(x.durationUnit) && (x.duration === "" || x.duration == null)) return x.durationUnit;
+  return [x.duration, x.durationUnit].filter((v) => v !== "" && v != null).join(" ") || "—";
+};
+
 const RegimentMaster = ({ s }) => {
-  const [r, setR] = useState({ name: "", disease: "scabies", diagnosis: "", ageMin: "", ageMax: "", weightMin: "", weightMax: "", drugs: [] });
+  const [r, setR] = useState({ ...EMPTY_REGIMEN });
   const regimens = s.settings.regimens || [];
   const spec = DISEASE_SPECS[r.disease];
   const diseaseDrugs = (s.settings.drugs || [])
@@ -394,32 +454,85 @@ const RegimentMaster = ({ s }) => {
         <TextField label="Regimen name" testid="new-regimen-name" value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} />
         <SelectField label="Condition" options={SPEC_LIST.map((x) => x.name)} value={spec?.name} onChange={(v) => setR({ ...r, disease: SPEC_LIST.find((x) => x.name === v).id, diagnosis: "", drugs: [] })} testid="new-regimen-disease" />
         <SelectField label="Diagnosis criteria" options={["Any", ...(spec?.diagnosis || [])]} value={r.diagnosis || "Any"} onChange={(v) => setR({ ...r, diagnosis: v === "Any" ? "" : v })} testid="new-regimen-diagnosis" />
-        <TextField label="Age min (y)" type="number" testid="new-regimen-age-min" value={r.ageMin} onChange={(e) => setR({ ...r, ageMin: e.target.value })} />
-        <TextField label="Age max (y)" type="number" testid="new-regimen-age-max" value={r.ageMax} onChange={(e) => setR({ ...r, ageMax: e.target.value })} />
-        <TextField label="Weight min (kg)" type="number" testid="new-regimen-weight-min" value={r.weightMin} onChange={(e) => setR({ ...r, weightMin: e.target.value })} />
-        <TextField label="Weight max (kg)" type="number" testid="new-regimen-weight-max" value={r.weightMax} onChange={(e) => setR({ ...r, weightMax: e.target.value })} />
+        <CompareField label="Age (y)" op={r.ageOp} value={r.ageValue} onOp={(v) => setR({ ...r, ageOp: v })} onValue={(v) => setR({ ...r, ageValue: v })} unit="y" testid="new-regimen-age" className="lg:col-span-2" />
+        <CompareField label="Weight (kg)" op={r.weightOp} value={r.weightValue} onOp={(v) => setR({ ...r, weightOp: v })} onValue={(v) => setR({ ...r, weightValue: v })} unit="kg" testid="new-regimen-weight" className="lg:col-span-2" />
+        <SelectField label="Frequency" options={DRUG_FREQUENCIES} value={r.frequency} onChange={(v) => setR({ ...r, frequency: v })} testid="new-regimen-frequency" />
+        <Field label="Duration" className="lg:col-span-2">
+          <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)] gap-2">
+            <Input
+              className="h-12 w-full min-w-0 bg-white text-base"
+              type="number"
+              min="0"
+              placeholder={`Enter ${r.durationUnit || "Day(s)"}`}
+              data-testid="new-regimen-duration"
+              value={r.duration}
+              onChange={(e) => setR({ ...r, duration: e.target.value })}
+            />
+            <Select value={r.durationUnit || undefined} onValueChange={(v) => setR({ ...r, durationUnit: v })}>
+              <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid="new-regimen-duration-unit">
+                <SelectValue placeholder="Select…" />
+              </SelectTrigger>
+              <SelectContent>
+                {DRUG_DURATION_UNITS.map((o) => (
+                  <SelectItem key={o} value={o} className="text-base" data-testid={`new-regimen-duration-unit-opt-${o}`}>
+                    {o}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Field>
       </div>
-      <CheckGrid label="Drugs" options={diseaseDrugs} value={r.drugs} onChange={(v) => setR({ ...r, drugs: v })} testid="new-regimen-drug" />
+      <MultiSelectField
+        label="Drugs"
+        options={diseaseDrugs}
+        value={r.drugs}
+        onChange={(v) => setR({ ...r, drugs: v })}
+        placeholder="Select drugs…"
+        testid="new-regimen-drug"
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <AreaField label="Clinician Notes" testid="new-regimen-clinician-notes" rows={4} value={r.clinicianNotes} onChange={(e) => setR({ ...r, clinicianNotes: e.target.value })} placeholder="Notes for the treating clinician" />
+        <AreaField label="Patient Advice" testid="new-regimen-patient-advice" rows={4} value={r.patientAdvice} onChange={(e) => setR({ ...r, patientAdvice: e.target.value })} placeholder="Advice to give the patient or caregiver" />
+      </div>
       <Button className="h-12" data-testid="add-regimen-btn" onClick={() => {
         if (!r.name.trim() || !r.drugs.length) return toast.error("Regimen name and at least one drug are required");
-        s.addRegimen(r); setR({ name: "", disease: "scabies", diagnosis: "", ageMin: "", ageMax: "", weightMin: "", weightMax: "", drugs: [] });
+        if (r.ageOp && (r.ageValue === "" || r.ageValue == null)) return toast.error("Enter an age for the selected comparison");
+        if (r.weightOp && (r.weightValue === "" || r.weightValue == null)) return toast.error("Enter a weight for the selected comparison");
+        s.addRegimen(r); setR({ ...EMPTY_REGIMEN });
         toast.success("Regimen added");
       }}>
         <Plus className="mr-2 h-4 w-4" /> Add regimen
       </Button>
       <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full min-w-[820px] text-sm" data-testid="regimen-table">
-          <thead className="bg-muted"><tr>{["Regimen", "Condition", "Diagnosis", "Age", "Weight", "Drugs", ""].map((h) => (<th key={h} className="p-3 text-left font-semibold">{h}</th>))}</tr></thead>
+        <table className="w-full min-w-[1200px] text-sm" data-testid="regimen-table">
+          <thead className="bg-muted"><tr>{["Regimen", "Condition", "Diagnosis", "Age", "Weight", "Frequency", "Duration", "Drugs", "Clinician Notes", "Patient Advice", "Status"].map((h) => (<th key={h} className="p-3 text-left font-semibold">{h}</th>))}</tr></thead>
           <tbody>
             {regimens.map((x) => (
-              <tr key={x.id} className="border-t border-border" data-testid={`regimen-row-${x.id}`}>
-                <td className="p-3"><p className="font-semibold">{x.name}</p><p className="text-xs text-muted-foreground">{x.id}</p></td>
+              <tr key={x.id} className={`border-t border-border ${isRegimenActive(x) ? "" : "bg-muted/40 text-muted-foreground"}`} data-testid={`regimen-row-${x.id}`}>
+                <td className="p-3"><p className="font-semibold text-foreground">{x.name}</p><p className="text-xs text-muted-foreground">{x.id}</p></td>
                 <td className="p-3">{DISEASE_SPECS[x.disease]?.name}</td>
                 <td className="p-3">{x.diagnosis || "Any"}</td>
-                <td className="p-3">{x.ageMin || 0}–{x.ageMax || 120}y</td>
-                <td className="p-3">{x.weightMin || 0}–{x.weightMax || 200}kg</td>
+                <td className="p-3">{formatRegimenAge(x)}</td>
+                <td className="p-3">{formatRegimenWeight(x)}</td>
+                <td className="p-3">{x.frequency || "—"}</td>
+                <td className="p-3">{formatRegimenDuration(x)}</td>
                 <td className="p-3">{Array.isArray(x.drugs) ? x.drugs.join(", ") : x.drugs}</td>
-                <td className="p-3"><Button variant="ghost" size="icon" className="h-10 w-10 text-red-600" data-testid={`remove-regimen-${x.id}`} onClick={() => { s.removeRegimen(x.id); toast.success("Regimen removed"); }}><Trash2 className="h-4 w-4" /></Button></td>
+                <td className="max-w-[220px] p-3"><p className="line-clamp-3 whitespace-pre-wrap">{x.clinicianNotes || "—"}</p></td>
+                <td className="max-w-[220px] p-3"><p className="line-clamp-3 whitespace-pre-wrap">{x.patientAdvice || "—"}</p></td>
+                <td className="p-3">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      data-testid={`regimen-status-${x.id}`}
+                      checked={isRegimenActive(x)}
+                      onCheckedChange={(v) => {
+                        s.setRegimenStatus(x.id, v ? "Active" : "Inactive");
+                        toast.success(`${x.name} marked ${v ? "Active" : "Inactive"}`);
+                      }}
+                    />
+                    <span className="text-xs font-semibold">{isRegimenActive(x) ? "Active" : "Inactive"}</span>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -544,49 +657,5 @@ const RulesMaster = ({ s }) => {
         patient list and MIS, using the threshold of their most recent disease record.
       </AlertPanel>
     </SectionCard>
-  );
-};
-
-const BrandingMaster = ({ s }) => {
-  const [b, setB] = useState(s.branding);
-  return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <SectionCard title="Client &amp; branding" desc="Shown on the login screen, app header and printed reports">
-        <TextField label="Client / programme name" testid="client-name-input" value={b.clientName} onChange={(e) => setB({ ...b, clientName: e.target.value })} />
-        <TextField label="Programme subtitle" testid="programme-input" value={b.programme} onChange={(e) => setB({ ...b, programme: e.target.value })} />
-        <TextField label="Logo URL" testid="logo-input" value={b.logo} onChange={(e) => setB({ ...b, logo: e.target.value })} placeholder="https://…" hint="File upload will be wired to object storage in the build phase" />
-        <div className="flex items-center gap-4 rounded-md border border-dashed border-border p-4">
-          {b.logo ? (
-            <img src={b.logo} alt="logo preview" className="h-14 w-14 rounded-md border border-border object-cover" />
-          ) : (
-            <span className="grid h-14 w-14 place-items-center rounded-md bg-secondary text-primary"><Upload className="h-5 w-5" /></span>
-          )}
-          <p className="text-sm text-muted-foreground">Logo preview</p>
-        </div>
-        <Button
-          className="h-12 w-full"
-          data-testid="save-branding-btn"
-          onClick={() => {
-            s.setBranding(b);
-            toast.success("Branding updated");
-          }}
-        >
-          Save branding
-        </Button>
-      </SectionCard>
-      <SectionCard title="Prototype controls">
-        <Button
-          variant="outline"
-          className="h-12 w-full"
-          data-testid="reset-demo-btn"
-          onClick={() => {
-            s.resetDemo();
-            toast.success("Demo data reset");
-          }}
-        >
-          Reset demo data
-        </Button>
-      </SectionCard>
-    </div>
   );
 };

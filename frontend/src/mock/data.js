@@ -27,6 +27,53 @@ export const VISIT_TYPES = [
   "Referral visit",
 ];
 
+/** Drug frequency options from the webapp drugs table (tri-hmis DRUG.js). */
+export const DRUG_FREQUENCIES = [
+  "Every hour",
+  "Every two hours",
+  "Every three hours",
+  "Every four hours",
+  "Every six hours",
+  "Every eight hours",
+  "Every 12 hours",
+  "Every 24 hours",
+  "STAT",
+  "As needed",
+  "Once",
+  "Every day",
+  "Twice a day",
+  "Every evening",
+  "Every afternoon",
+  "Every night at bedtime",
+  "Four times a day",
+  "Every other day",
+  "Three times a day",
+  "As directed",
+  "Every morning",
+  "Once a week",
+  "Once a month",
+  "Call to OT",
+  "1-0-1",
+  "0-1-1",
+  "1-1-0",
+];
+
+/** Duration unit options from the webapp drugs table (tri-hmis DRUG.js). */
+export const DRUG_DURATION_UNITS = [
+  "Year(s)",
+  "Month(s)",
+  "Week(s)",
+  "Day(s)",
+  "Hour(s)",
+  "Min(s)",
+  "As needed",
+  "Ongoing",
+  "BOLUS",
+  "l/hr",
+  "ml/hr",
+  "mU/min",
+];
+
 export const DRUGS = [
   { name: "Permethrin 5% Cream/Lotion", form: "Topical", strength: "5%", diseases: ["scabies"] },
   { name: "Benzyl Benzoate 25%", form: "Topical", strength: "25%", diseases: ["scabies"] },

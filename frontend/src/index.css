@@ -59,6 +59,16 @@ h4,
         background: #0f52ba;
         color: #fff;
     }
+    input[type="number"] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        appearance: none;
+        margin: 0;
+    }
 }
 
 .trias-grid {
@@ -142,8 +152,23 @@ h4,
     fill: #0f52ba;
     filter: drop-shadow(0 0 4px rgba(15, 82, 186, 0.55));
 }
+.silhouette-region.nerve-locked,
+.nerve-only .silhouette-region {
+    cursor: default;
+    pointer-events: none;
+}
+.silhouette-region.nerve-locked:hover,
+.nerve-only .silhouette-region:hover {
+    fill: #3b3b6d;
+    filter: none;
+}
 .silhouette-region.marked {
     fill: #dc2626;
+}
+.silhouette-region.nerve-locked.marked:hover,
+.nerve-only .silhouette-region.marked:hover {
+    fill: #dc2626;
+    filter: none;
 }
 .silhouette-nerve {
     fill: #fbbf24;
@@ -172,6 +197,9 @@ h4,
     font-size: 11px;
     font-weight: 800;
     fill: #ffffff;
+}
+.silhouette-code.multi {
+    font-size: 8px;
 }
 
 @layer base {

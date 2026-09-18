@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { Check } from "lucide-react";
-import { AlertPanel, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
-import { DosePhysicalBox, DoseUnitSelect } from "@/components/MedicationShared";
-import { formatDosePhysical } from "@/lib/medications";
+import { AlertPanel, withDrugCourse } from "@/components/Fields";
+import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
 
 export const BURULI_DRUGS = {
   rifampicin: "Tab Rifampicin 300mg (10mg per Kg)",
@@ -83,6 +83,7 @@ export default function BuruliMedications({
   onChange,
   weight = 0,
   medCourses = {},
+  posology = {},
 }) {
   const selected = useMemo(
     () => ({
@@ -97,7 +98,11 @@ export default function BuruliMedications({
 
   const setOral = (name, on) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
-    onChange({ oral: next, medCourses: withDrugCourse(medCourses, name, on) });
+    onChange({
+      oral: next,
+      medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
+    });
   };
 
   return (
@@ -132,7 +137,18 @@ export default function BuruliMedications({
           />
         </div>
         {selected.rifampicin && (
-          <DrugCourseBlock name={BURULI_DRUGS.rifampicin} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={BURULI_DRUGS.rifampicin}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: rif ? formatDosePhysical(rif.mg, rif.tabs) : "10 mg/kg",
+              frequency: "Once daily",
+              duration: "8 weeks",
+            }}
+          />
         )}
       </DrugCard>
 
@@ -158,7 +174,18 @@ export default function BuruliMedications({
           />
         </div>
         {selected.clarithromycin && (
-          <DrugCourseBlock name={BURULI_DRUGS.clarithromycin} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={BURULI_DRUGS.clarithromycin}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: cla ? `${formatDosePhysical(cla.mg, cla.tabs)} per dose` : "7.5 mg/kg",
+              frequency: "Twice daily",
+              duration: "8 weeks",
+            }}
+          />
         )}
       </DrugCard>
     </div>

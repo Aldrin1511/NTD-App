@@ -1,3 +1,5 @@
+import { markCodes } from "@/lib/markFindings";
+
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /**
@@ -212,7 +214,7 @@ export default function BodySilhouette({ sex = "Male", view = "front", marks = {
   const nerves = showNerves ? NERVE_MARKERS.filter((n) => n.view === (view === "back" ? "back" : "front")) : [];
 
   return (
-    <svg viewBox="0 0 200 380" className="mx-auto h-[440px] w-full max-w-[300px] select-none" data-testid={`silhouette-${sex.toLowerCase()}-${view}`}>
+    <svg viewBox="0 0 200 380" className={`mx-auto h-[440px] w-full max-w-[300px] select-none${nerveOnly ? " nerve-only" : ""}`} data-testid={`silhouette-${sex.toLowerCase()}-${view}`}>
       {sex === "Female" && view === "front" && base.hair && (
         <path d={base.hair} fill="#F4C242" opacity="0.85" pointerEvents="none" />
       )}
@@ -222,13 +224,13 @@ export default function BodySilhouette({ sex = "Male", view = "front", marks = {
         const m = marks[key];
         const flip = r.side === "L";
         return (
-          <g key={r.id} transform={flip ? "translate(200,0) scale(-1,1)" : undefined}>
-            <title>{r.label}</title>
+          <g key={r.id} transform={flip ? "translate(200,0) scale(-1,1)" : undefined} pointerEvents={nerveOnly ? "none" : undefined}>
+            {!nerveOnly && <title>{r.label}</title>}
             <path
               d={r.d}
               data-testid={`body-region-${slug(r.label)}`}
               onClick={() => { if (!nerveOnly) onPlace?.(r.label); }}
-              className={`silhouette-region ${m ? "marked" : ""}`}
+              className={`silhouette-region ${m ? "marked" : ""} ${nerveOnly ? "nerve-locked" : ""}`}
             />
           </g>
         );
@@ -249,11 +251,25 @@ export default function BodySilhouette({ sex = "Male", view = "front", marks = {
       {regions.map((r) => {
         const key = `${view}:${r.label}`;
         const m = marks[key];
-        if (!m) return null;
+        const codes = markCodes(m);
+        if (!codes.length) return null;
         const x = r.side === "L" ? 200 - r.cx : r.cx;
+        const stacked = codes.length > 1;
+        const lineH = stacked ? 9 : 11;
+        const startY = r.cy + 4 - ((codes.length - 1) * lineH) / 2;
         return (
-          <text key={`t-${r.id}`} x={x} y={r.cy + 4} textAnchor="middle" className="silhouette-code" pointerEvents="none" data-testid={`body-mark-${slug(r.label)}`}>
-            {m.code}
+          <text
+            key={`t-${r.id}`}
+            x={x}
+            y={startY}
+            textAnchor="middle"
+            className={`silhouette-code${stacked ? " multi" : ""}`}
+            pointerEvents="none"
+            data-testid={`body-mark-${slug(r.label)}`}
+          >
+            {codes.map((c, i) => (
+              <tspan key={c} x={x} y={startY + i * lineH}>{c}</tspan>
+            ))}
           </text>
         );
       })}
@@ -261,10 +277,16 @@ export default function BodySilhouette({ sex = "Male", view = "front", marks = {
       {nerves.map((n) => {
         const key = `${view}:${n.label}`;
         const m = marks[key];
-        if (!m) return null;
+        const codes = markCodes(m);
+        if (!codes.length) return null;
+        const stacked = codes.length > 1;
+        const lineH = stacked ? 8 : 11;
+        const startY = n.cy - 10 - ((codes.length - 1) * lineH);
         return (
-          <text key={`nt-${n.id}`} x={n.cx} y={n.cy - 10} textAnchor="middle" className="silhouette-code" pointerEvents="none">
-            {m.code}
+          <text key={`nt-${n.id}`} x={n.cx} y={startY} textAnchor="middle" className={`silhouette-code${stacked ? " multi" : ""}`} pointerEvents="none">
+            {codes.map((c, i) => (
+              <tspan key={c} x={n.cx} y={startY + i * lineH}>{c}</tspan>
+            ))}
           </text>
         );
       })}

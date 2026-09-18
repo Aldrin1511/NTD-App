@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import { Check } from "lucide-react";
-import { AlertPanel, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
+import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
-import { formatDosePhysical } from "@/lib/medications";
+import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
+import { DrugVisitFields } from "@/components/MedicationShared";
 
 export const LEPROSY_DRUGS = {
   mdt: "Multi-Drug Therapy (MDT) Blister pack",
@@ -205,6 +206,7 @@ export default function LeprosyMedications({
   weight = 0,
   reactions = [],
   medCourses = {},
+  posology = {},
 }) {
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
@@ -226,6 +228,7 @@ export default function LeprosyMedications({
     onChange({
       oral: next,
       medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
       ...(on && name === LEPROSY_DRUGS.mdt && band ? { mdtBandId: band.id } : {}),
     });
   };
@@ -246,55 +249,20 @@ export default function LeprosyMedications({
           selected={selected.mdt}
           onToggle={() => setOral(LEPROSY_DRUGS.mdt, !selected.mdt)}
         >
-          <div className="overflow-x-auto rounded-md border border-border mb-3">
-            <table className="w-full min-w-[480px] text-left text-sm">
-              <thead className="bg-muted/40 text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Age / weight</th>
-                  <th className="px-3 py-2 font-semibold">Medications</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white">
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 align-top font-medium">Adults 15 and above</td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    Tab Dapsone 100 mg Daily<br />
-                    Cap Rifampicin 600 mg once a month<br />
-                    Cap Clofazimine 300 mg monthly and 50 mg daily
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 align-top font-medium">Children 10–14 years</td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    Tab Dapsone 50 mg Daily<br />
-                    Cap Rifampicin 450 mg once a month<br />
-                    Cap Clofazimine 150 mg monthly and 50 mg every other day
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 align-top font-medium">Children &lt;10 years or 20–40 kg</td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    Tab Dapsone 25 mg Daily<br />
-                    Cap Rifampicin 300 mg once a month<br />
-                    Cap Clofazimine 150 mg monthly and 50 mg twice weekly
-                    <span className="mt-1 block text-xs">Note: Please cut the tablets to equal to the dosage</span>
-                  </td>
-                </tr>
-                <tr className="border-t border-border">
-                  <td className="px-3 py-2 align-top font-medium">Children &lt;20 kg</td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    Tab Dapsone 2 mg/kg Daily<br />
-                    Cap Rifampicin 10 mg/kg once a month<br />
-                    Cap Clofazimine 6 mg/kg monthly and 1 mg/kg daily
-                    <span className="mt-1 block text-xs">Note: Please cut the tablets to equal to the dosage</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
           <MdtTable band={band} weight={weight} />
           {selected.mdt && (
-            <DrugCourseBlock name={LEPROSY_DRUGS.mdt} medCourses={medCourses} onChange={onChange} />
+            <DrugVisitFields
+              name={LEPROSY_DRUGS.mdt}
+              selected
+              medCourses={medCourses}
+              posology={posology}
+              onChange={onChange}
+              defaults={{
+                dosage: "Blister pack",
+                frequency: "",
+                duration: "",
+              }}
+            />
           )}
         </DrugCard>
       </div>
@@ -337,7 +305,18 @@ export default function LeprosyMedications({
               </table>
             </div>
             {selected.prednisolone && (
-              <DrugCourseBlock name={LEPROSY_DRUGS.prednisolone} medCourses={medCourses} onChange={onChange} />
+              <DrugVisitFields
+                name={LEPROSY_DRUGS.prednisolone}
+                selected
+                medCourses={medCourses}
+                posology={posology}
+                onChange={onChange}
+                defaults={{
+                  dosage: `${pred.totalTabs} × 5 mg tablets (taper)`,
+                  frequency: "Taper",
+                  duration: "12 weeks",
+                }}
+              />
             )}
           </DrugCard>
         </div>
@@ -363,10 +342,10 @@ export function leprosyTreatmentSummary(d = {}) {
 export function mdtAdherenceConfig(diagnosis = "") {
   const dx = String(diagnosis || "");
   if (/paucibacillary|\bPB\b/i.test(dx)) {
-    return { regimen: "PB", courseMonths: 6, checkboxMonths: 9, restartMissed: 3 };
+    return { regimen: "PB", courseMonths: 6, checkboxMonths: 9, restartMissed: 7 };
   }
   if (/multibacillary|\bMB\b/i.test(dx)) {
-    return { regimen: "MB", courseMonths: 12, checkboxMonths: 18, restartMissed: 6 };
+    return { regimen: "MB", courseMonths: 12, checkboxMonths: 18, restartMissed: 7 };
   }
-  return { regimen: "", courseMonths: 12, checkboxMonths: 18, restartMissed: 6 };
+  return { regimen: "", courseMonths: 12, checkboxMonths: 18, restartMissed: 7 };
 }

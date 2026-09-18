@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AlertPanel, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
+import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
-import { DosePhysicalBox, DoseUnitSelect } from "@/components/MedicationShared";
-import { formatDosePhysical } from "@/lib/medications";
+import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +95,7 @@ export default function LfMedications({
   history = {},
   weight = 0,
   medCourses = {},
+  posology = {},
 }) {
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
@@ -132,11 +133,19 @@ export default function LfMedications({
 
   const setOral = (name, on) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
-    onChange({ oral: next, medCourses: withDrugCourse(medCourses, name, on) });
+    onChange({
+      oral: next,
+      medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
+    });
   };
   const setTopical = (name, on) => {
     const next = on ? [...new Set([...topical, name])] : topical.filter((x) => x !== name);
-    onChange({ topical: next, medCourses: withDrugCourse(medCourses, name, on) });
+    onChange({
+      topical: next,
+      medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
+    });
   };
   const setRec = (name, on) => {
     const next = on
@@ -210,7 +219,18 @@ export default function LfMedications({
             />
           </div>
           {selected.ivermectin && (
-            <DrugCourseBlock name={LF_DRUGS.ivermectin} medCourses={medCourses} onChange={onChange} />
+            <DrugVisitFields
+              name={LF_DRUGS.ivermectin}
+              selected
+              medCourses={medCourses}
+              posology={posology}
+              onChange={onChange}
+              defaults={{
+                dosage: iver ? formatDosePhysical(iver.mg, iver.tabs) : "0.2 mg/kg",
+                frequency: "Once",
+                duration: "Single dose (IDA)",
+              }}
+            />
           )}
         </DrugCard>
 
@@ -229,7 +249,18 @@ export default function LfMedications({
             hint={alb ? alb.band : "Enter age/DOB to calculate tablets."}
           />
           {selected.albendazole && (
-            <DrugCourseBlock name={LF_DRUGS.albendazole} medCourses={medCourses} onChange={onChange} />
+            <DrugVisitFields
+              name={LF_DRUGS.albendazole}
+              selected
+              medCourses={medCourses}
+              posology={posology}
+              onChange={onChange}
+              defaults={{
+                dosage: alb ? formatDosePhysical(alb.mg, alb.tabs) : "200 mg (<10y) / 400 mg (10y+)",
+                frequency: "Once",
+                duration: "Single dose (IDA)",
+              }}
+            />
           )}
         </DrugCard>
 
@@ -245,7 +276,18 @@ export default function LfMedications({
             hint={dec && weight ? `${weight} kg × 6 mg/kg` : "Enter weight to calculate tablets."}
           />
           {selected.dec && (
-            <DrugCourseBlock name={LF_DRUGS.dec} medCourses={medCourses} onChange={onChange} />
+            <DrugVisitFields
+              name={LF_DRUGS.dec}
+              selected
+              medCourses={medCourses}
+              posology={posology}
+              onChange={onChange}
+              defaults={{
+                dosage: dec ? formatDosePhysical(dec.mg, dec.tabs) : "6 mg/kg",
+                frequency: "Once",
+                duration: "Single dose (IDA)",
+              }}
+            />
           )}
         </DrugCard>
       </div>
@@ -262,7 +304,18 @@ export default function LfMedications({
           {doxyTooYoung ? " This patient is under 8 years." : ""}
         </AlertPanel>
         {selected.doxycycline && (
-          <DrugCourseBlock name={LF_DRUGS.doxycycline} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={LF_DRUGS.doxycycline}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: "100 mg",
+              frequency: "As prescribed",
+              duration: "—",
+            }}
+          />
         )}
       </DrugCard>
 
@@ -274,7 +327,14 @@ export default function LfMedications({
         onToggle={() => setTopical(LF_DRUGS.dressing, !selected.dressing)}
       >
         {selected.dressing && (
-          <DrugCourseBlock name={LF_DRUGS.dressing} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={LF_DRUGS.dressing}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{ dosage: "Apply", frequency: "As needed", duration: "—" }}
+          />
         )}
       </DrugCard>
       <DrugCard
@@ -284,7 +344,14 @@ export default function LfMedications({
         onToggle={() => setTopical(LF_DRUGS.selfCare, !selected.selfCare)}
       >
         {selected.selfCare && (
-          <DrugCourseBlock name={LF_DRUGS.selfCare} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={LF_DRUGS.selfCare}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{ dosage: "—", frequency: "Daily self-care", duration: "—" }}
+          />
         )}
       </DrugCard>
 

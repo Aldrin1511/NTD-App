@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Check } from "lucide-react";
-import { AlertPanel, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
+import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
-import { DosePhysicalBox, DoseUnitSelect } from "@/components/MedicationShared";
-import { formatDosePhysical, physicalUnits } from "@/lib/medications";
+import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, physicalUnits, dropVisitPosology } from "@/lib/medications";
 
 export const YAWS_DRUGS = {
   azithromycin: "Tab Azithromycin 500mg (30mg per Kg)",
@@ -140,6 +140,7 @@ export default function YawsMedications({
   patient = {},
   weight = 0,
   medCourses = {},
+  posology = {},
   azithromycinTabletMg = 500,
 }) {
   const months = ageInMonths(patient);
@@ -171,7 +172,11 @@ export default function YawsMedications({
 
   const setOral = (name, on) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
-    onChange({ oral: next, medCourses: withDrugCourse(medCourses, name, on) });
+    onChange({
+      oral: next,
+      medCourses: withDrugCourse(medCourses, name, on),
+      posology: on ? posology : dropVisitPosology(posology, name),
+    });
   };
 
   return (
@@ -212,7 +217,18 @@ export default function YawsMedications({
           rows={AZITH_TABLE.map((r) => [r.ageLabel, r.weightLabel, String(r.mg), String(r.tabs)])}
         />
         {selected.azithromycin && (
-          <DrugCourseBlock name={YAWS_DRUGS.azithromycin} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={YAWS_DRUGS.azithromycin}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: azith ? formatDosePhysical(azith.mg, azithTabs) : "30 mg/kg",
+              frequency: "Once",
+              duration: "Single dose",
+            }}
+          />
         )}
       </DrugCard>
 
@@ -241,7 +257,18 @@ export default function YawsMedications({
         />
         <AdviceList items={["Intramuscular injection (IMI) after reconstitution as above."]} />
         {selected.benzathine && (
-          <DrugCourseBlock name={YAWS_DRUGS.benzathine} medCourses={medCourses} onChange={onChange} />
+          <DrugVisitFields
+            name={YAWS_DRUGS.benzathine}
+            selected
+            medCourses={medCourses}
+            posology={posology}
+            onChange={onChange}
+            defaults={{
+              dosage: benz?.mls != null ? `${benz.mls} ml IMI` : "IMI",
+              frequency: "Once",
+              duration: "Single dose",
+            }}
+          />
         )}
       </DrugCard>
     </div>

@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-const Input = React.forwardRef(({ className, type, ...props }, ref) => {
+const Input = React.forwardRef(({ className, type, onWheel, onKeyDown, ...props }, ref) => {
   return (
     <input
       type={type}
@@ -11,6 +11,14 @@ const Input = React.forwardRef(({ className, type, ...props }, ref) => {
         className
       )}
       ref={ref}
+      onWheel={(e) => {
+        if (type === "number") e.currentTarget.blur();
+        onWheel?.(e);
+      }}
+      onKeyDown={(e) => {
+        if (type === "number" && (e.key === "ArrowUp" || e.key === "ArrowDown")) e.preventDefault();
+        onKeyDown?.(e);
+      }}
       {...props} />
   );
 })

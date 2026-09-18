@@ -6,13 +6,14 @@ import { yawsTreatmentSummary } from "@/components/YawsMedications";
 import { lfTreatmentSummary } from "@/components/LfMedications";
 import { buruliTreatmentSummary } from "@/components/BuruliMedications";
 import { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
-import { PanelLeftClose } from "lucide-react";
+import { PanelLeftClose, Pencil } from "lucide-react";
 
 export default function PatientSidebar({
   patient: p,
   encounters = [],
   diseases = [],
   onCollapse,
+  onEdit,
   testid = "lhs-panel",
 }) {
   const last = [...encounters].sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -56,11 +57,18 @@ export default function PatientSidebar({
             <p className="font-head text-lg font-bold leading-tight">{p.name}</p>
             <p className="text-xs text-muted-foreground">{p.id}</p>
           </div>
-          {onCollapse && (
-            <Button variant="ghost" size="icon" className="h-9 w-9" data-testid="lhs-collapse-btn" onClick={onCollapse}>
-              <PanelLeftClose className="h-4 w-4" />
-            </Button>
-          )}
+          <div className="flex shrink-0 items-start gap-1">
+            {onEdit && (
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-primary" data-testid={`${testid}-edit-btn`} onClick={onEdit} title="Edit patient details">
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
+            {onCollapse && (
+              <Button variant="ghost" size="icon" className="h-9 w-9" data-testid="lhs-collapse-btn" onClick={onCollapse}>
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
         <dl className="mt-3 space-y-1.5 text-sm">
           {[
@@ -84,13 +92,13 @@ export default function PatientSidebar({
       <section className="rounded-lg border border-border bg-white p-4" data-testid="clinical-ready-reckoner">
         <p className="text-xs font-semibold text-muted-foreground">Clinical summary</p>
         <p className="mt-2 text-sm">
+          <b>Last encounter:</b> {last ? fmtDate(last.date) : "—"}
+        </p>
+        <p className="mt-1 text-sm">
           <b>Last diagnosis:</b> {lastDiagnosis}
         </p>
         <p className="mt-1 text-sm">
           <b>Active drugs:</b> {lastTreatment}
-        </p>
-        <p className="mt-1 text-sm">
-          <b>Last encounter:</b> {last ? fmtDate(last.date) : "—"}
         </p>
         <p className="mt-1 text-sm">
           <b>Conditions:</b> {diseaseNames.join(", ") || "None"}

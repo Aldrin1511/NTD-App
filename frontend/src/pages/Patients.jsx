@@ -7,10 +7,10 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/Fields";
 import { Avatar, isLostToFollowUp, dobFromAge, patientAgeLabel } from "@/components/Capture";
 import { GEO, DISEASES } from "@/mock/data";
-import { fmtDate, fmtDateTime, DISEASE_SPECS } from "@/mock/specs";
+import { fmtDate, fmtDateTime } from "@/mock/specs";
 import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
-import StatusChips, { PendingSyncChip } from "@/components/StatusChips";
+import StatusChips, { PendingSyncChip, patientStatusRecords } from "@/components/StatusChips";
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -282,10 +282,7 @@ export default function Patients() {
           const encs = encounters.filter((e) => e.patientId === p.id);
           const unsynced = encs.some((e) => !e.synced);
           const lastEnc = [...encs].sort((a, b) => b.date.localeCompare(a.date))[0];
-          const lastSuspect = suspects.filter((s) => s.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date))[0]?.suspect;
-          const diseaseId = lastEnc?.disease || (lastSuspect && DISEASE_SPECS[lastSuspect] ? lastSuspect : "") || "";
-          const diagnosis = lastEnc?.diagnosis || "";
-          const recordedOutcome = p.outcome || lastEnc?.outcome || (isLostToFollowUp(p, encounters, settings) ? "Lost to follow-up" : "");
+          const statusRecords = patientStatusRecords(p, encounters, settings);
           return (
             <div
               key={p.id}
@@ -301,9 +298,7 @@ export default function Patients() {
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <p className="font-head text-lg font-semibold leading-tight sm:truncate">{p.name}</p>
                   <StatusChips
-                    diseaseId={diseaseId}
-                    diagnosis={diagnosis}
-                    outcome={recordedOutcome}
+                    records={statusRecords}
                     testid={`patient-status-${p.id}`}
                   />
                 </div>

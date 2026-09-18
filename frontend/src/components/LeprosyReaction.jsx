@@ -157,7 +157,7 @@ const emptySelections = () =>
 
 const emptyReaction = () => ({
   id: `lr-${Date.now()}`,
-  onsetDate: "",
+  onsetDate: localISODate(),
   onsetDays: "",
   onsetMonths: "",
   onsetYears: "",
@@ -260,7 +260,7 @@ export default function LeprosyReaction({ value = [], onChange, id = "lep-reacti
   const save = () => {
     const row = { ...draft, id: draft.id || `lr-${Date.now()}` };
     if (editIndex >= 0) onChange(rows.map((r, j) => (j === editIndex ? row : r)));
-    else onChange([...rows, row]);
+    else onChange([row, ...rows]);
     setOpen(false);
   };
 

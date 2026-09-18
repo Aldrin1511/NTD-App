@@ -67,6 +67,9 @@ export const sectionPayload = (key, e) => {
       topicalAntibiotics: [...(x.topicalAntibiotics || [])].map(String).sort(),
       oralAntibiotics: [...(x.oralAntibiotics || [])].map(String).sort(),
       medCourses: Object.keys(courses).length ? courses : null,
+      posology: x.posology && typeof x.posology === "object" && Object.keys(x.posology).length
+        ? compactValue(x.posology)
+        : null,
       ivermectinTabletMg: hasOral(/ivermectin/i) ? x.ivermectinTabletMg : null,
       sulphurStrength: hasTopical(/sulphur/i) ? x.sulphurStrength : null,
       rifampicinTabletMg: hasOral(/rifampicin/i) ? x.rifampicinTabletMg : null,
