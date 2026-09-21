@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { SUSPECT_SYMPTOMS } from "@/mock/specs";
 import { USERS, PATIENTS, ENCOUNTERS, HOUSEHOLDS } from "@/mock/data";
+import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
 
 const KEY = "trias.state.v3";
 const Ctx = createContext(null);
@@ -13,7 +14,7 @@ const initial = () => ({
   households: HOUSEHOLDS,
   suspects: SUSPECTS,
   facilities: FACILITIES_LIST,
-  settings: { symptoms: SUSPECT_SYMPTOMS, drugs: DRUGS, visitTypes: VISIT_TYPES, ltfuByDisease: DEFAULT_LTFU, lostToFollowUpDays: 30, regimens: [
+  settings: { symptoms: SUSPECT_SYMPTOMS, drugs: DRUGS, visitTypes: VISIT_TYPES, ltfuByDisease: DEFAULT_LTFU, lostToFollowUpDays: 30, immunizationSchedules: DEFAULT_IMMUNIZATION_SCHEDULES, labMaster: DEFAULT_LAB_MASTER, featureConfig: DEFAULT_FEATURE_CONFIG, regimens: [
     { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
     { id: "R-001b", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Suspected Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
     { id: "R-002", name: "Scabies — oral ivermectin", disease: "scabies", diagnosis: "Crusted Scabies", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "Once", duration: 2, durationUnit: "Week(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)"] },
@@ -22,6 +23,7 @@ const initial = () => ({
     { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "STAT", durationUnit: "BOLUS", drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
     { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "STAT", duration: 1, durationUnit: "Day(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
+  schoolHealth: [],
   currentUserId: null,
   branding: {
     clientName: "PNG National NTD Programme",
@@ -38,6 +40,8 @@ const load = () => {
     if (raw) {
       const saved = JSON.parse(raw);
       const merged = { ...initial(), ...saved };
+      merged.settings = { ...initial().settings, ...(saved.settings || {}) };
+      if (!Array.isArray(merged.schoolHealth)) merged.schoolHealth = [];
       const have = new Set((merged.encounters || []).map((e) => e.id));
       const extra = ENCOUNTERS.filter((e) => !have.has(e.id));
       if (extra.length) merged.encounters = [...(merged.encounters || []), ...extra];
@@ -138,6 +142,46 @@ export function StoreProvider({ children }) {
       resetPassword: (id, password) =>
         patch((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, password } : u)) })),
       updateSettings: (changes) => patch((s) => ({ settings: { ...s.settings, ...changes } })),
+      // ---- Masters: immunization schedules ----
+      addImmunizationSchedule: (sch) =>
+        patch((s) => ({ settings: { ...s.settings, immunizationSchedules: [...(s.settings.immunizationSchedules || []), { id: `sch-${Date.now()}`, vaccines: [], ...sch }] } })),
+      updateImmunizationSchedule: (id, changes) =>
+        patch((s) => ({ settings: { ...s.settings, immunizationSchedules: (s.settings.immunizationSchedules || []).map((x) => (x.id === id ? { ...x, ...changes } : x)) } })),
+      removeImmunizationSchedule: (id) =>
+        patch((s) => ({ settings: { ...s.settings, immunizationSchedules: (s.settings.immunizationSchedules || []).filter((x) => x.id !== id) } })),
+      // ---- Masters: lab tests ----
+      addLabTest: (t) =>
+        patch((s) => ({ settings: { ...s.settings, labMaster: [...(s.settings.labMaster || []), { id: `lab-${Date.now()}`, results: [], location: "Bedside", ...t }] } })),
+      updateLabTest: (id, changes) =>
+        patch((s) => ({ settings: { ...s.settings, labMaster: (s.settings.labMaster || []).map((x) => (x.id === id ? { ...x, ...changes } : x)) } })),
+      removeLabTest: (id) =>
+        patch((s) => ({ settings: { ...s.settings, labMaster: (s.settings.labMaster || []).filter((x) => x.id !== id) } })),
+      // ---- Masters: per-condition feature config ----
+      setFeatureConfig: (condition, features) =>
+        patch((s) => ({ settings: { ...s.settings, featureConfig: { ...(s.settings.featureConfig || {}), [condition]: features } } })),
+      // ---- School Health ----
+      addSchoolVisit: (v) => {
+        const rec = { id: `SCH-${String(Math.floor(Math.random() * 900000) + 100000)}`, createdBy: state.currentUserId, worker: state.users.find((u) => u.id === state.currentUserId)?.name, children: [], report: null, status: v.status || "Planned", ...v };
+        const nextPending = queuedCount(state) + 1;
+        patch((s) => ({ schoolHealth: [rec, ...s.schoolHealth], pendingSync: nextPending }));
+        return rec;
+      },
+      updateSchoolVisit: (id, changes) =>
+        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === id ? { ...v, ...changes } : v)) })),
+      removeSchoolVisit: (id) => patch((s) => ({ schoolHealth: s.schoolHealth.filter((v) => v.id !== id) })),
+      saveSchoolChild: (visitId, child) =>
+        patch((s) => ({
+          schoolHealth: s.schoolHealth.map((v) => {
+            if (v.id !== visitId) return v;
+            const children = v.children || [];
+            if (child.id) return { ...v, children: children.map((c) => (c.id === child.id ? { ...c, ...child } : c)) };
+            return { ...v, children: [...children, { ...child, id: `CH-${Date.now()}` }] };
+          }),
+        })),
+      removeSchoolChild: (visitId, childId) =>
+        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, children: (v.children || []).filter((c) => c.id !== childId) } : v)) })),
+      saveSchoolReport: (visitId, report) =>
+        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, report } : v)) })),
       addSymptom: (text) =>
         patch((s) => ({
           settings: { ...s.settings, symptoms: s.settings.symptoms.includes(text) ? s.settings.symptoms : [...s.settings.symptoms, text] },
@@ -243,8 +287,7 @@ export function StoreProvider({ children }) {
         offerSyncAfterSave(nextPending);
         return next;
       },
-      registerBaby: (motherId, baby) => {
-        const mother = state.patients.find((p) => p.id === motherId);
+      registerBaby: (motherId, baby) => {        const mother = state.patients.find((p) => p.id === motherId);
         if (!mother) return null;
         const nextNum =
           state.patients.reduce((max, p) => {
