@@ -243,6 +243,37 @@ export function StoreProvider({ children }) {
         offerSyncAfterSave(nextPending);
         return next;
       },
+      registerBaby: (motherId, baby) => {
+        const mother = state.patients.find((p) => p.id === motherId);
+        if (!mother) return null;
+        const nextNum =
+          state.patients.reduce((max, p) => {
+            const m = String(p.id).match(/^PNG(\d+)$/i);
+            return m ? Math.max(max, Number(m[1])) : max;
+          }, 0) + 1;
+        const rec = {
+          id: `PNG${String(nextNum).padStart(7, "0")}`,
+          episodeId: `WB-${new Date().getFullYear()}-${String(1240 + nextNum).padStart(8, "0")}`,
+          createdBy: state.currentUserId,
+          createdAt: new Date().toISOString().slice(0, 10),
+          status: "New born",
+          diseases: [],
+          province: mother.province,
+          district: mother.district,
+          village: mother.village,
+          facility: mother.facility,
+          household: mother.household,
+          phone: mother.phone,
+          age: 0,
+          bornFrom: motherId,
+          ...baby,
+          sex: baby.sex || "",
+          gender: baby.sex || "",
+        };
+        const nextPending = queuedCount(state) + 1;
+        patch((s) => ({ patients: [rec, ...s.patients], pendingSync: nextPending }));
+        return rec;
+      },
       addDisease: (patientId, diseaseId) =>
         patch((s) => ({
           patients: s.patients.map((p) =>

@@ -8,6 +8,7 @@ import Patients from "@/pages/Patients";
 import PatientNew from "@/pages/PatientNew";
 import PatientRecord from "@/pages/PatientRecord";
 import ScabiesEncounter from "@/pages/Encounter";
+import AntenatalEncounter from "@/pages/AntenatalEncounter";
 import SuspectScreen from "@/pages/SuspectScreen";
 import Admin from "@/pages/Admin";
 import Sync from "@/pages/Sync";
@@ -34,6 +35,7 @@ function Shell() {
       <Route path="/patients/:id" element={<Guard><PatientRecord /></Guard>} />
       <Route path="/patients/:id/suspect" element={<Guard><SuspectScreen /></Guard>} />
       <Route path="/patients/:id/encounter/:diseaseId" element={<Guard><ScabiesEncounter /></Guard>} />
+      <Route path="/patients/:id/antenatal" element={<Guard><AntenatalEncounter /></Guard>} />
       <Route path="/patients/:id/disease/:diseaseId" element={<Guard><PatientRecord /></Guard>} />
       <Route path="/admin" element={<Guard><Admin /></Guard>} />
       <Route path="/sync" element={<Guard><Sync /></Guard>} />

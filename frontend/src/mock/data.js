@@ -92,6 +92,14 @@ export const DRUGS = [
   { name: "Doxycycline 100mg tablet", form: "Oral", strength: "100 mg", diseases: ["lf"] },
   { name: "Dressing Material (Compression Bandage / Wound Care)", form: "Supportive", strength: "—", diseases: ["lf"] },
   { name: "Self care kit", form: "Supportive", strength: "—", diseases: ["lf"] },
+  { name: "Folic Acid 5mg", form: "Oral", type: "Drug", strength: "5 mg", diseases: ["antenatal"] },
+  { name: "Ferrous Sulphate / FeFol", form: "Oral", type: "Drug", strength: "200 mg", diseases: ["antenatal"] },
+  { name: "Calcium 500mg", form: "Oral", type: "Drug", strength: "500 mg", diseases: ["antenatal"] },
+  { name: "Tab Albendazole 400mg", form: "Oral", type: "Drug", strength: "400 mg", diseases: ["antenatal", "lf"] },
+  { name: "Sulfadoxine-Pyrimethamine (IPTp)", form: "Oral", type: "Drug", strength: "500/25 mg", diseases: ["antenatal"] },
+  { name: "Tetanus Toxoid Vaccine", form: "Injectable", type: "Vaccine", strength: "0.5 ml", diseases: ["antenatal"] },
+  { name: "Tdap Vaccine", form: "Injectable", type: "Vaccine", strength: "0.5 ml", diseases: ["antenatal"] },
+  { name: "Influenza Vaccine", form: "Injectable", type: "Vaccine", strength: "0.5 ml", diseases: ["antenatal"] },
 ];
 
 export const DEFAULT_LTFU = { scabies: 30, yaws: 60, buruli: 90, lf: 180, leprosy: 180 };
