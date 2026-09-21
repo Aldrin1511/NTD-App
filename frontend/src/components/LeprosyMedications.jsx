@@ -352,7 +352,7 @@ export function leprosyTreatmentSummary(d = {}) {
 export function mdtAdherenceConfig(diagnosis = "") {
   const dx = String(diagnosis || "");
   if (/paucibacillary|\bPB\b/i.test(dx)) {
-    return { regimen: "PB", courseMonths: 6, checkboxMonths: 9, restartMissed: 7 };
+    return { regimen: "PB", courseMonths: 6, checkboxMonths: 9, restartMissed: 4 };
   }
   if (/multibacillary|\bMB\b/i.test(dx)) {
     return { regimen: "MB", courseMonths: 12, checkboxMonths: 18, restartMissed: 7 };

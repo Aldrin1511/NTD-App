@@ -1053,7 +1053,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         <p className="text-xs font-semibold text-muted-foreground">Drug adherence — MDT</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {cfg.regimen ? `${cfg.regimen} course ${cfg.courseMonths} months · showing ${cfg.checkboxMonths} month checkboxes.` : "MDT month-wise drug adherence."}
-          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. Restart appears on the current regimen after ${cfg.restartMissed} months not taken.`}
+          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. Restart appears after ${cfg.restartMissed} months not taken; remaining months then grey out.`}
         </p>
       </div>
 
@@ -1066,7 +1066,8 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         const missed = Object.values(line.months || {}).filter((v) => v === false).length;
         const taken = Object.values(line.months || {}).filter((v) => v === true).length;
         const isLatest = lineIdx === displayLines.length - 1;
-        const showRestart = isLatest && !readOnly && missed >= lineCfg.restartMissed;
+        const lockRemaining = missed >= lineCfg.restartMissed;
+        const showRestart = isLatest && !readOnly && lockRemaining;
 
         return (
           <div
@@ -1115,22 +1116,25 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                 d.setMonth(d.getMonth() + i);
                 const monthName = `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
                 const st = line.months?.[i];
+                const remaining = lockRemaining && st !== true && st !== false;
                 return (
                   <button
                     key={i}
                     type="button"
                     data-testid={`adherence-${lineIdx}-${i}`}
-                    onClick={readOnly ? undefined : () => setMonth(line.id, i, cycleAdherence(st))}
-                    disabled={readOnly}
+                    onClick={readOnly || remaining ? undefined : () => setMonth(line.id, i, cycleAdherence(st))}
+                    disabled={readOnly || remaining}
                     className={`flex min-h-12 items-center gap-2 rounded-md border px-3 text-left text-sm font-semibold ${
-                      st === true
-                        ? "border-green-500 bg-green-50 text-green-800"
-                        : st === false
-                          ? "border-red-400 bg-red-50 text-red-800"
-                          : "border-border bg-white"
-                    } ${readOnly ? "cursor-default disabled:opacity-100" : ""}`}
+                      remaining
+                        ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-60"
+                        : st === true
+                          ? "border-green-500 bg-green-50 text-green-800"
+                          : st === false
+                            ? "border-red-400 bg-red-50 text-red-800"
+                            : "border-border bg-white"
+                    } ${readOnly && !remaining ? "cursor-default disabled:opacity-100" : ""}`}
                   >
-                    {st === true ? <Check className="h-4 w-4" /> : <span className="h-4 w-4 rounded border border-input" />}
+                    {st === true ? <Check className="h-4 w-4" /> : <span className={`h-4 w-4 rounded border ${remaining ? "border-muted-foreground/30 bg-muted" : "border-input"}`} />}
                     <span className="flex-1">
                       {monthName}
                       <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">
@@ -1138,7 +1142,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                         {i < lineCfg.courseMonths ? "" : " · extension"}
                       </span>
                     </span>
-                    <span className="text-[10px]">{st === true ? "Taken" : st === false ? "Not taken" : ""}</span>
+                    <span className="text-[10px]">{st === true ? "Taken" : st === false ? "Not taken" : remaining ? "Locked" : ""}</span>
                   </button>
                 );
               })}
