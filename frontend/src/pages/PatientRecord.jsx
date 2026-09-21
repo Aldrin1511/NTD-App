@@ -1126,7 +1126,7 @@ export default function PatientRecord() {
     const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}`;
     setEnc({ ...enc, show: false });
     const path =
-      isExtra(enc.disease)
+      EXTRA_IDS.includes(enc.disease)
         ? `/patients/${p.id}/${EXTRA_CONDITIONS.find((c) => c.id === enc.disease).route}?${q}`
         : enc.disease
           ? `/patients/${p.id}/encounter/${enc.disease}?${q}`
@@ -1652,7 +1652,7 @@ export default function PatientRecord() {
               hint={enc.referral === "Yes" && !enc.district ? "Select province and district to see referral locations" : enc.referral === "Yes" && locationOptions.length === 0 ? "No facilities listed for this district" : undefined}
             />
             <SelectField label="Go to" options={["Suspect screening", ...SPEC_LIST.map((s) => s.name), ...EXTRA_CONDITIONS.map((c) => c.name)]}
-              value={isExtra(enc.disease) ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease).name : enc.disease && DISEASE_SPECS[enc.disease] ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
+              value={EXTRA_IDS.includes(enc.disease) ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease).name : enc.disease && DISEASE_SPECS[enc.disease] ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
               onChange={(v) => setEnc({ ...enc, disease: EXTRA_CONDITIONS.find((c) => c.name === v)?.id || SPEC_LIST.find((s) => s.name === v)?.id || "" })} testid="encounter-target-select" />
           </div>
           <DialogFooter className="gap-2">

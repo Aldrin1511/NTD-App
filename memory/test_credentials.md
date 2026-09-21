@@ -8,7 +8,15 @@ App is client-only (React + localStorage). Login via the sign-in screen.
 | Health worker | joseph@trias.health | Health@123 | own |
 | Supervisor (view only) | mary@trias.health | Health@123 | province |
 
-## Useful data
-- Female adult patient for Ante Natal testing: **PNG0000002** (Grace Waim) — also PNG0000006 (Rita Manam).
-- Ante Natal entry route: `/patients/:id/antenatal?fac=<facility>&vt=<visitType>`
-- Ante Natal dashboard: patient record page, "Ante Natal" tab (`/patients/:id?tab=antenatal`).
+## Useful patients / routes
+- Ante Natal (female adult): **PNG0000002** (Grace Waim). Route: `/patients/:id/antenatal`
+- Well Baby / Malnutrition (child): **PNG0000004** (Lucy Sipa). Routes: `/patients/:id/wellbaby`, `/patients/:id/malnutrition`
+- Condition tabs on record: `/patients/:id?tab=<antenatal|wellbaby|malnutrition|scabies>`
+- School Health (top-level): `/school-health` and `/school-health/:visitId`
+- Admin Masters: `/admin` → Masters tab → Immunization schedule / Lab master / Feature config
+
+## Notes for testers
+- New condition encounters route to `/patients/:id/<wellbaby|malnutrition|antenatal>`, NOT `/patients/:id/encounter/:disease`.
+- `ChoiceRow` toggles off on a second click — don't re-click a default option.
+- Malnutrition case types: New / Restart / Transfer in.
+- Growth chart uses representative WHO/CDC/IAP curves (not official tables).
