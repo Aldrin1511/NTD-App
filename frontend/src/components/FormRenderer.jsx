@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field, TextField, AreaField, SelectField, ChoiceRow, CheckGrid, AlertPanel, ItemActions } from "@/components/Fields";
-import { RELATIONSHIPS, CONTACT_STATUS, CONSENT, AGE_SEX_GROUPS, fmtDate, localISODate, parseDate } from "@/mock/specs";
+import { RELATIONSHIPS, CONTACT_STATUS, CONSENT, AGE_SEX_GROUPS, fmtDate, fmtDateTime, localISODate, parseDate } from "@/mock/specs";
 import { markFindings, packMark, isExclusiveFinding, findingPatchCount } from "@/lib/markFindings";
 import { Plus, Trash2, Check } from "lucide-react";
 import BodySilhouette from "@/components/BodySilhouette";
@@ -1008,6 +1008,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
 
   const restart = (line) => {
     const missed = Object.values(line.months || {}).filter((v) => v === false).length;
+    const fromIdx = lines.findIndex((l) => l.id === line.id);
     const nextLine = {
       id: `mdt-${Date.now()}`,
       startDate: localISODate(),
@@ -1016,6 +1017,9 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
       months: {},
       restartedFrom: line.id,
       restartedAt: localISODate(),
+      restartedFromRegimen: line.regimen || cfg.regimen || "",
+      restartedFromNumber: fromIdx >= 0 ? fromIdx + 1 : lines.length,
+      restartedFromStart: line.startDate || "",
     };
     commit([...lines, nextLine]);
     toast.success(
@@ -1068,6 +1072,21 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         const isLatest = lineIdx === displayLines.length - 1;
         const lockRemaining = missed >= lineCfg.restartMissed;
         const showRestart = isLatest && !readOnly && lockRemaining;
+        const fromIdx = line.restartedFrom
+          ? displayLines.findIndex((l) => l.id === line.restartedFrom)
+          : -1;
+        const fromLine = fromIdx >= 0 ? displayLines[fromIdx] : null;
+        const restartedFromLabel = line.restartedFrom
+          ? `Previous regimen #${line.restartedFromNumber || (fromIdx >= 0 ? fromIdx + 1 : "?")}${
+              line.restartedFromRegimen || fromLine?.regimen
+                ? ` · ${line.restartedFromRegimen || fromLine.regimen}`
+                : ""
+            }${
+              line.restartedFromStart || fromLine?.startDate
+                ? ` (started ${fmtDate(line.restartedFromStart || fromLine.startDate)})`
+                : ""
+            }`
+          : "";
 
         return (
           <div
@@ -1082,6 +1101,17 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                   {line.regimen ? ` · ${line.regimen}` : ""}
                   {line.restartedFrom ? " · restarted" : ""}
                 </p>
+                {line.restartedFrom && (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950" data-testid={`mdt-restarted-meta-${lineIdx}`}>
+                    Restarted from {restartedFromLabel}
+                    {line.restartedAt ? (
+                      <>
+                        {" · "}
+                        <span className="font-semibold">Restarted on {fmtDate(line.restartedAt)}</span>
+                      </>
+                    ) : null}
+                  </p>
+                )}
                 <Field label="Regimen start date">
                   <Input
                     type="date"
@@ -1110,7 +1140,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
               )}
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-3 gap-1.5 md:grid-cols-6">
               {Array.from({ length: count }, (_, i) => {
                 const d = new Date(start);
                 d.setMonth(d.getMonth() + i);
@@ -1124,7 +1154,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                     data-testid={`adherence-${lineIdx}-${i}`}
                     onClick={readOnly || remaining ? undefined : () => setMonth(line.id, i, cycleAdherence(st))}
                     disabled={readOnly || remaining}
-                    className={`flex min-h-12 items-center gap-2 rounded-md border px-3 text-left text-sm font-semibold ${
+                    className={`flex min-h-[4.25rem] flex-col items-start justify-between gap-1 rounded-md border px-2 py-1.5 text-left text-xs font-semibold ${
                       remaining
                         ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-60"
                         : st === true
@@ -1134,15 +1164,17 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
                             : "border-border bg-white"
                     } ${readOnly && !remaining ? "cursor-default disabled:opacity-100" : ""}`}
                   >
-                    {st === true ? <Check className="h-4 w-4" /> : <span className={`h-4 w-4 rounded border ${remaining ? "border-muted-foreground/30 bg-muted" : "border-input"}`} />}
-                    <span className="flex-1">
-                      {monthName}
-                      <span className="mt-0.5 block text-[10px] font-normal text-muted-foreground">
+                    <span className="flex w-full items-center justify-between gap-1">
+                      {st === true ? <Check className="h-3.5 w-3.5 shrink-0" /> : <span className={`h-3.5 w-3.5 shrink-0 rounded border ${remaining ? "border-muted-foreground/30 bg-muted" : "border-input"}`} />}
+                      <span className="text-[9px] font-semibold leading-none">{st === true ? "Taken" : st === false ? "Not taken" : remaining ? "Locked" : ""}</span>
+                    </span>
+                    <span className="w-full leading-tight">
+                      <span className="block">{monthName}</span>
+                      <span className="mt-0.5 block text-[9px] font-normal text-muted-foreground">
                         Month {i + 1}
-                        {i < lineCfg.courseMonths ? "" : " · extension"}
+                        {i < lineCfg.courseMonths ? "" : " · ext"}
                       </span>
                     </span>
-                    <span className="text-[10px]">{st === true ? "Taken" : st === false ? "Not taken" : remaining ? "Locked" : ""}</span>
                   </button>
                 );
               })}
@@ -1153,6 +1185,278 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
     </div>
   );
 };
+
+function MdtMonthCard({ testid, monthName, monthIndex, courseMonths, status, locked, readOnly, onCycle }) {
+  const st = status;
+  const remaining = locked;
+  return (
+    <button
+      type="button"
+      data-testid={testid}
+      onClick={onCycle}
+      disabled={readOnly || remaining || !onCycle}
+      className={`flex min-h-[4.25rem] flex-col items-start justify-between gap-1 rounded-md border px-2 py-1.5 text-left text-xs font-semibold ${
+        remaining
+          ? "cursor-not-allowed border-border bg-muted text-muted-foreground opacity-60"
+          : st === true
+            ? "border-green-500 bg-green-50 text-green-800"
+            : st === false
+              ? "border-red-400 bg-red-50 text-red-800"
+              : "border-border bg-white"
+      } ${readOnly && !remaining ? "cursor-default disabled:opacity-100" : ""}`}
+    >
+      <span className="flex w-full items-center justify-between gap-1">
+        {st === true ? <Check className="h-3.5 w-3.5 shrink-0" /> : <span className={`h-3.5 w-3.5 shrink-0 rounded border ${remaining ? "border-muted-foreground/30 bg-muted" : "border-input"}`} />}
+        <span className="text-[9px] font-semibold leading-none">{st === true ? "Taken" : st === false ? "Not taken" : remaining ? "Locked" : ""}</span>
+      </span>
+      <span className="w-full leading-tight">
+        <span className="block">{monthName}</span>
+        <span className="mt-0.5 block text-[9px] font-normal text-muted-foreground">
+          Month {monthIndex + 1}
+          {monthIndex < courseMonths ? "" : " · ext"}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function MdtRegimenReadonly({ line, lineIdx, title, diagnosis, testidPrefix = "mdt-dash" }) {
+  const lineCfg = mdtAdherenceConfig(
+    line.regimen === "PB" ? "Paucibacillary (PB)" : line.regimen === "MB" ? "Multibacillary (MB)" : diagnosis,
+  );
+  const count = Number(line.count || lineCfg.checkboxMonths);
+  const start = parseDate(line.startDate) || new Date();
+  const missed = Object.values(line.months || {}).filter((v) => v === false).length;
+  const taken = Object.values(line.months || {}).filter((v) => v === true).length;
+  const lockRemaining = missed >= lineCfg.restartMissed;
+
+  return (
+    <div className="rounded-lg border border-border bg-white p-4" data-testid={`${testidPrefix}-line-${lineIdx}`}>
+      <div className="mb-3 space-y-2">
+        <p className="text-sm font-semibold">{title}{line.regimen ? ` · ${line.regimen}` : ""}</p>
+        {line.restartedFrom && (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            Restarted from Previous regimen #{line.restartedFromNumber || "?"}
+            {line.restartedFromRegimen ? ` · ${line.restartedFromRegimen}` : ""}
+            {line.restartedFromStart ? ` (started ${fmtDate(line.restartedFromStart)})` : ""}
+            {line.restartedAt ? (
+              <>
+                {" · "}
+                <span className="font-semibold">Restarted on {fmtDate(line.restartedAt)}</span>
+              </>
+            ) : null}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Start {fmtDate(line.startDate) || "—"} · {taken} taken · {missed} not taken
+        </p>
+      </div>
+      <div className="grid grid-cols-3 gap-1.5 md:grid-cols-6">
+        {Array.from({ length: count }, (_, i) => {
+          const d = new Date(start);
+          d.setMonth(d.getMonth() + i);
+          const monthName = `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+          const st = line.months?.[i];
+          const remaining = lockRemaining && st !== true && st !== false;
+          return (
+            <MdtMonthCard
+              key={i}
+              testid={`${testidPrefix}-${lineIdx}-${i}`}
+              monthName={monthName}
+              monthIndex={i}
+              courseMonths={lineCfg.courseMonths}
+              status={st}
+              locked={remaining}
+              readOnly
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const dispensedMonthsForLine = (line, diagnosis) => {
+  const lineCfg = mdtAdherenceConfig(
+    line.regimen === "PB" ? "Paucibacillary (PB)" : line.regimen === "MB" ? "Multibacillary (MB)" : diagnosis,
+  );
+  const start = parseDate(line.startDate) || new Date();
+  const taken = [];
+  const notTaken = [];
+  Object.entries(line.months || {}).forEach(([k, v]) => {
+    const i = Number(k);
+    if (!Number.isFinite(i)) return;
+    const d = new Date(start);
+    d.setMonth(d.getMonth() + i);
+    const label = `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()} (M${i + 1}${i < lineCfg.courseMonths ? "" : " ext"})`;
+    if (v === true) taken.push(label);
+    else if (v === false) notTaken.push(label);
+  });
+  return { taken, notTaken };
+};
+
+const adherenceMonthSnapshot = (visit, diagnosis) => {
+  const dx = visit?.data?.diagnosis || visit?.diagnosis || diagnosis;
+  const lines = normalizeLeprosyAdherence(
+    visit?.data?.adherence || {},
+    dx,
+    visit?.data?.caseDetails?.treatmentStart,
+  ).lines;
+  const map = {};
+  lines.forEach((line, lineIdx) => {
+    const lineCfg = mdtAdherenceConfig(
+      line.regimen === "PB" ? "Paucibacillary (PB)" : line.regimen === "MB" ? "Multibacillary (MB)" : dx,
+    );
+    const start = parseDate(line.startDate) || new Date();
+    Object.entries(line.months || {}).forEach(([k, v]) => {
+      if (v !== true && v !== false) return;
+      const i = Number(k);
+      if (!Number.isFinite(i)) return;
+      const d = new Date(start);
+      d.setMonth(d.getMonth() + i);
+      const label = `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()} (M${i + 1}${i < lineCfg.courseMonths ? "" : " ext"})`;
+      const key = `${line.id || `L${lineIdx}`}:${i}`;
+      map[key] = { v, label, lineIdx };
+    });
+  });
+  return map;
+};
+
+const dispensedForVisit = (visit, prevVisit, diagnosis) => {
+  const cur = adherenceMonthSnapshot(visit, diagnosis);
+  const prev = prevVisit ? adherenceMonthSnapshot(prevVisit, diagnosis) : {};
+  const taken = [];
+  const notTaken = [];
+  Object.entries(cur).forEach(([key, info]) => {
+    if (prev[key] && prev[key].v === info.v) return;
+    if (info.v === true) taken.push(info.label);
+    else notTaken.push(info.label);
+  });
+  // First encounter (no previous): show full marks for that visit
+  if (!prevVisit) {
+    const dx = visit?.data?.diagnosis || visit?.diagnosis || diagnosis;
+    const lines = normalizeLeprosyAdherence(
+      visit?.data?.adherence || {},
+      dx,
+      visit?.data?.caseDetails?.treatmentStart,
+    ).lines;
+    const allTaken = [];
+    const allNot = [];
+    lines.forEach((line) => {
+      const { taken: t, notTaken: n } = dispensedMonthsForLine(line, dx);
+      allTaken.push(...t);
+      allNot.push(...n);
+    });
+    return { taken: allTaken, notTaken: allNot };
+  }
+  return { taken, notTaken };
+};
+
+/** Dashboard view: Dispensed-for list + at most two regimen tables (previous / current). */
+export function LeprosyAdherenceDashboard({ visits = [], diagnosis = "" }) {
+  const chronological = [...visits].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)));
+  const newest = chronological[chronological.length - 1];
+  const [prevIdx, setPrevIdx] = useState(0);
+
+  const latestDx = newest?.data?.diagnosis || newest?.diagnosis || diagnosis;
+  const allLines = normalizeLeprosyAdherence(
+    newest?.data?.adherence || {},
+    latestDx,
+    newest?.data?.caseDetails?.treatmentStart,
+  ).lines;
+
+  const previousLines = allLines.slice(0, -1);
+  const currentLine = allLines[allLines.length - 1];
+  const safePrevIdx = Math.min(prevIdx, Math.max(0, previousLines.length - 1));
+  const previousLine = previousLines[safePrevIdx];
+
+  const dispensedRows = [...visits]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
+    .map((v) => {
+      const chronoIdx = chronological.findIndex((x) => x.id === v.id);
+      const prevVisit = chronoIdx > 0 ? chronological[chronoIdx - 1] : null;
+      const dx = v?.data?.diagnosis || v?.diagnosis || diagnosis;
+      const { taken } = dispensedForVisit(v, prevVisit, dx);
+      return { visit: v, taken };
+    })
+    .filter((row) => row.taken.length > 0);
+
+  if (!visits.length || !allLines.length) {
+    return <p className="mt-2 text-sm text-muted-foreground">No MDT adherence recorded yet.</p>;
+  }
+
+  return (
+    <div className="mt-2 space-y-5" data-testid="leprosy-adherence-dashboard">
+      <div className="space-y-3" data-testid="adherence-dispensed-for">
+        {!dispensedRows.length ? (
+          <p className="text-sm text-muted-foreground">No months marked taken yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {dispensedRows.map(({ visit: v, taken }) => (
+              <div key={v.id} className="space-y-1" data-testid={`dispensed-enc-${v.id}`}>
+                <p className="text-xs font-semibold text-foreground">
+                  {fmtDateTime(v.date)} · {v.worker || "—"} · {v.type || "Encounter"}
+                </p>
+                <p className="text-sm text-foreground">
+                  <span className="font-semibold text-muted-foreground">Dispensed for </span>
+                  {taken.join(", ")}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground">Drug adherence — MDT</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Current regimen and previous regimen history. Use chips when there are multiple restarts.
+        </p>
+      </div>
+
+      {currentLine && (
+        <MdtRegimenReadonly
+          line={currentLine}
+          lineIdx={allLines.length - 1}
+          title={currentLine.restartedFrom ? "Current regimen · restarted" : "Current regimen"}
+          diagnosis={latestDx}
+          testidPrefix="mdt-current"
+        />
+      )}
+
+      {previousLines.length > 0 && (
+        <div className="space-y-3" data-testid="adherence-previous-block">
+          {previousLines.length > 1 && (
+            <div className="flex flex-wrap gap-2" data-testid="adherence-previous-chips">
+              {previousLines.map((line, i) => (
+                <button
+                  key={line.id || i}
+                  type="button"
+                  data-testid={`adherence-prev-chip-${i}`}
+                  onClick={() => setPrevIdx(i)}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-semibold ${
+                    i === safePrevIdx ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Previous #{i + 1}{line.regimen ? ` · ${line.regimen}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
+          {previousLine && (
+            <MdtRegimenReadonly
+              line={previousLine}
+              lineIdx={safePrevIdx}
+              title={`Previous regimen #${safePrevIdx + 1}`}
+              diagnosis={latestDx}
+              testidPrefix="mdt-prev"
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export const AdherenceGrid = ({ spec, value = {}, onChange, startDate, onRestart, diagnosis, readOnly = false }) => {
   const cfg = spec.adherence;

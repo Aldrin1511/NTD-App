@@ -472,6 +472,8 @@ export default function Encounter() {
   });
   const catalogue = settings.drugs || [];
 
+  const recordPath = () => (spec?.id ? `/patients/${p.id}/disease/${spec.id}` : `/patients/${p.id}`);
+
   const persist = (close) => {
     if (spec.id === "leprosy") {
       const rounds = examRounds?.length ? examRounds : [{}];
@@ -546,7 +548,7 @@ export default function Encounter() {
       } : {}),
     });
     setSavedAt(new Date().toLocaleTimeString());
-    if (close) navigate(`/patients/${p.id}`);
+    if (close) navigate(recordPath());
     if (online) toast.success(close ? "Encounter saved" : "Saved to device");
     else toast.success(close ? "Encounter saved · queued until you are online" : "Saved to device · queued until you are online");
   };
@@ -556,7 +558,7 @@ export default function Encounter() {
     setSavedAt("");
     setCancelOpen(false);
     toast.success("Encounter cancelled");
-    navigate(`/patients/${p.id}`);
+    navigate(recordPath());
   };
 
   const openLeprosyExam = (occasion) => {
@@ -883,7 +885,7 @@ export default function Encounter() {
             >
               {allExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
             </button>
-            <Button variant="outline" className="h-11 shrink-0" data-testid="exit-encounter-btn" onClick={() => navigate(`/patients/${p.id}`)}>
+            <Button variant="outline" className="h-11 shrink-0" data-testid="exit-encounter-btn" onClick={() => navigate(recordPath())}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Exit to record
             </Button>
           </div>

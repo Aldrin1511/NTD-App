@@ -1,33 +1,45 @@
 import { useState } from "react";
 
 /** Shared interactive point — checkbox/circle on the chart image. */
-function ChartPoint({ label, code, color, active, onClick, shape = "circle", testid, x, y, highlightMissing }) {
+function ChartPoint({ label, code, color, active, onClick, shape = "circle", testid, x, y, highlightMissing, decorative = false }) {
   const marked = !!code;
   const missing = highlightMissing && !marked;
+  const className = `absolute grid place-items-center border-2 shadow-sm transition ${
+    shape === "square" ? "h-[18px] w-[18px] rounded-[2px]" : "h-[18px] w-[18px] rounded-full"
+  } ${active ? "ring-2 ring-offset-1 ring-offset-black ring-white" : ""} ${
+    missing ? "ring-2 ring-red-500 ring-offset-1 ring-offset-black" : ""
+  } ${decorative ? "pointer-events-none" : ""}`;
+  const style = {
+    background: marked ? color || "#fff" : "#fff",
+    borderColor: marked ? (color || "#94a3b8") : missing ? "#dc2626" : "#94a3b8",
+    left: x,
+    top: y,
+    transform: "translate(-50%, -50%)",
+  };
+  const mark = marked && shape === "square" ? (
+    <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden>
+      <path d="M2.5 6.2 L5 8.5 L9.5 3.5" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ) : null;
+
+  if (decorative) {
+    return (
+      <span className={className} style={style} aria-hidden data-testid={testid}>
+        {mark}
+      </span>
+    );
+  }
+
   return (
     <button
       type="button"
       title={`${label}${code ? ` · ${code}` : ""}`}
       data-testid={testid}
       onClick={onClick}
-      className={`absolute grid place-items-center border-2 shadow-sm transition ${
-        shape === "square" ? "h-[18px] w-[18px] rounded-[2px]" : "h-[18px] w-[18px] rounded-full"
-      } ${active ? "ring-2 ring-offset-1 ring-offset-black ring-white" : ""} ${
-        missing ? "ring-2 ring-red-500 ring-offset-1 ring-offset-black" : ""
-      }`}
-      style={{
-        background: marked ? color || "#fff" : "#fff",
-        borderColor: marked ? (color || "#94a3b8") : missing ? "#dc2626" : "#94a3b8",
-        left: x,
-        top: y,
-        transform: "translate(-50%, -50%)",
-      }}
+      className={className}
+      style={style}
     >
-      {marked && shape === "square" && (
-        <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden>
-          <path d="M2.5 6.2 L5 8.5 L9.5 3.5" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
+      {mark}
     </button>
   );
 }
@@ -137,8 +149,22 @@ export const missingChartPoints = (points = {}, requiredIds = []) =>
 
 function StFigure({ artKey, value, options, onPlace, prefix, highlightMissing }) {
   const art = ST_ART[artKey];
+  // Eyes have a single circle — tap anywhere on the diagram (like VMT), not only the tiny marker.
+  const wholeImageHit = art.points.length === 1 && art.points[0].shape === "circle";
+  const sole = wholeImageHit ? art.points[0] : null;
+  const Wrapper = wholeImageHit ? "button" : "div";
+  const wrapperProps = wholeImageHit
+    ? {
+        type: "button",
+        title: `${sole.id}${value[sole.id] ? ` · ${value[sole.id]}` : ""}`,
+        "data-testid": `${prefix}-${sole.id}`,
+        onClick: () => onPlace(sole.id, options),
+        className: "relative mx-auto block w-full max-w-[9.5rem] rounded-md p-1 text-left hover:bg-white/5",
+      }
+    : { className: "relative mx-auto w-full max-w-[9.5rem]" };
+
   return (
-    <div className="relative mx-auto w-full max-w-[9.5rem]">
+    <Wrapper {...wrapperProps}>
       <img src={art.src} alt="" className="block h-auto w-full" draggable={false} />
       {art.points.map((p) => (
         <ChartPoint
@@ -151,11 +177,12 @@ function StFigure({ artKey, value, options, onPlace, prefix, highlightMissing })
           shape={p.shape}
           x={p.x}
           y={p.y}
-          testid={`${prefix}-${p.id}`}
-          onClick={() => onPlace(p.id, options)}
+          testid={wholeImageHit ? undefined : `${prefix}-${p.id}`}
+          onClick={wholeImageHit ? undefined : () => onPlace(p.id, options)}
+          decorative={wholeImageHit}
         />
       ))}
-    </div>
+    </Wrapper>
   );
 }
 
@@ -216,7 +243,7 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
       </div>
 
       {!activeCode && !readOnly && (
-        <p className="text-xs text-muted-foreground">Select a finding in the subsection, then tap the image.</p>
+        <p className="text-xs text-muted-foreground">Select a finding in the subsection, then tap the image (eyes) or a checkbox (hands/feet).</p>
       )}
     </div>
   );
@@ -425,7 +452,7 @@ export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision
     <div className={`scroll-mt-32 space-y-4 rounded-lg border p-4 ${showGaps ? "border-red-500 bg-red-50/40" : "border-border bg-muted/20"}`} data-testid={id}>
       <div>
         <p className="font-head text-base font-semibold">Vision Acuity <span className="text-red-600">*</span></p>
-        <p className="text-xs text-muted-foreground">1. Choose acuity result · 2. Tap the circle on Right or Left</p>
+        <p className="text-xs text-muted-foreground">1. Choose acuity result · 2. Tap the Right or Left diagram</p>
         {showGaps && (
           <p className="mt-2 text-sm font-semibold text-red-600" data-testid={`${id}-required-hint`}>
             Mark both Right and Left circles. {missing.length} remaining.
@@ -439,31 +466,40 @@ export function VisionAcuityChart({ value = {}, onChange, readOnly, id = "vision
           {VISION_REQUIRED_IDS.map((eyeId) => {
             const art = VISION_ART[eyeId];
             const code = points[eyeId];
+            const opt = VISION_OPTS.find((o) => o.code === code);
+            const missing = showGaps && !code;
             return (
-              <div key={eyeId} className="flex flex-col items-center gap-2">
-                <div className="relative w-full max-w-[11rem]">
+              <button
+                key={eyeId}
+                type="button"
+                data-testid={`${id}-${eyeId}`}
+                title={`${art.label} — ${opt?.label || "tap to mark"}`}
+                onClick={() => place(eyeId)}
+                className="relative flex flex-col items-center gap-2 rounded-md p-1 text-white hover:bg-white/5"
+              >
+                <span className="relative block w-full max-w-[11rem]">
                   <img src={art.src} alt="" className="block h-auto w-full" draggable={false} />
-                  <ChartPoint
-                    label={art.label}
-                    code={code}
-                    color={code ? colorFor(code, VISION_OPTS) : undefined}
-                    active={!!code}
-                    highlightMissing={showGaps}
-                    shape="circle"
-                    x={art.x}
-                    y={art.y}
-                    testid={`${id}-${eyeId}`}
-                    onClick={() => place(eyeId)}
+                  <span
+                    className={`absolute h-[18px] w-[18px] rounded-full border-2 shadow-sm ${
+                      missing ? "ring-2 ring-red-500 ring-offset-1 ring-offset-black" : ""
+                    } ${code ? "ring-2 ring-offset-1 ring-offset-black ring-white" : ""}`}
+                    style={{
+                      left: art.x,
+                      top: art.y,
+                      transform: "translate(-50%, -50%)",
+                      background: opt?.color || "#ffffff",
+                      borderColor: opt?.color || (missing ? "#dc2626" : "#94a3b8"),
+                    }}
                   />
-                </div>
+                </span>
                 <span className="text-[10px] font-semibold text-white/70">{art.label}</span>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
       {!activeCode && !readOnly && (
-        <p className="text-xs text-muted-foreground">Select 6/60 or Lesser than 6/60, then tap a circle.</p>
+        <p className="text-xs text-muted-foreground">Select 6/60 or Lesser than 6/60, then tap a diagram.</p>
       )}
     </div>
   );

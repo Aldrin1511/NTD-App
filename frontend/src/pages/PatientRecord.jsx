@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
@@ -22,7 +22,7 @@ import { LF_DRUGS, ivermectinDose, albendazoleDose, decDose } from "@/components
 import { BURULI_DRUGS, rifampicinDose, clarithromycinDose } from "@/components/BuruliMedications";
 import { LEPROSY_DRUGS, mdtBand, prednisoloneSchedule, mdtAdherenceConfig } from "@/components/LeprosyMedications";
 import { formatDosePhysical, physicalUnits, hideVisitPosology } from "@/lib/medications";
-import { AdherenceGrid, HouseholdCountTable, normalizeLepOccasion } from "@/components/FormRenderer";
+import { AdherenceGrid, HouseholdCountTable, normalizeLepOccasion, LeprosyAdherenceDashboard } from "@/components/FormRenderer";
 import LeprosyHouseholdMonitoring from "@/components/LeprosyHouseholdMonitoring";
 import { REACTION_COLS, REACTION_GRID } from "@/components/LeprosyReaction";
 
@@ -1043,11 +1043,11 @@ const UnfoldLessIcon = ({ className = "h-5 w-5" }) => (
 );
 
 export default function PatientRecord() {
-  const { id } = useParams();
+  const { id, diseaseId } = useParams();
   const navigate = useNavigate();
   const { patients, encounters, user, suspects, facilities, settings } = useStore();
   const p = patients.find((x) => x.id === id);
-  const [tab, setTab] = useState("");
+  const [tab, setTab] = useState(() => diseaseId || "");
   const [lhs, setLhs] = useState(true);
   const [featureOpen, setFeatureOpen] = useState(() => Object.fromEntries(FEATURES.map(([k]) => [k, true])));
   const [enc, setEnc] = useState({ show: false, facility: "", date: localISODate(), visitType: "", referral: "No", disease: "", province: "", district: "", prevFacility: "" });
@@ -1073,9 +1073,28 @@ export default function PatientRecord() {
       ? "suspect"
       : myDiseases.some((d) => d.id === tab)
         ? tab
-        : hasSuspects
-          ? "suspect"
-          : myDiseases[0]?.id || "";
+        : diseaseId && myDiseases.some((d) => d.id === diseaseId)
+          ? diseaseId
+          : hasSuspects
+            ? "suspect"
+            : myDiseases[0]?.id || "";
+
+  useEffect(() => {
+    if (!diseaseId) return;
+    if (diseaseId === "suspect" && hasSuspects) {
+      setTab("suspect");
+      return;
+    }
+    if (myDiseases.some((d) => d.id === diseaseId)) setTab(diseaseId);
+  }, [diseaseId, hasSuspects, myDiseases]);
+
+  const selectTab = (k) => {
+    setTab(k);
+    if (!p?.id) return;
+    if (k === "suspect") navigate(`/patients/${p.id}`, { replace: true });
+    else navigate(`/patients/${p.id}/disease/${k}`, { replace: true });
+  };
+
   const episodesByDisease = useMemo(() => {
     const map = {};
     for (const d of myDiseases) map[d.id] = groupDiseaseEpisodes(encs, d.id, p?.episodeId);
@@ -1196,7 +1215,7 @@ export default function PatientRecord() {
               {tabs.map(([k, label]) => {
                 if (k === "suspect") {
                   return (
-                    <button key={k} data-testid={`tab-${k}`} onClick={() => setTab(k)}
+                    <button key={k} data-testid={`tab-${k}`} onClick={() => selectTab(k)}
                       className={`h-11 shrink-0 rounded-md border px-4 text-sm font-semibold ${activeTab === k ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"}`}>{label}</button>
                   );
                 }
@@ -1211,7 +1230,7 @@ export default function PatientRecord() {
                       <button
                         type="button"
                         data-testid={`tab-${k}`}
-                        onClick={() => setTab(k)}
+                        onClick={() => selectTab(k)}
                         className={`${tabCls} rounded-r-none border-r-0 px-4`}
                       >
                         {label}{visits ? ` · ${visits}` : ""}
@@ -1223,7 +1242,7 @@ export default function PatientRecord() {
                             data-testid={`tab-${k}-episodes`}
                             aria-label={`${label} episodes`}
                             className={`${tabCls} rounded-l-none px-2`}
-                            onClick={() => setTab(k)}
+                            onClick={() => selectTab(k)}
                           >
                             <ChevronDown className="h-4 w-4" />
                           </button>
@@ -1235,7 +1254,7 @@ export default function PatientRecord() {
                               data-testid={`tab-${k}-episode-${ep.id}`}
                               className={`flex flex-col items-start gap-0.5 py-2 ${current?.id === ep.id ? "bg-secondary" : ""}`}
                               onClick={() => {
-                                setTab(k);
+                                selectTab(k);
                                 setEpisodeSel((s) => ({ ...s, [k]: ep.id }));
                               }}
                             >
@@ -1253,7 +1272,7 @@ export default function PatientRecord() {
                   );
                 }
                 return (
-                  <button key={k} data-testid={`tab-${k}`} onClick={() => setTab(k)}
+                  <button key={k} data-testid={`tab-${k}`} onClick={() => selectTab(k)}
                     className={`${tabCls} px-4`}>{label}{visits ? ` · ${visits}` : ""}</button>
                 );
               })}
@@ -1424,6 +1443,36 @@ export default function PatientRecord() {
                               </div>
                             );
                           })
+                        ) : k === "adherence" && activeTab === "leprosy" ? (
+                          <div className="px-4 py-3" data-testid="feature-adherence-leprosy">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-primary">
+                                <span>
+                                  {rows[0]?.e
+                                    ? `${entryDateTime(rows[0].e.date, rows[0].e.editedAt)} · ${rows[0].e.worker} · ${rows[0].e.type}`
+                                    : "MDT adherence"}
+                                </span>
+                                {rows.some(({ e }) => isEditedSection(e, "adherence")) && <EditedBadge />}
+                              </p>
+                              {canEdit && rows[0]?.e && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-9 w-9 text-primary"
+                                  data-testid="feature-edit-adherence"
+                                  aria-label="Edit adherence"
+                                  onClick={() => openFeatureEncounter(rows[0].e, "adherence")}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                            <LeprosyAdherenceDashboard
+                              visits={rows.map(({ e }) => e)}
+                              diagnosis={rows[0]?.s?.diagnosis || selectedEpisode?.diagnosis || ""}
+                            />
+                          </div>
                         ) : (
                           rows.map(({ e, s }) => (
                             <div key={e.id} className="px-4 py-3">
