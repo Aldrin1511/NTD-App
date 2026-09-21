@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { GEO, DISEASES, DRUG_FREQUENCIES, DRUG_DURATION_UNITS } from "@/mock/data";
 import { DISEASE_SPECS, SPEC_LIST } from "@/mock/specs";
 import { COMPARE_OPS, formatRegimenAge, formatRegimenWeight, isRegimenActive } from "@/lib/medications";
+import { scrollViewToTop } from "@/lib/scroll";
 import { toast } from "sonner";
 import { UserPlus, Trash2, Plus, KeyRound, Building2, Users, Library } from "lucide-react";
 
@@ -39,6 +40,10 @@ export default function Admin() {
   const s = useStore();
   const [tab, setTab] = useState("users");
   const [master, setMaster] = useState("drugs");
+
+  useLayoutEffect(() => {
+    scrollViewToTop();
+  }, [tab, master]);
 
   if (s.user?.role !== "Admin")
     return (

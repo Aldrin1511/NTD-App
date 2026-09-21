@@ -194,6 +194,31 @@ export function extraDrugNames(diseaseId, topical = [], oral = []) {
   return [...topical, ...oral].filter((n) => n && !protocol.has(n));
 }
 
+/** Combo blister packs contain many drugs — visit posology is for single drugs only. */
+export function isBlisterPackDrug(name) {
+  return /blister\s*pack/i.test(String(name || ""));
+}
+
+/** Prednisolone uses a taper table, not a single frequency/duration. */
+export function hideVisitPosology(name) {
+  return isBlisterPackDrug(name) || /prednisolone/i.test(String(name || ""));
+}
+
+export function regimenForDrug(matchedRegimens = [], name, catalogue = []) {
+  return (matchedRegimens || []).find((r) => regimenDrugList(r, catalogue).includes(name)) || null;
+}
+
+/** Prefill visit posology from the matching regimen master; calculated values fill any gaps. */
+export function posologyDefaultsFromRegimens(name, matchedRegimens = [], catalogue = [], calculated = {}) {
+  const regimen = regimenForDrug(matchedRegimens, name, catalogue);
+  const masterDuration = regimen ? formatRegimenDurationValue(regimen) : "";
+  return {
+    dosage: calculated.dosage || "",
+    frequency: (regimen && regimen.frequency) || calculated.frequency || "",
+    duration: masterDuration || calculated.duration || "",
+  };
+}
+
 export function slugDrug(name) {
   return String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

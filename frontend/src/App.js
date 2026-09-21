@@ -2,6 +2,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { StoreProvider, useStore } from "@/store";
 import { Toaster } from "@/components/ui/sonner";
+import ScrollToTop from "@/components/ScrollToTop";
 import Login from "@/pages/Login";
 import Patients from "@/pages/Patients";
 import PatientNew from "@/pages/PatientNew";
@@ -45,6 +46,7 @@ export default function App() {
   return (
     <StoreProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <Shell />
         <Toaster position="top-center" richColors />
       </BrowserRouter>

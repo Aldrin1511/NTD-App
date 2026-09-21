@@ -14,13 +14,13 @@ const initial = () => ({
   suspects: SUSPECTS,
   facilities: FACILITIES_LIST,
   settings: { symptoms: SUSPECT_SYMPTOMS, drugs: DRUGS, visitTypes: VISIT_TYPES, ltfuByDisease: DEFAULT_LTFU, lostToFollowUpDays: 30, regimens: [
-    { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Permethrin 5% Cream/Lotion"] },
-    { id: "R-001b", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Suspected Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Permethrin 5% Cream/Lotion"] },
-    { id: "R-002", name: "Scabies — oral ivermectin", disease: "scabies", diagnosis: "Crusted Scabies", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, drugs: ["Tab Ivermectin (0.2 mg/kg)"] },
-    { id: "R-003", name: "Buruli — RC 8 weeks", disease: "buruli", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Tab Rifampicin 300mg (10mg per Kg)", "Tab Clarithromycin 500mg (7.5mg per kg)"] },
+    { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
+    { id: "R-001b", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Suspected Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
+    { id: "R-002", name: "Scabies — oral ivermectin", disease: "scabies", diagnosis: "Crusted Scabies", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "Once", duration: 2, durationUnit: "Week(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)"] },
+    { id: "R-003", name: "Buruli — RC 8 weeks", disease: "buruli", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, duration: 8, durationUnit: "Week(s)", drugs: ["Tab Rifampicin 300mg (10mg per Kg)", "Tab Clarithromycin 500mg (7.5mg per kg)"] },
     { id: "R-004", name: "Leprosy MDT — blister pack", disease: "leprosy", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Multi-Drug Therapy (MDT) Blister pack"] },
-    { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
-    { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
+    { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "STAT", durationUnit: "BOLUS", drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
+    { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "STAT", duration: 1, durationUnit: "Day(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
   currentUserId: null,
   branding: {
@@ -41,6 +41,24 @@ const load = () => {
       const have = new Set((merged.encounters || []).map((e) => e.id));
       const extra = ENCOUNTERS.filter((e) => !have.has(e.id));
       if (extra.length) merged.encounters = [...(merged.encounters || []), ...extra];
+      const seedRegimens = initial().settings.regimens || [];
+      const savedRegimens = merged.settings?.regimens;
+      if (Array.isArray(savedRegimens) && seedRegimens.length) {
+        const byId = Object.fromEntries(seedRegimens.map((r) => [r.id, r]));
+        merged.settings = {
+          ...merged.settings,
+          regimens: savedRegimens.map((r) => {
+            const seed = byId[r.id];
+            if (!seed) return r;
+            return {
+              ...r,
+              frequency: r.frequency || seed.frequency || "",
+              duration: r.duration || seed.duration || "",
+              durationUnit: r.durationUnit || seed.durationUnit || "",
+            };
+          }),
+        };
+      }
       return merged;
     }
   } catch (e) {}

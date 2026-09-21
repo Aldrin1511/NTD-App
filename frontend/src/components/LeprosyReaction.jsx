@@ -1,17 +1,8 @@
-import { useMemo, useState } from "react";
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TextField, ChoiceRow, AreaField } from "@/components/Fields";
-import { fmtDate, localISODate } from "@/mock/specs";
-import { Pencil, Plus, Trash2, Eye } from "lucide-react";
-import {
-  SensoryTestingChart,
-  VmtChart,
-  VisionAcuityChart,
-  emptySensory,
-  emptyVmt,
-  emptyVision,
-} from "@/components/LeprosyReactionCharts";
+import { localISODate } from "@/mock/specs";
+import { Plus, Stethoscope } from "lucide-react";
 
 export const REACTION_TYPES = [
   "Reversal reaction (Type 1 reaction)",
@@ -155,7 +146,7 @@ const emptySelections = () =>
     ]),
   );
 
-const emptyReaction = () => ({
+export const emptyReaction = () => ({
   id: `lr-${Date.now()}`,
   onsetDate: localISODate(),
   onsetDays: "",
@@ -165,14 +156,9 @@ const emptyReaction = () => ({
   occurred: "",
   reactionType: "",
   selections: emptySelections(),
-  sensory: emptySensory(),
-  vmt: emptyVmt(),
-  vision: emptyVision(),
   notes: "",
   typeManual: false,
 });
-
-const countChartMarks = (chart) => Object.keys(chart?.points || {}).length;
 
 const toggleInList = (list, item) =>
   (list || []).includes(item) ? list.filter((x) => x !== item) : [...(list || []), item];
@@ -197,78 +183,171 @@ const inferReactionType = (selections) => {
   return "";
 };
 
-const countFindings = (selections) =>
-  REACTION_GRID.reduce(
-    (n, row) => n + REACTION_COLS.reduce((a, { key }) => a + (selections?.[row.category]?.[key] || []).length, 0),
-    0,
-  );
-
-export default function LeprosyReaction({ value = [], onChange, id = "lep-reaction" }) {
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState("add");
-  const [draft, setDraft] = useState(emptyReaction());
-  const [editIndex, setEditIndex] = useState(-1);
-
-  const rows = Array.isArray(value) ? value : [];
-  const readOnly = mode === "view";
-
-  const openAdd = () => {
-    setMode("add");
-    setEditIndex(-1);
-    setDraft(emptyReaction());
-    setOpen(true);
-  };
-
-  const openRow = (i, nextMode) => {
-    setMode(nextMode);
-    setEditIndex(i);
-    const row = rows[i] || {};
-    setDraft({
-      ...emptyReaction(),
-      ...row,
-      selections: { ...emptySelections(), ...(row.selections || {}) },
-      sensory: { ...emptySensory(), ...(row.sensory || {}), points: { ...(row.sensory?.points || {}) } },
-      vmt: { ...emptyVmt(), ...(row.vmt || {}), points: { ...(row.vmt?.points || {}) } },
-      vision: { ...emptyVision(), ...(row.vision || {}), points: { ...(row.vision?.points || {}) } },
+const findingLabels = (selections) => {
+  const labels = [];
+  REACTION_GRID.forEach((row) => {
+    REACTION_COLS.forEach(({ key }) => {
+      (selections?.[row.category]?.[key] || []).forEach((label) => {
+        if (label) labels.push(label);
+      });
     });
-    setOpen(true);
-  };
+  });
+  return labels;
+};
 
-  const remove = (i) => onChange(rows.filter((_, j) => j !== i));
+export const isReactionFilled = (r) => {
+  if (!r) return false;
+  if (String(r.occurred || "").trim()) return true;
+  if (String(r.reactionType || "").trim()) return true;
+  if (String(r.notes || "").trim()) return true;
+  return findingLabels(r.selections).length > 0;
+};
 
-  const setField = (k) => (v) => setDraft((s) => ({ ...s, [k]: v }));
+function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
+  const setField = (k) => (v) => onPatch({ [k]: v });
 
   const toggleFinding = (category, colKey, label) => {
-    if (readOnly) return;
-    setDraft((s) => {
-      const nextSel = {
-        ...s.selections,
-        [category]: {
-          ...s.selections[category],
-          [colKey]: toggleInList(s.selections[category]?.[colKey], label),
-        },
-      };
-      const inferred = inferReactionType(nextSel);
-      return {
-        ...s,
-        selections: nextSel,
-        reactionType: s.typeManual ? s.reactionType : inferred,
-      };
+    const selections = { ...emptySelections(), ...(draft.selections || {}) };
+    const cat = selections[category] || { type1: [], type2: [], drug: [] };
+    const nextSel = {
+      ...selections,
+      [category]: {
+        ...cat,
+        [colKey]: toggleInList(cat[colKey], label),
+      },
+    };
+    onPatch({
+      selections: nextSel,
+      reactionType: draft.typeManual ? draft.reactionType : inferReactionType(nextSel),
     });
   };
 
-  const save = () => {
-    const row = { ...draft, id: draft.id || `lr-${Date.now()}` };
-    if (editIndex >= 0) onChange(rows.map((r, j) => (j === editIndex ? row : r)));
-    else onChange([row, ...rows]);
-    setOpen(false);
+  return (
+    <div className="space-y-6 rounded-lg border border-primary/25 bg-white p-4" data-testid={`${id}-form`}>
+      <p className="font-head text-base font-semibold tracking-tight">{heading}</p>
+      <div className="space-y-6">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-3">
+            <TextField
+              label="Reaction onset"
+              type="date"
+              testid={`${id}-onset-date`}
+              value={draft.onsetDate}
+              onChange={(e) => setField("onsetDate")(e.target.value)}
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <TextField label="Days" type="number" testid={`${id}-onset-days`} value={draft.onsetDays} onChange={(e) => setField("onsetDays")(e.target.value)} />
+              <TextField label="Months" type="number" testid={`${id}-onset-months`} value={draft.onsetMonths} onChange={(e) => setField("onsetMonths")(e.target.value)} />
+              <TextField label="Years" type="number" testid={`${id}-onset-years`} value={draft.onsetYears} onChange={(e) => setField("onsetYears")(e.target.value)} />
+            </div>
+          </div>
+          <TextField
+            label="Date of diagnosis"
+            type="date"
+            testid={`${id}-dx-date`}
+            value={draft.diagnosisDate}
+            onChange={(e) => setField("diagnosisDate")(e.target.value)}
+          />
+        </div>
+
+        <ChoiceRow
+          label="Reaction Occurred"
+          options={OCCURRED}
+          value={draft.occurred}
+          onChange={setField("occurred")}
+          testid={`${id}-occurred`}
+        />
+
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[900px] text-sm" data-testid={`${id}-grid`}>
+            <thead className="bg-muted">
+              <tr>
+                <th className="sticky left-0 z-10 bg-muted p-3 text-left text-xs font-semibold text-muted-foreground">Reaction</th>
+                {REACTION_COLS.map((c) => (
+                  <th key={c.key} className="p-3 text-left text-xs font-semibold text-muted-foreground">{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {REACTION_GRID.map((row) => (
+                <tr key={row.category} className="border-t border-border align-top">
+                  <td className="sticky left-0 z-10 bg-white p-3 font-semibold">{row.category}</td>
+                  {REACTION_COLS.map((col) => (
+                    <td key={col.key} className="p-3">
+                      <div className="space-y-2">
+                        {(row[col.key] || []).map((opt) => {
+                          const on = (draft.selections?.[row.category]?.[col.key] || []).includes(opt.label);
+                          return (
+                            <label
+                              key={`${col.key}-${opt.label}`}
+                              className={`flex cursor-pointer items-start gap-2 text-sm ${priorityClass(opt.priority)}`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-4 w-4 accent-primary"
+                                checked={on}
+                                onChange={() => toggleFinding(row.category, col.key, opt.label)}
+                                data-testid={`${id}-${row.category}-${col.key}-${opt.label}`.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
+                              />
+                              <span className={on ? "font-semibold" : ""}>{opt.label}</span>
+                            </label>
+                          );
+                        })}
+                        {(row[col.key] || []).length === 0 && (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <ChoiceRow
+          label="Reaction type (auto from findings — override if needed)"
+          options={REACTION_TYPES}
+          value={draft.reactionType}
+          onChange={(v) => onPatch({ reactionType: v, typeManual: true })}
+          testid={`${id}-type`}
+        />
+
+        <AreaField
+          label="Notes"
+          rows={3}
+          testid={`${id}-notes`}
+          value={draft.notes}
+          onChange={(e) => setField("notes")(e.target.value)}
+        />
+
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 w-full sm:w-auto"
+          data-testid={`${id}-start-exam`}
+          onClick={() => onStartExam?.("Upon Reaction")}
+        >
+          <Stethoscope className="mr-2 h-4 w-4" /> Start Leprosy Assessment Upon Reaction
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function LeprosyReaction({ value = [], onChange, onStartExam, followUp = false, id = "lep-reaction" }) {
+  const rows = Array.isArray(value) ? value : [];
+  const seedRef = useRef(null);
+  if (!seedRef.current) seedRef.current = emptyReaction();
+
+  const forms = followUp ? rows : (rows.length ? rows : [seedRef.current]);
+
+  const patchAt = (i) => (partial) => {
+    const base = rows.length ? rows : [seedRef.current];
+    onChange(base.map((r, j) => (j === i ? { ...r, ...partial } : r)));
   };
 
-  const title = useMemo(() => {
-    if (mode === "view") return "View Reaction Assessment";
-    if (mode === "edit") return "Edit Reaction Assessment";
-    return "Reaction Assessment";
-  }, [mode]);
+  const add = () => onChange([...rows, emptyReaction()]);
 
   return (
     <div className="space-y-4" data-testid={id}>
@@ -276,192 +355,34 @@ export default function LeprosyReaction({ value = [], onChange, id = "lep-reacti
         <div>
           <p className="font-head text-lg font-semibold tracking-tight">Leprosy Reaction</p>
           <p className="text-xs text-muted-foreground">
-            {rows.length} assessment{rows.length === 1 ? "" : "s"} recorded
+            {followUp
+              ? `${rows.filter(isReactionFilled).length} assessment${rows.filter(isReactionFilled).length === 1 ? "" : "s"} this visit`
+              : "Record findings for this reaction"}
           </p>
         </div>
-        <Button type="button" className="h-11" data-testid={`${id}-add`} onClick={openAdd}>
-          <Plus className="mr-2 h-4 w-4" /> Add
-        </Button>
+        {followUp && (
+          <Button type="button" className="h-11" data-testid={`${id}-add`} onClick={add}>
+            <Plus className="mr-2 h-4 w-4" /> Add
+          </Button>
+        )}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[720px] text-sm" data-testid={`${id}-table`}>
-          <thead className="bg-muted">
-            <tr>
-              {["Reaction type", "Occurred", "Diagnosis date", "Findings", "Charts", ""].map((h) => (
-                <th key={h || "a"} className="p-3 text-left text-xs font-semibold text-muted-foreground">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="p-8 text-center text-muted-foreground">No reaction assessments yet.</td>
-              </tr>
-            ) : (
-              rows.map((r, i) => (
-                <tr key={r.id || i} className="border-t border-border align-top">
-                  <td className="p-3 font-semibold">{r.reactionType || "—"}</td>
-                  <td className="p-3">{r.occurred || "—"}</td>
-                  <td className="p-3">{r.diagnosisDate ? fmtDate(r.diagnosisDate) : "—"}</td>
-                  <td className="p-3 text-muted-foreground">{countFindings(r.selections)} finding(s)</td>
-                  <td className="p-3 text-muted-foreground">
-                    ST {countChartMarks(r.sensory)} · VMT {countChartMarks(r.vmt)} · VA {countChartMarks(r.vision)}
-                  </td>
-                  <td className="p-3">
-                    <div className="flex items-center gap-1">
-                      <Button type="button" variant="ghost" className="h-9 px-2 text-primary" data-testid={`${id}-view-${i}`} onClick={() => openRow(i, "view")}>
-                        <Eye className="mr-1 h-4 w-4" /> View
-                      </Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-primary" data-testid={`${id}-edit-${i}`} onClick={() => openRow(i, "edit")}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" data-testid={`${id}-remove-${i}`} onClick={() => remove(i)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {forms.map((row, i) => (
+        <ReactionForm
+          key={row.id || i}
+          draft={{ ...emptyReaction(), ...row, selections: { ...emptySelections(), ...(row.selections || {}) } }}
+          onPatch={patchAt(i)}
+          onStartExam={onStartExam}
+          id={`${id}-${i}`}
+          heading={followUp && rows.length > 1 ? `Reaction Assessment ${i + 1}` : "Reaction Assessment"}
+        />
+      ))}
 
-      <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl" data-testid={`${id}-dialog`}>
-          <DialogHeader>
-            <DialogTitle className="font-head text-xl">{title}</DialogTitle>
-          </DialogHeader>
-
-          <div className={`space-y-6 ${readOnly ? "pointer-events-none opacity-90" : ""}`}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-3">
-                <TextField
-                  label="Reaction onset"
-                  type="date"
-                  testid={`${id}-onset-date`}
-                  value={draft.onsetDate}
-                  onChange={(e) => setField("onsetDate")(e.target.value)}
-                />
-                <div className="grid grid-cols-3 gap-2">
-                  <TextField label="Days" type="number" testid={`${id}-onset-days`} value={draft.onsetDays} onChange={(e) => setField("onsetDays")(e.target.value)} />
-                  <TextField label="Months" type="number" testid={`${id}-onset-months`} value={draft.onsetMonths} onChange={(e) => setField("onsetMonths")(e.target.value)} />
-                  <TextField label="Years" type="number" testid={`${id}-onset-years`} value={draft.onsetYears} onChange={(e) => setField("onsetYears")(e.target.value)} />
-                </div>
-              </div>
-              <TextField
-                label="Date of diagnosis"
-                type="date"
-                testid={`${id}-dx-date`}
-                value={draft.diagnosisDate}
-                onChange={(e) => setField("diagnosisDate")(e.target.value)}
-              />
-            </div>
-
-            <ChoiceRow
-              label="Reaction Occurred"
-              options={OCCURRED}
-              value={draft.occurred}
-              onChange={setField("occurred")}
-              testid={`${id}-occurred`}
-            />
-
-            <ChoiceRow
-              label="Reaction type (auto from findings — override if needed)"
-              options={REACTION_TYPES}
-              value={draft.reactionType}
-              onChange={(v) => setDraft((s) => ({ ...s, reactionType: v, typeManual: true }))}
-              testid={`${id}-type`}
-            />
-
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[900px] text-sm" data-testid={`${id}-grid`}>
-                <thead className="bg-muted">
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-muted p-3 text-left text-xs font-semibold text-muted-foreground">Reaction</th>
-                    {REACTION_COLS.map((c) => (
-                      <th key={c.key} className="p-3 text-left text-xs font-semibold text-muted-foreground">{c.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {REACTION_GRID.map((row) => (
-                    <tr key={row.category} className="border-t border-border align-top">
-                      <td className="sticky left-0 z-10 bg-white p-3 font-semibold">{row.category}</td>
-                      {REACTION_COLS.map((col) => (
-                        <td key={col.key} className="p-3">
-                          <div className="space-y-2">
-                            {(row[col.key] || []).map((opt) => {
-                              const on = (draft.selections?.[row.category]?.[col.key] || []).includes(opt.label);
-                              return (
-                                <label
-                                  key={`${col.key}-${opt.label}`}
-                                  className={`flex cursor-pointer items-start gap-2 text-sm ${priorityClass(opt.priority)}`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    className="mt-1 h-4 w-4 accent-primary"
-                                    checked={on}
-                                    onChange={() => toggleFinding(row.category, col.key, opt.label)}
-                                    data-testid={`${id}-${row.category}-${col.key}-${opt.label}`.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
-                                  />
-                                  <span className={on ? "font-semibold" : ""}>{opt.label}</span>
-                                </label>
-                              );
-                            })}
-                            {(row[col.key] || []).length === 0 && (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
-                          </div>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <SensoryTestingChart
-              id={`${id}-st`}
-              value={draft.sensory}
-              onChange={(sensory) => setDraft((s) => ({ ...s, sensory }))}
-              readOnly={readOnly}
-            />
-            <VmtChart
-              id={`${id}-vmt`}
-              value={draft.vmt}
-              onChange={(vmt) => setDraft((s) => ({ ...s, vmt }))}
-              readOnly={readOnly}
-            />
-            <VisionAcuityChart
-              id={`${id}-vision`}
-              value={draft.vision}
-              onChange={(vision) => setDraft((s) => ({ ...s, vision }))}
-              readOnly={readOnly}
-            />
-
-            <AreaField
-              label="Notes"
-              rows={3}
-              testid={`${id}-notes`}
-              value={draft.notes}
-              onChange={(e) => setField("notes")(e.target.value)}
-            />
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" className="h-12" onClick={() => setOpen(false)} data-testid={`${id}-cancel`}>
-              {readOnly ? "Close" : "Cancel"}
-            </Button>
-            {!readOnly && (
-              <Button type="button" className="h-12" onClick={save} data-testid={`${id}-save`}>
-                Save
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {followUp && rows.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          No reaction assessments this visit. Use Add to record one.
+        </p>
+      )}
     </div>
   );
 }

@@ -749,8 +749,6 @@ export const DISEASE_SPECS = {
       { k: "vmtChart", type: "leprosyVmtChart" },
       { k: "sensoryChart", type: "leprosySensoryChart" },
       { k: "visionChart", type: "leprosyVisionChart" },
-      { k: "patches", label: "Number of patches A–D (override if needed)", type: "number" },
-      { k: "nerves", label: "Nerves affected — max(body chart, NFA) override (max 18 for NFA / 12 body)", type: "number" },
     ],
     repeatExam: true,
     repeatExamIncludesAssessment: true,

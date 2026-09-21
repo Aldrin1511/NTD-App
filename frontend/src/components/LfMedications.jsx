@@ -96,7 +96,10 @@ export default function LfMedications({
   weight = 0,
   medCourses = {},
   posology = {},
+  matchedRegimens = [],
+  catalogue = [],
 }) {
+  const regimenVisit = { matchedRegimens, catalogue };
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
   const yearsNum = Number.isFinite(years) ? years : null;
@@ -225,6 +228,7 @@ export default function LfMedications({
               medCourses={medCourses}
               posology={posology}
               onChange={onChange}
+              {...regimenVisit}
               defaults={{
                 dosage: iver ? formatDosePhysical(iver.mg, iver.tabs) : "0.2 mg/kg",
                 frequency: "Once",
@@ -255,6 +259,7 @@ export default function LfMedications({
               medCourses={medCourses}
               posology={posology}
               onChange={onChange}
+              {...regimenVisit}
               defaults={{
                 dosage: alb ? formatDosePhysical(alb.mg, alb.tabs) : "200 mg (<10y) / 400 mg (10y+)",
                 frequency: "Once",
@@ -282,6 +287,7 @@ export default function LfMedications({
               medCourses={medCourses}
               posology={posology}
               onChange={onChange}
+              {...regimenVisit}
               defaults={{
                 dosage: dec ? formatDosePhysical(dec.mg, dec.tabs) : "6 mg/kg",
                 frequency: "Once",
@@ -310,6 +316,7 @@ export default function LfMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: "100 mg",
               frequency: "As prescribed",
@@ -333,6 +340,7 @@ export default function LfMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{ dosage: "Apply", frequency: "As needed", duration: "—" }}
           />
         )}
@@ -350,6 +358,7 @@ export default function LfMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{ dosage: "—", frequency: "Daily self-care", duration: "—" }}
           />
         )}

@@ -142,7 +142,10 @@ export default function YawsMedications({
   medCourses = {},
   posology = {},
   azithromycinTabletMg = 500,
+  matchedRegimens = [],
+  catalogue = [],
 }) {
+  const regimenVisit = { matchedRegimens, catalogue };
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
   const yearsNum = Number.isFinite(years) ? years : null;
@@ -223,6 +226,7 @@ export default function YawsMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: azith ? formatDosePhysical(azith.mg, azithTabs) : "30 mg/kg",
               frequency: "Once",
@@ -263,6 +267,7 @@ export default function YawsMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: benz?.mls != null ? `${benz.mls} ml IMI` : "IMI",
               frequency: "Once",

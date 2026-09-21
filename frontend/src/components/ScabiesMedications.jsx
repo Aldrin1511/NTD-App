@@ -124,7 +124,10 @@ export default function ScabiesMedications({
   weight = 0,
   medCourses = {},
   posology = {},
+  matchedRegimens = [],
+  catalogue = [],
 }) {
+  const regimenVisit = { matchedRegimens, catalogue };
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age) || null;
   const pregnant = caseDetails.pregnant === "Yes" || patient.pregnancy === "Yes";
@@ -231,6 +234,7 @@ export default function ScabiesMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: "Apply to body below the neck",
               frequency: "Once at night",
@@ -275,6 +279,7 @@ export default function ScabiesMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: months != null && months < 24
                 ? "Dilute 1:3 (10 ml + 30 ml water)"
@@ -329,6 +334,7 @@ export default function ScabiesMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: sulphurStrength || "5%",
               frequency: "Every night",
@@ -379,6 +385,7 @@ export default function ScabiesMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: dose ? formatDosePhysical(dose.mg, dose.tabs) : "0.2 mg/kg",
               frequency: "Once",

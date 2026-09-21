@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { SelectField, ChoiceRow, SectionCard, TextField, capitalizeName } from "@/components/Fields";
+import PhoneField from "@/components/PhoneField";
 import { PhotoCapture, FingerprintCapture, DocumentCapture, ageFromDob, dobFromAge } from "@/components/Capture";
 import { GEO, REGISTERED_ATS, BLOOD_GROUPS } from "@/mock/data";
+import { defaultPhoneCountryFromFacilities, digitsOnly, formatInternational, getPhoneMaxLength, parseStoredPhone } from "@/lib/phone";
 import { Plus, Trash2 } from "lucide-react";
 
 const registeredAtOptions = REGISTERED_ATS.map((h) => `${h.id} — ${h.name}`);
@@ -14,15 +16,13 @@ export const emptyAddress = (type = "By residency", province = "") => ({
   village: "",
 });
 
-export const emptyPatientForm = (user) => ({
+export const emptyPatientForm = (user, facilities = []) => ({
   name: "",
   middleName: "",
   lastName: "",
   dob: "",
   age: "",
   gender: "",
-  weight: "",
-  height: "",
   email: "",
   bloodGroup: "Unknown",
   photo: "",
@@ -30,6 +30,7 @@ export const emptyPatientForm = (user) => ({
   pregnancy: "N/A",
   lactating: "N/A",
   phone: "",
+  phoneCountry: defaultPhoneCountryFromFacilities(user, facilities),
   facility: "",
   registeredAt: "",
   consent: "By verbal",
@@ -49,7 +50,7 @@ export const splitPatientName = (p) => {
   return { name: parts[0], middleName: parts.slice(1, -1).join(" "), lastName: parts[parts.length - 1] };
 };
 
-export const formFromPatient = (p, user) => {
+export const formFromPatient = (p, user, facilities = []) => {
   const names = splitPatientName(p);
   const addresses = Array.isArray(p.addresses) && p.addresses.length
     ? p.addresses.map((a) => ({
@@ -66,21 +67,25 @@ export const formFromPatient = (p, user) => {
         district: p.district || "",
         village: p.village || "",
       }];
+  const parsed = parseStoredPhone(
+    p.phone,
+    p.countryCode || p.phoneCountry,
+    defaultPhoneCountryFromFacilities(user, facilities),
+  );
   return {
-    ...emptyPatientForm(user),
+    ...emptyPatientForm(user, facilities),
     ...names,
     dob: p.dob || dobFromAge(p.age, p.createdAt) || "",
     age: p.age ?? ageFromDob(p.dob || dobFromAge(p.age, p.createdAt)) ?? "",
     gender: p.gender || p.sex || "",
-    weight: p.weight ?? "",
-    height: p.height ?? "",
     email: p.email || "",
     bloodGroup: p.bloodGroup || "Unknown",
     photo: p.photo || "",
     fingerprint: p.fingerprint || {},
     pregnancy: p.pregnancy || "N/A",
     lactating: p.lactating || "N/A",
-    phone: p.phone || "",
+    phone: parsed.national,
+    phoneCountry: parsed.country,
     facility: p.facility || "",
     registeredAt: p.registeredAt || "",
     consent: p.consent || "By verbal",
@@ -96,10 +101,10 @@ export const patientPayload = (f) => {
     firstName: f.name,
     name: [f.name, f.middleName, f.lastName].filter(Boolean).join(" "),
     age: Number(f.age) || 0,
-    weight: Number(f.weight) || 0,
-    height: Number(f.height) || 0,
     sex: f.gender,
     gender: f.gender,
+    phone: formatInternational(f.phoneCountry, f.phone),
+    countryCode: f.phoneCountry,
     country: primary.country,
     province: primary.province,
     district: primary.district,
@@ -166,9 +171,19 @@ export default function PatientForm({ f, setF, patientId, mode = "create" }) {
             hint={mode === "edit" ? "Changing age updates the date of birth from today" : "Entering age fills the date of birth from today's registration date"}
           />
           <ChoiceRow label="Gender" options={["Male", "Female", "Other"]} value={f.gender} onChange={set("gender")} testid="patient-gender-select" />
-          <TextField label="Weight (kg)" testid="patient-weight-input" type="number" value={f.weight} onChange={(e) => set("weight")(e.target.value)} />
-          <TextField label="Height (cm)" testid="patient-height-input" type="number" value={f.height} onChange={(e) => set("height")(e.target.value)} />
-          <TextField label="Phone / contact" testid="patient-phone-input" value={f.phone} onChange={(e) => set("phone")(e.target.value)} />
+          <PhoneField
+            country={f.phoneCountry}
+            national={f.phone}
+            onCountryChange={(c) =>
+              setF((s) => ({
+                ...s,
+                phoneCountry: c,
+                phone: digitsOnly(s.phone, getPhoneMaxLength(c.Code)),
+              }))
+            }
+            onNationalChange={set("phone")}
+            testid="patient-phone"
+          />
           <TextField label="Email" type="email" testid="patient-email-input" value={f.email} onChange={(e) => set("email")(e.target.value)} />
           <div className="sm:col-span-2">
             <ChoiceRow label="Blood group" options={BLOOD_GROUPS} value={f.bloodGroup} onChange={set("bloodGroup")} testid="patient-blood-select" />

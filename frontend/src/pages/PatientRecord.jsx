@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertPanel, SelectField, TextField, ChoiceRow } from "@/components/Fields";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DISEASE_SPECS, SPEC_LIST, assessmentSpecs, fmtDate, fmtDateTime, visitLabel, groupDiseaseEpisodes, leprosyScores, leprosyClass, localISODate } from "@/mock/specs";
+import { DISEASE_SPECS, SPEC_LIST, assessmentSpecs, fmtDate, fmtDateTime, visitLabel, groupDiseaseEpisodes, isEpisodeClosed, leprosyScores, leprosyClass, localISODate } from "@/mock/specs";
 import { markFindings, findingPatchCount } from "@/lib/markFindings";
 import { GEO } from "@/mock/data";
 import { compactValue, sectionFingerprint } from "@/sectionDiff";
+import { scrollViewToTop } from "@/lib/scroll";
 import { toast } from "sonner";
 import { ArrowLeft, Plus, Phone, ChevronDown, ChevronLeft, ChevronRight, PanelLeft, Pencil, Printer } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
@@ -20,8 +21,8 @@ import { YAWS_DRUGS, azithromycinDose, benzathineDose } from "@/components/YawsM
 import { LF_DRUGS, ivermectinDose, albendazoleDose, decDose } from "@/components/LfMedications";
 import { BURULI_DRUGS, rifampicinDose, clarithromycinDose } from "@/components/BuruliMedications";
 import { LEPROSY_DRUGS, mdtBand, prednisoloneSchedule, mdtAdherenceConfig } from "@/components/LeprosyMedications";
-import { formatDosePhysical, physicalUnits } from "@/lib/medications";
-import { AdherenceGrid, HouseholdCountTable } from "@/components/FormRenderer";
+import { formatDosePhysical, physicalUnits, hideVisitPosology } from "@/lib/medications";
+import { AdherenceGrid, HouseholdCountTable, normalizeLepOccasion } from "@/components/FormRenderer";
 import LeprosyHouseholdMonitoring from "@/components/LeprosyHouseholdMonitoring";
 import { REACTION_COLS, REACTION_GRID } from "@/components/LeprosyReaction";
 
@@ -79,8 +80,9 @@ const rowsForChangedSection = (visits, key, spec, patient) => {
 };
 
 const examChipFingerprint = (exam) => JSON.stringify(compactValue({
-  roundIndex: exam.roundIndex,
-  findings: exam.findings,
+        roundIndex: exam.roundIndex,
+        occasion: exam.occasion,
+        findings: exam.findings,
   secondaryInfection: exam.secondaryInfection,
   extras: exam.extras,
   leprosy: exam.leprosy,
@@ -116,6 +118,23 @@ const episodeStatus = (outcome) => {
   const s = String(outcome || "").trim();
   if (!s || s === "Open") return "Active";
   return s;
+};
+
+const episodeStatusChipClass = (status) => {
+  const s = String(status || "").toLowerCase();
+  if (s === "active") return "border-transparent bg-emerald-600 text-white";
+  if (/cured|healed/.test(s)) return "border-transparent bg-primary text-white";
+  if (/lost to follow-up/.test(s)) return "border-amber-300 bg-amber-50 text-amber-900";
+  if (/^no\b/.test(s)) return "border-slate-200 bg-slate-100 text-slate-700";
+  return "border-primary/20 bg-secondary text-secondary-foreground";
+};
+
+const episodeDateParts = (ep) => {
+  const parts = [{ k: "start", label: "Start date", value: fmtDate(ep.start) }];
+  if (isEpisodeClosed(ep.outcome)) {
+    parts.push({ k: "end", label: "End date", value: fmtDate(ep.last) });
+  }
+  return parts;
 };
 
 const formatList = (v) => (Array.isArray(v) ? v : []).map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
@@ -241,12 +260,32 @@ const bodyPartOf = (m) => {
   return m.label || "";
 };
 
+const isSecondaryPerLesion = (spec) =>
+  /secondary/i.test(String(spec?.bodyChart?.perLesion?.k || spec?.bodyChart?.perLesion?.label || ""));
+
+const lesionSecondaryInfection = (marks) => {
+  const items = Object.values(marks || {})
+    .map((m) => {
+      const v = String(m.extra || "").trim();
+      if (!v || /^none$/i.test(v)) return null;
+      return { value: v, part: bodyPartOf(m) };
+    })
+    .filter(Boolean);
+  if (!items.length) return "";
+  const values = [...new Set(items.map((x) => x.value))];
+  if (values.length === 1) return values[0];
+  return items
+    .map((x) => (x.part ? `${x.value} (${x.part})` : x.value))
+    .filter((line, i, all) => all.indexOf(line) === i)
+    .join(", ");
+};
+
 const groupExamFindings = (marks, spec) => {
   const order = (spec?.bodyChart?.codes || []).map((c) => c[1]);
   const groups = new Map();
   Object.values(marks || {}).forEach((m) => {
     const part = bodyPartOf(m);
-    const extra = m.extra && m.extra !== "None" ? m.extra : "";
+    const extra = isSecondaryPerLesion(spec) ? "" : (m.extra && m.extra !== "None" ? m.extra : "");
     markFindings(m).forEach((f) => {
       const name = findingNameOf({ ...m, ...f }, spec);
       if (!name && !part) return;
@@ -307,7 +346,9 @@ const entryDateTime = (primary, fallback) =>
 
 const examChipLabel = (exam) => {
   const base = `${entryDateTime(exam.date, exam.editedAt || exam.encounterDate)} · ${exam.type || "Examination"}`;
-  return exam.roundCount > 1 ? `${base} · Assessment ${exam.roundIndex + 1}` : base;
+  const round = exam.roundCount > 1 ? ` · Assessment ${exam.roundIndex + 1}` : "";
+  const occasion = exam.occasion ? ` · ${exam.occasion}` : "";
+  return `${base}${round}${occasion}`;
 };
 
 const summariseExam = (e, spec) => {
@@ -322,7 +363,9 @@ const summariseExam = (e, spec) => {
       const marks = round.marks || {};
       const assessment = { ...(x.assessment || {}), ...(round.assessment || {}) };
       const findings = groupExamFindings(marks, spec);
-      const si = round.secondaryInfection || assessment.secondaryInfection || "";
+      const si = isSecondaryPerLesion(spec)
+        ? lesionSecondaryInfection(marks)
+        : (round.secondaryInfection || assessment.secondaryInfection || "");
       const extras = examExtras(assessment, spec);
       const hasLepCharts = spec?.id === "leprosy" && (assessment.vmtChart || assessment.sensoryChart || assessment.visionChart);
       if (!findings.length && !hasValue(si) && !extras.length && !Object.keys(marks).length && !hasLepCharts) return null;
@@ -355,6 +398,7 @@ const summariseExam = (e, spec) => {
         worker: e.worker,
         roundIndex: rounds.length - 1 - i,
         roundCount: rounds.length,
+        occasion: normalizeLepOccasion(round.occasion) || (spec?.id === "leprosy" && i === rounds.length - 1 ? "Upon Diagnosis" : ""),
         findings,
         secondaryInfection: hasValue(si) ? si : "",
         extras,
@@ -375,10 +419,12 @@ const ExamSummary = ({ exam }) => {
       {exam.findings.length > 0 && (
         <p className="text-sm font-medium">{exam.findings.join(" · ")}</p>
       )}
+      {exam.occasion && (
+        <p className="text-sm" data-testid="exam-occasion">{exam.occasion}</p>
+      )}
       {exam.secondaryInfection && (
-        <p className="text-sm">
-          <span className="text-muted-foreground">Secondary infection:</span>{" "}
-          <span className="font-medium">{exam.secondaryInfection}</span>
+        <p className="text-sm" data-testid="exam-secondary-infection">
+          Secondary infection - {exam.secondaryInfection}
         </p>
       )}
       {exam.extras.map((item) => (
@@ -494,7 +540,7 @@ const medicationRows = (e, spec, patient) => {
       ? list.map((c, i) => ({ stamp: c?.date ? fmtDate(c.date) : date || "—", n: list.length - i }))
       : [{ stamp: row.date || date || "—", n: 1 }];
     stamps.forEach(({ stamp, n }) => {
-      const ov = (x.posology || {})[row.name] || {};
+      const ov = hideVisitPosology(row.name) ? {} : ((x.posology || {})[row.name] || {});
       rows.push({
         name: stamps.length > 1 ? `${row.name} (${n})` : row.name,
         dosage: ov.dosage || row.dosage || "—",
@@ -684,12 +730,24 @@ const medicationRows = (e, spec, patient) => {
     }
     if (oral.includes(LEPROSY_DRUGS.prednisolone)) {
       const sch = prednisoloneSchedule();
-      add({
-        name: LEPROSY_DRUGS.prednisolone,
-        dosage: `${sch.totalTabs} × 5 mg tablets (taper)`,
-        frequency: "Taper",
-        duration: "12 weeks",
-      }, [LEPROSY_DRUGS.prednisolone]);
+      const key = LEPROSY_DRUGS.prednisolone;
+      used.add(key);
+      const list = Array.isArray(x.medCourses?.[key]) ? newestFirst(x.medCourses[key]) : [];
+      const stamps = list.some((c) => c?.date)
+        ? list.map((c, i) => ({ stamp: c?.date ? fmtDate(c.date) : date || "—", n: list.length - i }))
+        : [{ stamp: date || "—", n: 1 }];
+      stamps.forEach(({ stamp }) => {
+        sch.phases.forEach((p, i) => {
+          rows.push({
+            name: i === 0 ? LEPROSY_DRUGS.prednisolone : "",
+            dosage: `${p.mgPerDose} mg`,
+            date: stamp,
+            frequency: p.dosesPerDay > 1 ? "Twice daily" : "Daily",
+            duration: `${p.weeks} weeks`,
+            advice: "",
+          });
+        });
+      });
     }
   }
 
@@ -903,20 +961,20 @@ const MedsSummary = ({ rows }) => {
             <tr className="border-b border-border text-xs text-muted-foreground">
               <th className="py-2 pr-3 font-semibold">Name</th>
               <th className="py-2 pr-3 font-semibold">Dosage</th>
-              <th className="py-2 pr-3 font-semibold">Date</th>
               <th className="py-2 pr-3 font-semibold">Frequency</th>
-              <th className="py-2 font-semibold">Duration</th>
+              <th className="py-2 pr-3 font-semibold">Duration</th>
+              <th className="py-2 font-semibold">Date</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, i) => (
-              <Fragment key={`${row.name}-${i}`}>
+              <Fragment key={`${row.name || row.dosage}-${i}`}>
                 <tr className="border-b border-border/70 align-top">
                   <td className="py-2 pr-3 font-medium">{row.name}</td>
                   <td className="py-2 pr-3">{row.dosage}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">{row.date}</td>
                   <td className="py-2 pr-3">{row.frequency}</td>
-                  <td className="py-2">{row.duration}</td>
+                  <td className="py-2 pr-3">{row.duration}</td>
+                  <td className="py-2 whitespace-nowrap">{row.date}</td>
                 </tr>
                 {row.advice ? (
                   <tr className="border-b border-border">
@@ -1025,6 +1083,11 @@ export default function PatientRecord() {
   }, [encs, myDiseases, p?.episodeId]);
 
   const selectedEpisode = (episodesByDisease[activeTab] || []).find((e) => e.id === episodeSel[activeTab]) || (episodesByDisease[activeTab] || [])[0];
+  const selectedEpisodeId = selectedEpisode?.id || "";
+
+  useLayoutEffect(() => {
+    scrollViewToTop();
+  }, [id, activeTab, selectedEpisodeId]);
   const featureRows = useMemo(() => {
     if (!myDiseases.some((x) => x.id === activeTab)) return [];
     const visits = selectedEpisode?.visits || [];
@@ -1178,7 +1241,7 @@ export default function PatientRecord() {
                             >
                               <span className="font-semibold">Episode {episodeNumber(episodes, ep.id)} · {visitLabel(ep.visitCount)}</span>
                               <span className="text-xs text-muted-foreground">
-                                {fmtDate(ep.start)}{ep.visitCount > 1 ? ` – ${fmtDate(ep.last)}` : ""}
+                                {episodeDateParts(ep).map((d) => `${d.label}: ${d.value}`).join(" · ")}
                                 {` · ${episodeStatus(ep.outcome)}`}
                                 {ep.diagnosis ? ` · ${ep.diagnosis}` : ""}
                               </span>
@@ -1252,14 +1315,19 @@ export default function PatientRecord() {
           {myDiseases.some((x) => x.id === activeTab) && (
             <div className="space-y-4" data-testid={`condition-tab-${activeTab}`}>
               {selectedEpisode && (
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-white px-4 py-3" data-testid="episode-summary">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/25 bg-secondary px-4 py-3" data-testid="episode-summary">
                   <div>
                     <p className="font-semibold">
                       Episode {episodeNumber(episodesByDisease[activeTab], selectedEpisode.id)}
                       {" · "}{visitLabel(selectedEpisode.visitCount)}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {fmtDate(selectedEpisode.start)}{selectedEpisode.visitCount > 1 ? ` – ${fmtDate(selectedEpisode.last)}` : ""}
+                    <p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">
+                      {episodeDateParts(selectedEpisode).map((d, i) => (
+                        <Fragment key={d.k}>
+                          {i > 0 && " · "}
+                          <span data-testid={`episode-${d.k}-date`}>{d.label}: {d.value}</span>
+                        </Fragment>
+                      ))}
                       {selectedEpisode.diagnosis ? ` · ${selectedEpisode.diagnosis}` : ""}
                     </p>
                   </div>
@@ -1276,12 +1344,18 @@ export default function PatientRecord() {
                             ...Object.fromEntries(featureRows.map((f) => [f.k, !allExpanded])),
                           }))
                         }
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-primary hover:bg-secondary"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
                       >
                         {allExpanded ? <UnfoldLessIcon className="h-5 w-5" /> : <UnfoldMoreIcon className="h-5 w-5" />}
                       </button>
                     )}
-                    <Badge variant="outline" className="rounded">{episodeStatus(selectedEpisode.outcome)}</Badge>
+                    <Badge
+                      variant="outline"
+                      className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${episodeStatusChipClass(episodeStatus(selectedEpisode.outcome))}`}
+                      data-testid="episode-status-chip"
+                    >
+                      {episodeStatus(selectedEpisode.outcome)}
+                    </Badge>
                   </div>
                 </div>
               )}

@@ -84,7 +84,10 @@ export default function BuruliMedications({
   weight = 0,
   medCourses = {},
   posology = {},
+  matchedRegimens = [],
+  catalogue = [],
 }) {
+  const regimenVisit = { matchedRegimens, catalogue };
   const selected = useMemo(
     () => ({
       rifampicin: oral.includes(BURULI_DRUGS.rifampicin),
@@ -143,6 +146,7 @@ export default function BuruliMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: rif ? formatDosePhysical(rif.mg, rif.tabs) : "10 mg/kg",
               frequency: "Once daily",
@@ -180,6 +184,7 @@ export default function BuruliMedications({
             medCourses={medCourses}
             posology={posology}
             onChange={onChange}
+            {...regimenVisit}
             defaults={{
               dosage: cla ? `${formatDosePhysical(cla.mg, cla.tabs)} per dose` : "7.5 mg/kg",
               frequency: "Twice daily",

@@ -10,11 +10,11 @@ import { ArrowLeft } from "lucide-react";
 
 export default function PatientNew() {
   const { id } = useParams();
-  const { addPatient, updatePatient, patients, user, online } = useStore();
+  const { addPatient, updatePatient, patients, user, online, facilities } = useStore();
   const navigate = useNavigate();
   const existing = id ? patients.find((x) => x.id === id) : null;
   const isEdit = Boolean(id);
-  const [f, setF] = useState(() => (existing ? formFromPatient(existing, user) : emptyPatientForm(user)));
+  const [f, setF] = useState(() => (existing ? formFromPatient(existing, user, facilities) : emptyPatientForm(user, facilities)));
 
   if (isEdit && !existing) {
     return (

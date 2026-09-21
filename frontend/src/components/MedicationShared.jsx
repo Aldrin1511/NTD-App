@@ -8,10 +8,12 @@ import {
   catalogueForDisease,
   extraDrugNames,
   isTopicalForm,
+  hideVisitPosology,
   parseTabletOptions,
   dropVisitPosology,
   setVisitPosology,
   slugDrug,
+  posologyDefaultsFromRegimens,
 } from "@/lib/medications";
 
 export function RegimenBanner({ names = [] }) {
@@ -161,12 +163,17 @@ export function DrugVisitFields({
   medCourses,
   posology = {},
   defaults = {},
+  matchedRegimens = [],
+  catalogue = [],
   onChange,
 }) {
   if (!selected) return null;
+  const merged = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults);
   return (
     <>
-      <VisitPosology name={name} defaults={defaults} posology={posology} onChange={onChange} />
+      {!hideVisitPosology(name) && (
+        <VisitPosology name={name} defaults={merged} posology={posology} onChange={onChange} />
+      )}
       <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
     </>
   );
@@ -180,6 +187,7 @@ export function ExtraSelectedDrugs({
   medCourses = {},
   posology = {},
   defaults = {},
+  matchedRegimens = [],
   onChange,
 }) {
   const extras = extraDrugNames(diseaseId, topical, oral);
@@ -215,7 +223,14 @@ export function ExtraSelectedDrugs({
               <p className="mt-2 text-xs text-muted-foreground">Available strengths: {tabs.map((t) => `${t} mg`).join(", ")}</p>
             )}
             <div className="mt-3 space-y-3">
-              <VisitPosology name={name} defaults={defaults} posology={posology} onChange={onChange} />
+              {!hideVisitPosology(name) && (
+                <VisitPosology
+                  name={name}
+                  defaults={posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults)}
+                  posology={posology}
+                  onChange={onChange}
+                />
+              )}
               <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
             </div>
           </div>

@@ -4,6 +4,7 @@ import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
 import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
 import { DrugVisitFields } from "@/components/MedicationShared";
+import { isReactionFilled } from "@/components/LeprosyReaction";
 
 export const LEPROSY_DRUGS = {
   mdt: "Multi-Drug Therapy (MDT) Blister pack",
@@ -31,6 +32,10 @@ export function prednisoloneSchedule() {
   });
   const totalTabs = phases.reduce((a, p) => a + p.tabs, 0);
   return { phases, totalTabs, tabletMg: TAB_MG };
+}
+
+export function prednisoloneTaperDetails(sch = prednisoloneSchedule()) {
+  return sch.phases.map((p) => `${p.label} for ${p.weeks} weeks`);
 }
 
 /** Resolve WHO-style MDT blister band from age/weight. */
@@ -207,12 +212,15 @@ export default function LeprosyMedications({
   reactions = [],
   medCourses = {},
   posology = {},
+  matchedRegimens = [],
+  catalogue = [],
 }) {
+  const regimenVisit = { matchedRegimens, catalogue };
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
   const yearsNum = Number.isFinite(years) ? years : null;
   const band = mdtBand({ years: yearsNum, weight });
-  const hasReaction = Array.isArray(reactions) && reactions.length > 0;
+  const hasReaction = Array.isArray(reactions) && reactions.some(isReactionFilled);
   const pred = prednisoloneSchedule();
 
   const selected = useMemo(
@@ -257,6 +265,7 @@ export default function LeprosyMedications({
               medCourses={medCourses}
               posology={posology}
               onChange={onChange}
+              {...regimenVisit}
               defaults={{
                 dosage: "Blister pack",
                 frequency: "",
@@ -274,7 +283,7 @@ export default function LeprosyMedications({
           <DrugCard
             id="prednisolone"
             title={LEPROSY_DRUGS.prednisolone}
-            subtitle="Taper schedule · tablet strength 5 mg"
+            subtitle="12-week reducing dose · tablet strength 5 mg"
             selected={selected.prednisolone}
             onToggle={() => setOral(LEPROSY_DRUGS.prednisolone, !selected.prednisolone)}
           >
@@ -311,9 +320,10 @@ export default function LeprosyMedications({
                 medCourses={medCourses}
                 posology={posology}
                 onChange={onChange}
+                {...regimenVisit}
                 defaults={{
-                  dosage: `${pred.totalTabs} × 5 mg tablets (taper)`,
-                  frequency: "Taper",
+                  dosage: prednisoloneTaperDetails(pred).join(" → "),
+                  frequency: "",
                   duration: "12 weeks",
                 }}
               />

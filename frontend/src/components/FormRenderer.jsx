@@ -661,16 +661,62 @@ export const DiseaseBodyChart = ({ spec, marks = {}, onChange, sex = "Male" }) =
   );
 };
 
-const emptyExamRound = () => ({ marks: {}, secondaryInfection: "", assessment: {}, date: localISODate() });
+export const LEP_EXAM_OCCASIONS = [
+  "Upon Diagnosis",
+  "Upon Reaction",
+  "Upon Follow Up",
+  "Upon Completion (RFT)",
+];
+export const DEFAULT_LEP_EXAM_OCCASION = "Upon Diagnosis";
 
-export const normalizeExamRounds = (data = {}) => {
-  if (Array.isArray(data.examRounds) && data.examRounds.length) return data.examRounds;
+export const normalizeLepOccasion = (occasion) => {
+  const s = String(occasion || "").trim();
+  if (!s) return "";
+  if (/^upon rft$/i.test(s) || /completion of treatment/i.test(s) || /upon completion/i.test(s)) {
+    return "Upon Completion (RFT)";
+  }
+  if (/upon follow/i.test(s)) return "Upon Follow Up";
+  if (/upon diagnosis/i.test(s)) return "Upon Diagnosis";
+  if (/upon reaction/i.test(s)) return "Upon Reaction";
+  return s;
+};
+
+export const emptyExamRound = (specOrOccasion) => {
+  const raw = typeof specOrOccasion === "string"
+    ? specOrOccasion
+    : specOrOccasion?.id === "leprosy"
+      ? DEFAULT_LEP_EXAM_OCCASION
+      : "";
+  const occasion = raw ? (normalizeLepOccasion(raw) || raw) : "";
+  return {
+    marks: {},
+    secondaryInfection: "",
+    assessment: {},
+    date: localISODate(),
+    ...(occasion ? { occasion } : {}),
+  };
+};
+
+const withLepOccasions = (rounds, spec) => {
+  if (spec?.id !== "leprosy") return rounds;
+  return (rounds || []).map((r, idx, all) => {
+    if (r?.occasion) return { ...r, occasion: normalizeLepOccasion(r.occasion) || r.occasion };
+    const isOldest = idx === all.length - 1;
+    return isOldest ? { ...r, occasion: DEFAULT_LEP_EXAM_OCCASION } : r;
+  });
+};
+
+export const normalizeExamRounds = (data = {}, spec) => {
+  if (Array.isArray(data.examRounds) && data.examRounds.length) return withLepOccasions(data.examRounds, spec);
   const hasMarks = data.marks && Object.keys(data.marks).length > 0;
   const hasSi = data.assessment?.secondaryInfection;
   if (hasMarks || hasSi) {
-    return [{ marks: data.marks || {}, secondaryInfection: data.assessment?.secondaryInfection || "" }];
+    return withLepOccasions(
+      [{ marks: data.marks || {}, secondaryInfection: data.assessment?.secondaryInfection || "", date: data.date || localISODate() }],
+      spec,
+    );
   }
-  return [emptyExamRound()];
+  return [emptyExamRound(spec)];
 };
 
 export const mergedExamMarks = (rounds = []) =>
@@ -682,27 +728,30 @@ export const mergedExamMarks = (rounds = []) =>
   }, {});
 
 /** Repeatable body exam rounds (Yaws / LF / Buruli / Leprosy / Scabies). */
-export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encounterDate, highlightNfa, focusRound }) => {
-  const rounds = value?.length ? value : [emptyExamRound()];
+export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encounterDate, highlightNfa, focusRound, focusKey }) => {
+  const rounds = withLepOccasions(value?.length ? value : [emptyExamRound(spec)], spec);
   const [sel, setSel] = useState(0);
+  const [occasionOpen, setOccasionOpen] = useState(false);
   const i = Math.min(sel, rounds.length - 1);
-  const round = rounds[i] || emptyExamRound();
+  const round = rounds[i] || emptyExamRound(spec);
   const showRoundSi = !spec.bodyChart?.perLesion && !spec.repeatExamIncludesAssessment;
   const includeAssessment = Boolean(spec.repeatExamIncludesAssessment && spec.assessmentExtra?.length);
+  const isLeprosy = spec.id === "leprosy";
   useEffect(() => {
     if (focusRound == null || focusRound < 0 || focusRound >= rounds.length) return;
     setSel(focusRound);
-  }, [focusRound, rounds.length]);
+  }, [focusRound, focusKey, rounds.length]);
   const update = (idx, patch) => {
     const next = rounds.map((r, rIdx) => (rIdx === idx ? { ...r, ...patch } : r));
     onChange(next);
   };
-  const add = () => {
-    onChange([emptyExamRound(), ...rounds]);
+  const add = (occasion) => {
+    onChange([emptyExamRound(isLeprosy ? (occasion || DEFAULT_LEP_EXAM_OCCASION) : spec), ...rounds]);
     setSel(0);
+    setOccasionOpen(false);
   };
   const remove = () => {
-    if (rounds.length <= 1) return onChange([emptyExamRound()]);
+    if (rounds.length <= 1) return onChange([emptyExamRound(spec)]);
     onChange(rounds.filter((_, j) => j !== i));
     setSel(0);
   };
@@ -730,6 +779,11 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encoun
                 >
                   Assessment {rounds.length - idx}
                 </span>
+                {isLeprosy && r.occasion && (
+                  <span className="mt-1 block text-center text-[11px] font-semibold text-primary" data-testid={`exam-round-occasion-${idx}`}>
+                    {r.occasion}
+                  </span>
+                )}
                 <span className="mt-1 block text-center text-[11px] font-medium text-muted-foreground">
                   {fmtDate(r.date || encounterDate)}
                 </span>
@@ -738,7 +792,7 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encoun
           })}
         </div>
         <ItemActions
-          onAdd={add}
+          onAdd={isLeprosy ? () => setOccasionOpen(true) : () => add()}
           addTestid="exam-round-add"
           canRemove={rounds.length > 1}
           onRemove={remove}
@@ -776,11 +830,34 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encoun
           />
         )}
       </div>
+
+      <Dialog open={occasionOpen} onOpenChange={setOccasionOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="exam-occasion-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-head text-xl">Add examination</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">Choose when this assessment is being recorded.</p>
+          <div className="grid gap-2">
+            {LEP_EXAM_OCCASIONS.map((o) => (
+              <Button
+                key={o}
+                type="button"
+                variant="outline"
+                className="h-12 justify-start"
+                data-testid={`exam-occasion-${slug(o)}`}
+                onClick={() => add(o)}
+              >
+                {o}
+              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
-export const LeprosyExamSummary = ({ classification, patches, nerves, scores, onAccept }) => {
+export const LeprosyExamSummary = ({ classification, scores, onAccept }) => {
   if (!classification) return null;
   return (
     <div className="space-y-4 rounded-lg border border-primary/30 bg-secondary/30 p-4" data-testid="leprosy-exam-summary">
@@ -788,9 +865,6 @@ export const LeprosyExamSummary = ({ classification, patches, nerves, scores, on
         <div>
           <p className="text-xs font-semibold text-muted-foreground">Classification (from examination)</p>
           <p className="mt-1 font-head text-xl font-bold tracking-tight" data-testid="leprosy-classification">{classification}</p>
-          <p className="mt-1 text-sm text-muted-foreground" data-testid="leprosy-counts">
-            Patches: <b>{patches}</b> · Nerves affected: <b>{nerves}</b>
-          </p>
         </div>
         {onAccept && (
           <Button type="button" className="h-11" data-testid="leprosy-accept-classification" onClick={() => onAccept(classification)}>
