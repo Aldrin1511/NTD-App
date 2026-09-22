@@ -208,14 +208,36 @@ export function regimenForDrug(matchedRegimens = [], name, catalogue = []) {
   return (matchedRegimens || []).find((r) => regimenDrugList(r, catalogue).includes(name)) || null;
 }
 
-/** Prefill visit posology from the matching regimen master; calculated values fill any gaps. */
-export function posologyDefaultsFromRegimens(name, matchedRegimens = [], catalogue = [], calculated = {}) {
-  const regimen = regimenForDrug(matchedRegimens, name, catalogue);
+/** Posology fields stored on the drug catalogue master. */
+export function posologyFromDrugMaster(drug = {}) {
+  if (!drug) return { dosage: "", frequency: "", duration: "" };
+  const duration = formatRegimenDurationValue({
+    duration: drug.duration,
+    durationUnit: drug.durationUnit,
+  });
+  return {
+    dosage: String(drug.dosage || "").trim(),
+    frequency: String(drug.frequency || "").trim(),
+    duration: duration || String(drug.duration || "").trim(),
+  };
+}
+
+/**
+ * Prefill visit posology:
+ * 1) calculated defaults (weight/age dosing from the disease form)
+ * 2) drug catalogue master dosage / frequency / duration
+ * 3) regimen master (matched first, then any regimen that lists the drug)
+ */
+export function posologyDefaultsFromRegimens(name, matchedRegimens = [], catalogue = [], calculated = {}, allRegimens = []) {
+  const drug = (catalogue || []).find((d) => d.name === name);
+  const fromDrug = posologyFromDrugMaster(drug);
+  const regimen = regimenForDrug(matchedRegimens, name, catalogue)
+    || regimenForDrug(allRegimens, name, catalogue);
   const masterDuration = regimen ? formatRegimenDurationValue(regimen) : "";
   return {
-    dosage: calculated.dosage || "",
-    frequency: (regimen && regimen.frequency) || calculated.frequency || "",
-    duration: masterDuration || calculated.duration || "",
+    dosage: calculated.dosage || fromDrug.dosage || "",
+    frequency: calculated.frequency || fromDrug.frequency || (regimen && regimen.frequency) || "",
+    duration: calculated.duration || fromDrug.duration || masterDuration || "",
   };
 }
 

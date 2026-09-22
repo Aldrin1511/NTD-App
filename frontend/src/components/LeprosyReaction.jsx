@@ -43,7 +43,6 @@ export const REACTION_GRID = [
       { label: "Painful", priority: 0 },
       { label: "Tender", priority: 0 },
       { label: "Enlarged nerves when palpated (felt)", priority: 0 },
-      { label: "Red patches", priority: 1 },
       { label: "Raised patches on or around a nerve", priority: 1 },
     ],
     type2: [
@@ -335,11 +334,12 @@ function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
   );
 }
 
-export default function LeprosyReaction({ value = [], onChange, onStartExam, followUp = false, id = "lep-reaction" }) {
+export default function LeprosyReaction({ value = [], onChange, onStartExam, followUp = false, allowAdd = false, id = "lep-reaction" }) {
   const rows = Array.isArray(value) ? value : [];
   const seedRef = useRef(null);
   if (!seedRef.current) seedRef.current = emptyReaction();
 
+  const showAdd = followUp && allowAdd;
   const forms = followUp ? rows : (rows.length ? rows : [seedRef.current]);
 
   const patchAt = (i) => (partial) => {
@@ -360,7 +360,7 @@ export default function LeprosyReaction({ value = [], onChange, onStartExam, fol
               : "Record findings for this reaction"}
           </p>
         </div>
-        {followUp && (
+        {showAdd && (
           <Button type="button" className="h-11" data-testid={`${id}-add`} onClick={add}>
             <Plus className="mr-2 h-4 w-4" /> Add
           </Button>
@@ -380,7 +380,9 @@ export default function LeprosyReaction({ value = [], onChange, onStartExam, fol
 
       {followUp && rows.length === 0 && (
         <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No reaction assessments this visit. Use Add to record one.
+          {showAdd
+            ? "No reaction assessments this visit. Use Add to record one."
+            : "No reaction assessments this visit."}
         </p>
       )}
     </div>

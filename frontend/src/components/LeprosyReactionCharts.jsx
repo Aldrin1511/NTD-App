@@ -85,7 +85,7 @@ function SidePair({ title, left, right }) {
 
 const SENSORY_HAND_FOOT = [
   { code: "WITHSENS", label: "With sensation", color: "#22c55e" },
-  { code: "WITHOUTSENS", label: "Without sensation", color: "#eab308" },
+  { code: "WITHOUTSENS", label: "Without sensation", color: "#ef4444" },
 ];
 
 const SENSORY_EYE = [
@@ -251,8 +251,8 @@ export function SensoryTestingChart({ value = {}, onChange, readOnly, id = "st-c
 
 const VMT_OPTS = [
   { code: "STRONG", label: "Strong (0)", color: "#22c55e", short: "S" },
-  { code: "WEAK", label: "Weak (1)", color: "#a16207", short: "W" },
-  { code: "PARALYZED", label: "Paralyzed (2)", color: "#2563eb", short: "P" },
+  { code: "WEAK", label: "Weak (1)", color: "#eab308", short: "W" },
+  { code: "PARALYZED", label: "Paralyzed (2)", color: "#ef4444", short: "P" },
 ];
 
 /** Apex VMT artwork (extracted from tri-apex) + hotspot overlay positions. */

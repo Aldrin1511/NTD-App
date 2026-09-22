@@ -5,6 +5,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { AlertPanel } from "@/components/Fields";
 import PatientForm, { emptyPatientForm, formFromPatient, patientPayload } from "@/components/PatientForm";
+import { useFormDirty } from "@/lib/useFormDirty";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -15,6 +16,7 @@ export default function PatientNew() {
   const existing = id ? patients.find((x) => x.id === id) : null;
   const isEdit = Boolean(id);
   const [f, setF] = useState(() => (existing ? formFromPatient(existing, user, facilities) : emptyPatientForm(user, facilities)));
+  const { dirty, markSaved } = useFormDirty(f, existing?.id || "new-patient");
 
   if (isEdit && !existing) {
     return (
@@ -36,10 +38,12 @@ export default function PatientNew() {
   }
 
   const save = (thenEncounter) => {
-    if (!f.name || !f.age || !f.gender) return toast.error("Name, age and gender are required");
+    const hasAge = f.dob || f.ageY !== "" || f.ageM !== "" || f.ageD !== "" || f.age !== "";
+    if (!f.name || !hasAge || !f.gender) return toast.error("Name, age and gender are required");
     const payload = patientPayload(f);
     if (isEdit) {
       const rec = updatePatient(existing.id, payload);
+      markSaved(f);
       toast.success(
         online
           ? `Patient ${rec.id} details updated`
@@ -49,6 +53,7 @@ export default function PatientNew() {
       return;
     }
     const rec = addPatient(payload);
+    markSaved(f);
     toast.success(
       online
         ? `Patient ${rec.id} saved to device`
@@ -57,12 +62,21 @@ export default function PatientNew() {
     navigate(thenEncounter ? `/patients/${rec.id}/suspect` : `/patients/${rec.id}`);
   };
 
+  const leaveTo = isEdit ? `/patients/${id}` : "/patients";
+  const requestLeave = () => {
+    if (dirty) {
+      const ok = window.confirm("Discard unsaved changes and leave?");
+      if (!ok) return;
+    }
+    navigate(leaveTo);
+  };
+
   return (
     <AppShell
       title={isEdit ? "Edit patient details" : "Quick registration"}
       subtitle={isEdit ? "Update identity, location and consent. Clinical encounters are not changed." : "Six essential fields first — everything else can be captured during the encounter"}
       action={
-        <Button variant="outline" className="h-12" data-testid="back-btn" onClick={() => navigate(isEdit ? `/patients/${id}` : "/patients")}>
+        <Button variant="outline" className="h-12" data-testid="back-btn" onClick={requestLeave}>
           <ArrowLeft className="mr-2 h-4 w-4" /> {isEdit ? "Back to record" : "Back to patients"}
         </Button>
       }
@@ -72,15 +86,15 @@ export default function PatientNew() {
           <PatientForm f={f} setF={setF} patientId={existing?.id || ""} mode={isEdit ? "edit" : "create"} />
           <div className="space-y-3 rounded-lg border border-border bg-white p-5">
             {isEdit ? (
-              <Button className="h-12 w-full text-base" data-testid="save-patient-btn" onClick={() => save(false)}>
+              <Button className="h-12 w-full text-base" data-testid="save-patient-btn" disabled={!dirty} onClick={() => save(false)}>
                 Save details
               </Button>
             ) : (
               <>
-                <Button className="h-12 w-full text-base" data-testid="save-and-encounter-btn" onClick={() => save(true)}>
+                <Button className="h-12 w-full text-base" data-testid="save-and-encounter-btn" disabled={!dirty} onClick={() => save(true)}>
                   Save &amp; start suspect screening
                 </Button>
-                <Button variant="outline" className="h-12 w-full text-base" data-testid="save-patient-btn" onClick={() => save(false)}>
+                <Button variant="outline" className="h-12 w-full text-base" data-testid="save-patient-btn" disabled={!dirty} onClick={() => save(false)}>
                   Save patient only
                 </Button>
               </>

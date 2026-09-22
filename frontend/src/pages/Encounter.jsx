@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import PatientSidebar from "@/components/PatientSidebar";
 import StatusChips, { PendingSyncChip } from "@/components/StatusChips";
-import { FormRenderer, DiseaseBodyChart, AdherenceGrid, RepeatableBodyExam, normalizeExamRounds, emptyExamRound, LeprosyExamSummary } from "@/components/FormRenderer";
+import { FormRenderer, DiseaseBodyChart, AdherenceGrid, RepeatableBodyExam, normalizeExamRounds, emptyExamRound, LeprosyExamSummary, isMandatoryLepExamRound, lepExamOccasion } from "@/components/FormRenderer";
 import { AreaField, ChoiceRow, CheckGrid, AlertPanel, Field, ItemActions, withDrugCourse } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
 import LeprosyReaction, { isReactionFilled } from "@/components/LeprosyReaction";
@@ -15,13 +15,14 @@ import YawsMedications, { yawsTreatmentSummary } from "@/components/YawsMedicati
 import LfMedications, { lfTreatmentSummary } from "@/components/LfMedications";
 import BuruliMedications, { buruliTreatmentSummary } from "@/components/BuruliMedications";
 import LeprosyMedications, { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
-import { DISEASE_SPECS, assessmentSpecs, leprosyScores, leprosyClass, yawsClass, resolveEpisodeId, isEpisodeClosed, localISODate } from "@/mock/specs";
+import { DISEASE_SPECS, assessmentSpecs, leprosyScores, leprosyClass, yawsClass, resolveEpisodeId, isEpisodeClosed, encounterOutcome, groupDiseaseEpisodes, localISODate } from "@/mock/specs";
 import { flattenMarks } from "@/lib/markFindings";
 import { changedSectionKeys } from "@/sectionDiff";
 import { applyMatchingRegimens, matchingRegimens, formatDosePhysical, dropVisitPosology } from "@/lib/medications";
 import { RegimenBanner, AddDrugSelect, ExtraSelectedDrugs, addCatalogueDrug, DrugVisitFields } from "@/components/MedicationShared";
 import { leprosyNfaGaps } from "@/components/LeprosyReactionCharts";
 import { scrollViewToTop } from "@/lib/scroll";
+import { useFormDirty } from "@/lib/useFormDirty";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, PanelLeft, CircleHelp, Stethoscope } from "lucide-react";
@@ -110,12 +111,13 @@ const cloneData = (v) => {
 };
 
 const latestOpenEncounter = (encounters, patientId, disease) => {
-  const latest = (encounters || [])
-    .filter((e) => e.patientId === patientId && e.disease === disease)
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  if (!latest) return null;
-  if (isEpisodeClosed(latest.outcome || latest.data?.outcome)) return null;
-  return latest;
+  const diseaseEncs = (encounters || []).filter((e) => e.patientId === patientId && e.disease === disease);
+  if (!diseaseEncs.length) return null;
+  const episodes = groupDiseaseEpisodes(diseaseEncs, disease);
+  const current = episodes[0];
+  // Completed episode (Cured / Lost to Follow-up / No Leprosy / …) → blank new episode form
+  if (!current || isEpisodeClosed(current.outcome)) return null;
+  return current.visits[0] || null;
 };
 
 const applyLoadedEncounter = (source, disease) => {
@@ -288,18 +290,28 @@ export default function Encounter() {
   const existing = encounters.find((e) => e.id === params.get("enc"));
   const spec = DISEASE_SPECS[existing?.disease || diseaseId] || DISEASE_SPECS.scabies;
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
-  const lepFollowUpRef = useRef(null);
-  if (lepFollowUpRef.current == null) {
-    const lepEncs = (patientEncs || []).filter((e) => e.disease === "leprosy");
-    const encId = params.get("enc");
-    if (encId) {
-      const oldest = [...lepEncs].sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
-      lepFollowUpRef.current = oldest?.id !== encId;
-    } else {
-      lepFollowUpRef.current = lepEncs.length > 0;
+  /** Reaction Add only after an earlier visit in this episode already recorded one. */
+  const lepReactionMode = useMemo(() => {
+    if ((existing?.disease || diseaseId) !== "leprosy" || !p) {
+      return { followUp: false, allowAdd: false };
     }
-  }
-  const isLepFollowUp = lepFollowUpRef.current;
+    const diseaseEncs = patientEncs.filter((e) => e.disease === "leprosy");
+    const episodeId = resolveEpisodeId({
+      existingId: existing?.episodeId,
+      disease: "leprosy",
+      patientEpisodeId: p.episodeId,
+      diseaseEncounters: diseaseEncs,
+    });
+    const episodes = groupDiseaseEpisodes(diseaseEncs, "leprosy", p.episodeId);
+    const episode = episodes.find((ep) => ep.id === episodeId);
+    const priorVisits = (episode?.visits || []).filter((e) => e.id !== existing?.id);
+    const hasPriorReaction = priorVisits.some((e) => (e.data?.reactions || []).some(isReactionFilled));
+    // Show Add only when a prior visit already has reaction data; otherwise show the form to enter it.
+    return {
+      followUp: hasPriorReaction,
+      allowAdd: hasPriorReaction,
+    };
+  }, [existing, diseaseId, p, patientEncs]);
   const myDiseases = useMemo(() => {
     const fromStarted = assessmentSpecs(id, { encounters: patientEncs });
     if (fromStarted.some((d) => d.id === spec.id)) return fromStarted;
@@ -312,6 +324,26 @@ export default function Encounter() {
     const source = existing?.data || (prior ? prior.data : {});
     const loaded = applyLoadedEncounter(source, disease);
     if (!existing && disease === "leprosy") loaded.reactions = [];
+    // New visit in an open episode: keep clinical data, restart outcome, do not carry medications
+    if (!existing && prior) {
+      loaded.outcome = "Active";
+      loaded.topical = [];
+      loaded.oral = [];
+      loaded.topicalAntibiotics = [];
+      loaded.oralAntibiotics = [];
+      loaded.medCourses = {};
+      loaded.posology = {};
+      loaded.treatmentDate = "";
+      loaded.regimenNames = [];
+      loaded.regimenIds = [];
+      // Prevent diagnosis-matched regimens from auto-selecting prior drugs again
+      loaded.regimenAppliedKey = "loaded";
+    }
+    // Editing: honour the encounter's saved outcome (top-level or data)
+    if (existing) {
+      const savedOutcome = encounterOutcome(existing);
+      if (savedOutcome) loaded.outcome = savedOutcome;
+    }
     const fromEnc = existing?.diagnosis || prior?.diagnosis || "";
     if (!loaded.diagnosis && fromEnc) {
       loaded.diagnosis = fromEnc === "Clinical scabies" ? "Confirmed Scabies" : fromEnc;
@@ -329,6 +361,10 @@ export default function Encounter() {
   const visitType = existing?.type || params.get("vt") || "Encounter";
   const referral = params.get("ref") || existing?.referral || "No";
   const set = (k) => (v) => setD((s) => ({ ...s, [k]: v }));
+  const diagnosisTouchedRef = useRef(null);
+  if (diagnosisTouchedRef.current === null) {
+    diagnosisTouchedRef.current = Boolean(String(d.diagnosis || "").trim());
+  }
 
   useLayoutEffect(() => {
     if (requestedSection) return undefined;
@@ -380,6 +416,15 @@ export default function Encounter() {
       ? yawsClass(chartMarks)
       : "";
   const diagnosis = d.diagnosis || autoDx;
+
+  useEffect(() => {
+    if (spec.id !== "leprosy") return;
+    if (!autoDx) return;
+    if (diagnosisTouchedRef.current) return;
+    if (d.diagnosis === autoDx) return;
+    setD((s) => (s.diagnosis === autoDx ? s : { ...s, diagnosis: autoDx }));
+  }, [autoDx, spec.id, d.diagnosis]);
+
   const usesActiveDefault = spec.id === "scabies" || spec.id === "yaws" || spec.id === "lf" || spec.id === "buruli" || spec.id === "leprosy";
   const noDiseaseOutcome = spec.outcomes.find((o) => o.startsWith("No ")) || "";
   const outcome = (() => {
@@ -454,6 +499,9 @@ export default function Encounter() {
     });
   }, [diagnosis, weight, ageYears, spec.id, settings.drugs, settings.regimens]);
 
+  const dirtyKey = `${existing?.id || "new"}-${spec.id}-${params.get("enc") || params.get("new") || "draft"}`;
+  const { dirty, markSaved } = useFormDirty(d, dirtyKey);
+
   if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate("/patients")}>Back</Button></AppShell>;
 
   const oralDose = (o) => {
@@ -477,13 +525,15 @@ export default function Encounter() {
   const persist = (close) => {
     if (spec.id === "leprosy") {
       const rounds = examRounds?.length ? examRounds : [{}];
-      const idx = rounds.findIndex((r) => leprosyNfaGaps(r.assessment).incomplete);
-      const gapIdx = idx >= 0 ? idx : 0;
-      const gaps = leprosyNfaGaps(rounds[gapIdx]?.assessment);
-      if (gaps.incomplete) {
+      const gapIdx = rounds.findIndex((r, idx) =>
+        isMandatoryLepExamRound(r, idx, rounds) && leprosyNfaGaps(r.assessment).incomplete,
+      );
+      if (gapIdx >= 0) {
+        const gaps = leprosyNfaGaps(rounds[gapIdx]?.assessment);
+        const occasion = lepExamOccasion(rounds[gapIdx], gapIdx, rounds) || "assessment";
         setNfaGate({ round: gapIdx, target: gaps.target });
         setOpen((o) => ({ ...o, 3: true }));
-        toast.error("Complete Voluntary Muscle Testing, Sensory Testing and Vision Acuity — every circle and checkbox is required.");
+        toast.error(`Complete ${occasion} — Voluntary Muscle Testing, Sensory Testing and Vision Acuity are required.`);
         window.setTimeout(() => {
           const testid = gaps.target === "vmt"
             ? `exam-${gapIdx}-assess-vmtchart`
@@ -547,6 +597,9 @@ export default function Encounter() {
         ])],
       } : {}),
     });
+    const savedForm = { ...d, diagnosis: diagnosis || "", outcome: outcome || "", scores };
+    setD((s) => ({ ...s, diagnosis: savedForm.diagnosis, outcome: savedForm.outcome, scores: savedForm.scores }));
+    markSaved(savedForm);
     setSavedAt(new Date().toLocaleTimeString());
     if (close) navigate(recordPath());
     if (online) toast.success(close ? "Encounter saved" : "Saved to device");
@@ -558,6 +611,14 @@ export default function Encounter() {
     setSavedAt("");
     setCancelOpen(false);
     toast.success("Encounter cancelled");
+    navigate(recordPath());
+  };
+
+  const requestLeave = () => {
+    if (dirty) {
+      setCancelOpen(true);
+      return;
+    }
     navigate(recordPath());
   };
 
@@ -589,8 +650,11 @@ export default function Encounter() {
       : spec.id === "buruli" ? "Buruli Ulcer Examination"
       : spec.id === "leprosy" ? "Leprosy Examination"
       : "Assessment / body charting",
-      done: Object.keys(chartMarks).length > 0 || d.photos.length > 0 || Object.keys(d.assessment || {}).length > 0
-        || (examRounds || []).some((r) => r.secondaryInfection || Object.keys(r.assessment || {}).length > 0),
+      done: spec.id === "leprosy"
+        ? (examRounds || []).length > 0 && (examRounds || []).every((r, idx, all) =>
+          !isMandatoryLepExamRound(r, idx, all) || !leprosyNfaGaps(r.assessment).incomplete)
+        : Object.keys(chartMarks).length > 0 || d.photos.length > 0 || Object.keys(d.assessment || {}).length > 0
+          || (examRounds || []).some((r) => r.secondaryInfection || Object.keys(r.assessment || {}).length > 0),
       body: (
         <div className="space-y-6">
           {spec.repeatExam ? (
@@ -619,7 +683,6 @@ export default function Encounter() {
             <LeprosyExamSummary
               classification={lepClass.classification}
               scores={scores}
-              onAccept={(cls) => set("diagnosis")(cls)}
             />
           )}
           <PhotoCapture label="Assessment photographs" photos={d.photos} onChange={set("photos")} testid="encounter-photo" />
@@ -636,7 +699,16 @@ export default function Encounter() {
             </div>
           )}
           {autoDx && <AlertPanel level="info" title="System-calculated diagnosis" testid="auto-diagnosis">{autoDx} — override below if needed.</AlertPanel>}
-          <ChoiceRow label="Diagnosis" options={spec.diagnosis} value={d.diagnosis} onChange={set("diagnosis")} testid="diagnosis" />
+          <ChoiceRow
+            label="Diagnosis"
+            options={spec.diagnosis}
+            value={d.diagnosis || autoDx}
+            onChange={(v) => {
+              diagnosisTouchedRef.current = true;
+              set("diagnosis")(v);
+            }}
+            testid="diagnosis"
+          />
         </div>
       ) },
     { n: 6, title: "Medications",
@@ -644,6 +716,11 @@ export default function Encounter() {
         + (spec.id === "lf" ? (d.recommendations || []).length : 0) > 0,
       body: (
         <div className="space-y-6">
+          {d.history?.allergy === "Yes" && String(d.history?.allergyDetail || "").trim() && (
+            <AlertPanel level="review" title="Allergy warning" testid="medication-allergy-warning">
+              {String(d.history.allergyDetail).trim()}
+            </AlertPanel>
+          )}
           <RegimenBanner names={d.regimenNames || []} />
           {spec.id === "scabies" ? (
             <ScabiesMedications
@@ -712,6 +789,7 @@ export default function Encounter() {
               posology={d.posology || {}}
               matchedRegimens={matchedRegimens}
               catalogue={catalogue}
+              diagnosis={diagnosis}
               onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
             />
           ) : (
@@ -763,16 +841,6 @@ export default function Encounter() {
               </Field>
             </>
           )}
-          <ExtraSelectedDrugs
-            diseaseId={spec.id}
-            topical={d.topical}
-            oral={d.oral}
-            catalogue={catalogue}
-            medCourses={d.medCourses || {}}
-            posology={d.posology || {}}
-            matchedRegimens={matchedRegimens}
-            onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
-          />
           <AddDrugSelect
             catalogue={catalogue}
             diseaseId={spec.id}
@@ -781,12 +849,26 @@ export default function Encounter() {
               ...s,
               ...addCatalogueDrug({
                 name,
-                catalogue: catalogue,
+                catalogue,
                 topical: s.topical,
                 oral: s.oral,
                 medCourses: s.medCourses,
+                posology: s.posology,
+                matchedRegimens,
+                allRegimens: settings.regimens || [],
               }),
             }))}
+          />
+          <ExtraSelectedDrugs
+            diseaseId={spec.id}
+            topical={d.topical}
+            oral={d.oral}
+            catalogue={catalogue}
+            medCourses={d.medCourses || {}}
+            posology={d.posology || {}}
+            matchedRegimens={matchedRegimens}
+            allRegimens={settings.regimens || []}
+            onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
           />
           {spec.adherence && (
             <AdherenceGrid
@@ -811,7 +893,7 @@ export default function Encounter() {
           n: 8,
           title: "Leprosy reaction",
           done: (d.reactions || []).some(isReactionFilled),
-          body: <LeprosyReaction value={d.reactions || []} onChange={set("reactions")} onStartExam={openLeprosyExam} followUp={isLepFollowUp} id="lep-reaction" />,
+          body: <LeprosyReaction value={d.reactions || []} onChange={set("reactions")} onStartExam={openLeprosyExam} followUp={lepReactionMode.followUp} allowAdd={lepReactionMode.allowAdd} id="lep-reaction" />,
         }]
       : []),
     { n: spec.id === "leprosy" ? 9 : 8, title: "Visit notes", done: normalizeNotes(d.notes).some((n) => String(n).trim()), body: <VisitNotes value={d.notes} onChange={set("notes")} /> },
@@ -885,7 +967,7 @@ export default function Encounter() {
             >
               {allExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
             </button>
-            <Button variant="outline" className="h-11 shrink-0" data-testid="exit-encounter-btn" onClick={() => navigate(recordPath())}>
+            <Button variant="outline" className="h-11 shrink-0" data-testid="exit-encounter-btn" onClick={requestLeave}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Exit to record
             </Button>
           </div>
@@ -929,11 +1011,13 @@ export default function Encounter() {
 
       <div className="fixed bottom-16 left-0 right-0 z-30 border-t border-border bg-white lg:bottom-0">
         <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-3 sm:px-6">
-          <span className="hidden text-xs text-muted-foreground sm:block" data-testid="saved-indicator">{savedAt ? `Last saved: ${savedAt}` : "Draft — not saved yet"}</span>
+          <span className="hidden text-xs text-muted-foreground sm:block" data-testid="saved-indicator">
+            {savedAt ? `Last saved: ${savedAt}` : dirty ? "Unsaved changes" : "Draft — not saved yet"}
+          </span>
           <div className="ml-auto flex flex-1 gap-3 sm:flex-none">
-            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="cancel-encounter-btn" onClick={() => setCancelOpen(true)}>Cancel</Button>
-            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="save-btn" onClick={() => persist(false)}><Save className="mr-2 h-4 w-4" /> Save</Button>
-            <Button className="h-12 flex-1 text-base sm:flex-none sm:px-8" data-testid="save-close-btn" onClick={() => persist(true)}><Check className="mr-2 h-4 w-4" /> Save &amp; close</Button>
+            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="cancel-encounter-btn" onClick={requestLeave}>Cancel</Button>
+            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="save-btn" disabled={!dirty || !user?.canEdit} onClick={() => persist(false)}><Save className="mr-2 h-4 w-4" /> Save</Button>
+            <Button className="h-12 flex-1 text-base sm:flex-none sm:px-8" data-testid="save-close-btn" disabled={!dirty || !user?.canEdit} onClick={() => persist(true)}><Check className="mr-2 h-4 w-4" /> Save &amp; close</Button>
           </div>
         </div>
       </div>

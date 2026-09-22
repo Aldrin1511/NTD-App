@@ -669,6 +669,13 @@ export const LEP_EXAM_OCCASIONS = [
 ];
 export const DEFAULT_LEP_EXAM_OCCASION = "Upon Diagnosis";
 
+/** Occasions that must be fully completed (VMT/ST/vision) when present on a leprosy encounter. */
+export const MANDATORY_LEP_EXAM_OCCASIONS = new Set([
+  "Upon Diagnosis",
+  "Upon Reaction",
+  "Upon Completion (RFT)",
+]);
+
 export const normalizeLepOccasion = (occasion) => {
   const s = String(occasion || "").trim();
   if (!s) return "";
@@ -680,6 +687,18 @@ export const normalizeLepOccasion = (occasion) => {
   if (/upon reaction/i.test(s)) return "Upon Reaction";
   return s;
 };
+
+/** Resolve occasion for a round (oldest without occasion defaults to Upon Diagnosis). */
+export const lepExamOccasion = (round, idx, rounds = []) => {
+  const occ = normalizeLepOccasion(round?.occasion);
+  if (occ) return occ;
+  const isOldest = idx === (rounds?.length || 1) - 1;
+  return isOldest ? DEFAULT_LEP_EXAM_OCCASION : "";
+};
+
+export const isMandatoryLepExamRound = (round, idx, rounds = []) =>
+  MANDATORY_LEP_EXAM_OCCASIONS.has(lepExamOccasion(round, idx, rounds));
+
 
 export const emptyExamRound = (specOrOccasion) => {
   const raw = typeof specOrOccasion === "string"
@@ -752,6 +771,11 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encoun
   };
   const remove = () => {
     if (rounds.length <= 1) return onChange([emptyExamRound(spec)]);
+    const occ = lepExamOccasion(round, i, rounds);
+    if (isLeprosy && occ === DEFAULT_LEP_EXAM_OCCASION) {
+      const diagnosisCount = rounds.filter((r, idx) => lepExamOccasion(r, idx, rounds) === DEFAULT_LEP_EXAM_OCCASION).length;
+      if (diagnosisCount <= 1) return;
+    }
     onChange(rounds.filter((_, j) => j !== i));
     setSel(0);
   };
@@ -778,6 +802,9 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encoun
                   }`}
                 >
                   Assessment {rounds.length - idx}
+                  {isLeprosy && isMandatoryLepExamRound(r, idx, rounds) ? (
+                    <span className={selected ? "text-white" : "text-red-600"}> *</span>
+                  ) : null}
                 </span>
                 {isLeprosy && r.occasion && (
                   <span className="mt-1 block text-center text-[11px] font-semibold text-primary" data-testid={`exam-round-occasion-${idx}`}>
@@ -794,7 +821,7 @@ export const RepeatableBodyExam = ({ spec, value, onChange, sex = "Male", encoun
         <ItemActions
           onAdd={isLeprosy ? () => setOccasionOpen(true) : () => add()}
           addTestid="exam-round-add"
-          canRemove={rounds.length > 1}
+          canRemove={rounds.length > 1 && !(isLeprosy && lepExamOccasion(round, i, rounds) === DEFAULT_LEP_EXAM_OCCASION && rounds.filter((r, idx) => lepExamOccasion(r, idx, rounds) === DEFAULT_LEP_EXAM_OCCASION).length <= 1)}
           onRemove={remove}
           removeTestid="exam-round-remove"
         />
@@ -1057,7 +1084,7 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         <p className="text-xs font-semibold text-muted-foreground">Drug adherence — MDT</p>
         <p className="mt-1 text-sm text-muted-foreground">
           {cfg.regimen ? `${cfg.regimen} course ${cfg.courseMonths} months · showing ${cfg.checkboxMonths} month checkboxes.` : "MDT month-wise drug adherence."}
-          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. Restart appears after ${cfg.restartMissed} months not taken; remaining months then grey out.`}
+          {readOnly ? "" : ` Tap: empty → taken (green) → not taken (red) → empty. After ${cfg.courseMonths} taken (course complete) or ${cfg.restartMissed} not taken, remaining months grey out.`}
         </p>
       </div>
 
@@ -1070,8 +1097,9 @@ const LeprosyMdtAdherence = ({ value = {}, onChange, startDate, diagnosis, readO
         const missed = Object.values(line.months || {}).filter((v) => v === false).length;
         const taken = Object.values(line.months || {}).filter((v) => v === true).length;
         const isLatest = lineIdx === displayLines.length - 1;
-        const lockRemaining = missed >= lineCfg.restartMissed;
-        const showRestart = isLatest && !readOnly && lockRemaining;
+        const courseComplete = taken >= lineCfg.courseMonths;
+        const lockRemaining = courseComplete || missed >= lineCfg.restartMissed;
+        const showRestart = isLatest && !readOnly && missed >= lineCfg.restartMissed;
         const fromIdx = line.restartedFrom
           ? displayLines.findIndex((l) => l.id === line.restartedFrom)
           : -1;
@@ -1228,7 +1256,7 @@ function MdtRegimenReadonly({ line, lineIdx, title, diagnosis, testidPrefix = "m
   const start = parseDate(line.startDate) || new Date();
   const missed = Object.values(line.months || {}).filter((v) => v === false).length;
   const taken = Object.values(line.months || {}).filter((v) => v === true).length;
-  const lockRemaining = missed >= lineCfg.restartMissed;
+  const lockRemaining = taken >= lineCfg.courseMonths || missed >= lineCfg.restartMissed;
 
   return (
     <div className="rounded-lg border border-border bg-white p-4" data-testid={`${testidPrefix}-line-${lineIdx}`}>

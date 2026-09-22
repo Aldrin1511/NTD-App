@@ -76,7 +76,6 @@ export default function PatientSidebar({
             ["Age", patientAgeLabel(p)],
             ["Gender", p.gender || p.sex || "—"],
             ["Blood", p.bloodGroup || "Unknown"],
-            ["Weight", `${p.weight} kg`],
             ["Phone", p.phone || "—"],
             ["Village", `${p.village}, ${p.district}`],
             ["Province", p.province],

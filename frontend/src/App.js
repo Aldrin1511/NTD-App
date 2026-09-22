@@ -1,5 +1,5 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { StoreProvider, useStore } from "@/store";
 import { Toaster } from "@/components/ui/sonner";
 import ScrollToTop from "@/components/ScrollToTop";
@@ -19,6 +19,15 @@ const Guard = ({ children }) => {
   return children;
 };
 
+/** Remount when switching edit ↔ new encounter so form state does not carry over. */
+const EncounterRoute = () => {
+  const { id, diseaseId } = useParams();
+  const [params] = useSearchParams();
+  const enc = params.get("enc") || "new";
+  const fresh = params.get("new") || enc;
+  return <ScabiesEncounter key={`${id}-${diseaseId}-${fresh}`} />;
+};
+
 function Shell() {
   const { user } = useStore();
   return (
@@ -33,7 +42,7 @@ function Shell() {
       <Route path="/patients/:id/edit" element={<Guard><PatientNew /></Guard>} />
       <Route path="/patients/:id" element={<Guard><PatientRecord /></Guard>} />
       <Route path="/patients/:id/suspect" element={<Guard><SuspectScreen /></Guard>} />
-      <Route path="/patients/:id/encounter/:diseaseId" element={<Guard><ScabiesEncounter /></Guard>} />
+      <Route path="/patients/:id/encounter/:diseaseId" element={<Guard><EncounterRoute /></Guard>} />
       <Route path="/patients/:id/disease/:diseaseId" element={<Guard><PatientRecord /></Guard>} />
       <Route path="/admin" element={<Guard><Admin /></Guard>} />
       <Route path="/sync" element={<Guard><Sync /></Guard>} />

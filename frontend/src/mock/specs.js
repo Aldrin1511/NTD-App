@@ -863,25 +863,58 @@ export const localISODate = (d = new Date()) => {
 
 export const visitLabel = (n) => `${n} visit${n === 1 ? "" : "s"}`;
 
-export const isEpisodeClosed = (outcome) => /cured|healed|lost to follow-up|^no\b/i.test(String(outcome || "").trim());
+/** Closing outcomes end the episode so the next encounter starts episode 2+. */
+export const isEpisodeClosed = (outcome) => {
+  const s = String(outcome || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/\s+/g, " ");
+  if (!s || s === "active" || s === "open") return false;
+  // Intermediate statuses — episode stays open
+  if (/^(no change|improved|worse|mmdp|new lesions)/.test(s)) return false;
+  if (/cured|healed/.test(s)) return true;
+  // "Lost to Follow-up", "Lost to Follow up", "Lost to FollowUp"
+  if (/lost to follow/.test(s)) return true;
+  // Ruled-out disease: "No Leprosy", "No Scabies", "No Yaws", "No Buruli Ulcer", "No Lymphatic Filariasis"
+  if (/^no\s+(scabies|yaws|leprosy|buruli|lymphatic)/.test(s)) return true;
+  return false;
+};
+
+/** Prefer a closing / recorded outcome if top-level and data diverge after an edit. */
+export const encounterOutcome = (e) => {
+  const top = String(e?.outcome || "").trim();
+  const data = String(e?.data?.outcome || "").trim();
+  if (isEpisodeClosed(top)) return top;
+  if (isEpisodeClosed(data)) return data;
+  if (top && top !== "Open" && top !== "Active") return top;
+  if (data && data !== "Open" && data !== "Active") return data;
+  return top || data;
+};
 
 const EPISODE_PREFIX = { scabies: "SCAB", yaws: "YAWS", lf: "LF", buruli: "BURU", leprosy: "LEP" };
 
 export const newEpisodeId = (disease) =>
   `${EPISODE_PREFIX[disease] || "NTD"}-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 90000000) + 10000000)}`;
 
-export const resolveEpisodeId = ({ existingId, disease, patientEpisodeId, diseaseEncounters }) => {
-  if (existingId) return existingId;
-  const latest = [...(diseaseEncounters || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  if (latest && !isEpisodeClosed(latest.outcome || latest.data?.outcome)) {
-    return latest.episodeId || patientEpisodeId || newEpisodeId(disease);
+const byVisitDesc = (a, b) =>
+  String(b.date).localeCompare(String(a.date)) || String(b.id || "").localeCompare(String(a.id || ""));
+
+const visitTouchedAt = (e) => e?.editedAt || e?.date || "";
+
+const byTouchDesc = (a, b) =>
+  String(visitTouchedAt(b)).localeCompare(String(visitTouchedAt(a))) || byVisitDesc(a, b);
+
+/** Episode status: prefer a closing outcome from the most recently saved/edited visit. */
+export const episodeOutcomeFromVisits = (visits) => {
+  const list = visits || [];
+  if (!list.length) return "";
+  const byTouch = [...list].sort(byTouchDesc);
+  for (const v of byTouch) {
+    const o = encounterOutcome(v);
+    if (isEpisodeClosed(o)) return o;
   }
-  if (!latest) {
-    const prefix = EPISODE_PREFIX[disease];
-    if (prefix && String(patientEpisodeId || "").startsWith(`${prefix}-`)) return patientEpisodeId;
-    return newEpisodeId(disease);
-  }
-  return newEpisodeId(disease);
+  return encounterOutcome([...list].sort(byVisitDesc)[0]);
 };
 
 export const groupDiseaseEpisodes = (encounters, diseaseId, fallbackEpisodeId) => {
@@ -893,18 +926,38 @@ export const groupDiseaseEpisodes = (encounters, diseaseId, fallbackEpisodeId) =
   }
   return Object.entries(by)
     .map(([eid, visits]) => {
-      const sorted = [...visits].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+      const sorted = [...visits].sort(byVisitDesc);
+      const outcome = episodeOutcomeFromVisits(visits);
+      const closedVisit = isEpisodeClosed(outcome)
+        ? [...visits].sort(byTouchDesc).find((v) => isEpisodeClosed(encounterOutcome(v)))
+        : null;
       return {
         id: eid,
         visits: sorted,
         visitCount: sorted.length,
         start: sorted[sorted.length - 1].date,
-        last: sorted[0].date,
-        outcome: sorted[0].outcome || sorted[0].data?.outcome || "",
+        last: (closedVisit || sorted[0]).date,
+        outcome,
         diagnosis: sorted[0].diagnosis || sorted[0].data?.diagnosis || "",
       };
     })
     .sort((a, b) => String(b.last).localeCompare(String(a.last)));
+};
+
+export const resolveEpisodeId = ({ existingId, disease, patientEpisodeId, diseaseEncounters }) => {
+  if (existingId) return existingId;
+  const episodes = groupDiseaseEpisodes(diseaseEncounters, disease, patientEpisodeId);
+  const current = episodes[0];
+  if (current && current.id !== "_none" && !isEpisodeClosed(current.outcome)) {
+    return current.id;
+  }
+  if (!current || current.id === "_none") {
+    const prefix = EPISODE_PREFIX[disease];
+    if (prefix && String(patientEpisodeId || "").startsWith(`${prefix}-`)) return patientEpisodeId;
+    return newEpisodeId(disease);
+  }
+  // Current episode completed (Cured / Lost to Follow-up / No Leprosy / …) → new episode
+  return newEpisodeId(disease);
 };
 
 /** Diagnosis patches: A/B/C/D, summing the count entered for each body part. */
@@ -943,7 +996,8 @@ const regionSide = (region = "") => {
 const isEyeRegion = (region = "") => /\beye\b/.test(String(region).toLowerCase());
 const isHandRegion = (region = "") => /\b(hand|palm|finger|wrist)\b/.test(String(region).toLowerCase());
 const isFootRegion = (region = "") => /\b(foot|toe)\b/.test(String(region).toLowerCase());
-const isNerveRegion = (region = "") => /\bnerve\b/.test(String(region).toLowerCase());
+const isNerveRegion = (region = "") =>
+  /\b(nerve|auricular|median|tibial|ulnar|radial|peroneal)\b/i.test(String(region || ""));
 
 const vmtPointScore = (code) => {
   if (code === "PARALYZED") return 2;
