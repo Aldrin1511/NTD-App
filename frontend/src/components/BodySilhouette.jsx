@@ -192,20 +192,20 @@ export const bodyRegions = (sex, view) => {
 
 /** Leprosy peripheral nerves for diagnosis (6 front + 6 back = 12). */
 const NERVE_MARKERS = [
-  // Front: Neck, Wrist, Foot × Left/Right
-  { id: "n-neck-r", label: "Right neck nerve", cx: 72, cy: 58, view: "front" },
-  { id: "n-neck-l", label: "Left neck nerve", cx: 128, cy: 58, view: "front" },
-  { id: "n-wrist-r", label: "Right wrist nerve", cx: 48, cy: 178, view: "front" },
-  { id: "n-wrist-l", label: "Left wrist nerve", cx: 152, cy: 178, view: "front" },
-  { id: "n-foot-r", label: "Right foot nerve", cx: 80, cy: 318, view: "front" },
-  { id: "n-foot-l", label: "Left foot nerve", cx: 120, cy: 318, view: "front" },
-  // Back: Elbow, Wrist, behind the knee × Left/Right
-  { id: "n-elbow-br", label: "Right elbow nerve", cx: 48, cy: 130, view: "back" },
-  { id: "n-elbow-bl", label: "Left elbow nerve", cx: 152, cy: 130, view: "back" },
-  { id: "n-wrist-br", label: "Right wrist nerve (back)", cx: 48, cy: 178, view: "back" },
-  { id: "n-wrist-bl", label: "Left wrist nerve (back)", cx: 152, cy: 178, view: "back" },
-  { id: "n-knee-br", label: "Right nerve behind the knee", cx: 78, cy: 268, view: "back" },
-  { id: "n-knee-bl", label: "Left nerve behind the knee", cx: 122, cy: 268, view: "back" },
+  // Front: Auricular, Median, Tibial × Left/Right
+  { id: "n-neck-r", label: "Right Auricular", cx: 72, cy: 58, view: "front" },
+  { id: "n-neck-l", label: "Left Auricular", cx: 128, cy: 58, view: "front" },
+  { id: "n-wrist-r", label: "Right Median", cx: 48, cy: 178, view: "front" },
+  { id: "n-wrist-l", label: "Left Median", cx: 152, cy: 178, view: "front" },
+  { id: "n-foot-r", label: "Right Tibial", cx: 80, cy: 318, view: "front" },
+  { id: "n-foot-l", label: "Left Tibial", cx: 120, cy: 318, view: "front" },
+  // Back: Ulnar, Radial, Peroneal × Left/Right
+  { id: "n-elbow-br", label: "Right Ulnar", cx: 48, cy: 130, view: "back" },
+  { id: "n-elbow-bl", label: "Left Ulnar", cx: 152, cy: 130, view: "back" },
+  { id: "n-wrist-br", label: "Right Radial", cx: 48, cy: 178, view: "back" },
+  { id: "n-wrist-bl", label: "Left Radial", cx: 152, cy: 178, view: "back" },
+  { id: "n-knee-br", label: "Right Peroneal", cx: 78, cy: 268, view: "back" },
+  { id: "n-knee-bl", label: "Left Peroneal", cx: 122, cy: 268, view: "back" },
 ];
 
 export default function BodySilhouette({ sex = "Male", view = "front", marks = {}, onPlace, showNerves = false, nerveOnly = false }) {

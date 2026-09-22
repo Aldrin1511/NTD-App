@@ -102,6 +102,23 @@ export function mdtBand({ years, weight }) {
   return null;
 }
 
+/** PB / MB from diagnosis for MDT blister labelling. */
+export function mdtRegimenFromDiagnosis(diagnosis = "") {
+  const dx = String(diagnosis || "");
+  if (/paucibacillary|\bPB\b/i.test(dx)) return "PB";
+  if (/multibacillary|\bMB\b/i.test(dx)) return "MB";
+  return "";
+}
+
+/** e.g. "Children <20 kg for Child MB" · "Adults 15 and above for PB" */
+export function mdtBandLabel(band, diagnosis = "") {
+  if (!band?.title) return "";
+  const regimen = mdtRegimenFromDiagnosis(diagnosis);
+  if (!regimen) return band.title;
+  const isChild = band.id !== "adult";
+  return `${band.title} for ${isChild ? `Child ${regimen}` : regimen}`;
+}
+
 function formatWeightDose(weight, mgPerKg) {
   if (!weight || !mgPerKg) return null;
   const mg = weight * mgPerKg;
@@ -137,15 +154,17 @@ function DrugCard({ id, title, selected, onToggle, children, subtitle }) {
   );
 }
 
-function MdtTable({ band, weight }) {
+function MdtTable({ band, weight, diagnosis = "" }) {
   if (!band) {
     return <p className="text-sm text-muted-foreground">Enter age/DOB and weight to select the MDT blister band.</p>;
   }
 
+  const label = mdtBandLabel(band, diagnosis);
+
   return (
     <div className="space-y-3" data-testid={`mdt-band-${band.id}`}>
       <p className="text-sm font-semibold" data-testid="mdt-band-title">
-        Band: {band.title}
+        Band: {label}
       </p>
       {band.note && (
         <AlertPanel level="info" title="Note" testid="mdt-cut-note">
@@ -214,12 +233,14 @@ export default function LeprosyMedications({
   posology = {},
   matchedRegimens = [],
   catalogue = [],
+  diagnosis = "",
 }) {
   const regimenVisit = { matchedRegimens, catalogue };
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
   const yearsNum = Number.isFinite(years) ? years : null;
   const band = mdtBand({ years: yearsNum, weight });
+  const bandLabel = band ? mdtBandLabel(band, diagnosis) : "";
   const hasReaction = Array.isArray(reactions) && reactions.some(isReactionFilled);
   const pred = prednisoloneSchedule();
 
@@ -253,11 +274,11 @@ export default function LeprosyMedications({
         <DrugCard
           id="mdt"
           title={LEPROSY_DRUGS.mdt}
-          subtitle={band ? band.title : "Age/weight band pending"}
+          subtitle={bandLabel || "Age/weight band pending"}
           selected={selected.mdt}
           onToggle={() => setOral(LEPROSY_DRUGS.mdt, !selected.mdt)}
         >
-          <MdtTable band={band} weight={weight} />
+          <MdtTable band={band} weight={weight} diagnosis={diagnosis} />
           {selected.mdt && (
             <DrugVisitFields
               name={LEPROSY_DRUGS.mdt}
@@ -277,7 +298,7 @@ export default function LeprosyMedications({
       </div>
 
       {/* B) Prednisolone if reaction filled */}
-      {hasReaction ? (
+      {hasReaction && (
         <div className="space-y-3" data-testid="leprosy-prednisolone-section">
           <p className="font-head text-base font-semibold tracking-tight">B) Reaction treatment</p>
           <DrugCard
@@ -330,10 +351,6 @@ export default function LeprosyMedications({
             )}
           </DrugCard>
         </div>
-      ) : (
-        <AlertPanel level="info" title="Reaction treatment" testid="leprosy-prednisolone-locked">
-          Tab Prednisolone 5 mg taper appears here after a Leprosy reaction assessment is filled in.
-        </AlertPanel>
       )}
     </div>
   );

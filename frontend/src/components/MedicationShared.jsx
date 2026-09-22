@@ -63,15 +63,18 @@ export function AddDrugSelect({
   testid = "add-drug",
 }) {
   const [nonce, setNonce] = useState(0);
-  const options = catalogueForDisease(catalogue, diseaseId)
-    .map((d) => d.name)
-    .filter((name) => !selected.includes(name));
-  if (!options.length) return null;
+  // Full catalogue so clinicians can add any listed drug on this encounter
+  const options = [...new Set(
+    (catalogue.length ? catalogue : catalogueForDisease(catalogue, diseaseId))
+      .map((d) => d.name)
+      .filter((name) => name && !selected.includes(name))
+  )].sort((a, b) => a.localeCompare(b));
   return (
     <div className="rounded-lg border border-dashed border-border bg-white p-4" data-testid={`${testid}-wrap`}>
       <Field label="Add drug">
         <Select
           key={nonce}
+          disabled={!options.length}
           onValueChange={(v) => {
             if (!v) return;
             onAdd(v);
@@ -79,18 +82,18 @@ export function AddDrugSelect({
           }}
         >
           <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid}>
-            <SelectValue placeholder="Select…" />
+            <SelectValue placeholder={options.length ? "Select…" : "All catalogue drugs selected"} />
           </SelectTrigger>
           <SelectContent>
             {options.map((o) => (
-              <SelectItem key={o} value={o} className="text-base" data-testid={`${testid}-opt-${o}`}>
+              <SelectItem key={o} value={o} className="text-base" data-testid={`${testid}-opt-${slugDrug(o)}`}>
                 {o}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </Field>
-      <p className="mt-2 text-xs text-muted-foreground">Choose from the drug catalogue. Auto-filled regimen drugs stay selected until you uncheck them.</p>
+      <p className="mt-2 text-xs text-muted-foreground">Choose from the drug catalogue. Added drugs appear below with editable posology for this visit.</p>
     </div>
   );
 }
@@ -164,11 +167,12 @@ export function DrugVisitFields({
   posology = {},
   defaults = {},
   matchedRegimens = [],
+  allRegimens = [],
   catalogue = [],
   onChange,
 }) {
   if (!selected) return null;
-  const merged = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults);
+  const merged = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults, allRegimens);
   return (
     <>
       {!hideVisitPosology(name) && (
@@ -188,6 +192,7 @@ export function ExtraSelectedDrugs({
   posology = {},
   defaults = {},
   matchedRegimens = [],
+  allRegimens = [],
   onChange,
 }) {
   const extras = extraDrugNames(diseaseId, topical, oral);
@@ -208,6 +213,7 @@ export function ExtraSelectedDrugs({
       {extras.map((name) => {
         const drug = catalogue.find((d) => d.name === name);
         const tabs = parseTabletOptions(drug?.strength);
+        const masterDefaults = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults, allRegimens);
         return (
           <div key={name} className="rounded-lg border border-border bg-white p-4" data-testid={`extra-drug-${name}`}>
             <div className="flex items-start justify-between gap-3">
@@ -226,7 +232,7 @@ export function ExtraSelectedDrugs({
               {!hideVisitPosology(name) && (
                 <VisitPosology
                   name={name}
-                  defaults={posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults)}
+                  defaults={masterDefaults}
                   posology={posology}
                   onChange={onChange}
                 />
@@ -240,12 +246,24 @@ export function ExtraSelectedDrugs({
   );
 }
 
-export function addCatalogueDrug({ name, catalogue = [], topical = [], oral = [], medCourses = {} }) {
+export function addCatalogueDrug({ name, catalogue = [], topical = [], oral = [], medCourses = {}, posology = {}, matchedRegimens = [], allRegimens = [] }) {
   const drug = catalogue.find((d) => d.name === name);
   const next = isTopicalForm(drug?.form)
     ? { topical: [...new Set([...topical, name])], oral }
     : { topical, oral: [...new Set([...oral, name])] };
-  return { ...next, medCourses: withDrugCourse(medCourses, name, true) };
+  const defaults = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, {}, allRegimens);
+  const hasMaster = Boolean(defaults.dosage || defaults.frequency || defaults.duration);
+  return {
+    ...next,
+    medCourses: withDrugCourse(medCourses, name, true),
+    ...(hasMaster
+      ? { posology: setVisitPosology(posology, name, {
+          dosage: defaults.dosage,
+          frequency: defaults.frequency,
+          duration: defaults.duration,
+        }, defaults) }
+      : {}),
+  };
 }
 
 export function PlusDrugHint() {

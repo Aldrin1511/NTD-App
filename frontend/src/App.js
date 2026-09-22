@@ -1,5 +1,5 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { StoreProvider, useStore } from "@/store";
 import { Toaster } from "@/components/ui/sonner";
 import ScrollToTop from "@/components/ScrollToTop";
@@ -21,6 +21,15 @@ const Guard = ({ children }) => {
   const loc = useLocation();
   if (!user) return <Navigate to="/" replace state={{ from: loc.pathname }} />;
   return children;
+};
+
+/** Remount when switching edit ↔ new encounter so form state does not carry over. */
+const EncounterRoute = () => {
+  const { id, diseaseId } = useParams();
+  const [params] = useSearchParams();
+  const enc = params.get("enc") || "new";
+  const fresh = params.get("new") || enc;
+  return <ScabiesEncounter key={`${id}-${diseaseId}-${fresh}`} />;
 };
 
 function Shell() {

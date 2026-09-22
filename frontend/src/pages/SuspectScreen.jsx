@@ -8,6 +8,7 @@ import { PhotoCapture } from "@/components/Capture";
 import PatientSidebar from "@/components/PatientSidebar";
 import { SUSPECT_OPTIONS, assessmentSpecs } from "@/mock/specs";
 import { DISEASES } from "@/mock/data";
+import { useFormDirty } from "@/lib/useFormDirty";
 import { toast } from "sonner";
 import { ArrowLeft, ClipboardList, ShieldQuestion, PanelLeft } from "lucide-react";
 
@@ -25,6 +26,8 @@ export default function SuspectScreen() {
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(null);
   const [lhs, setLhs] = useState(true);
+  const formState = useMemo(() => ({ symptoms, photos, suspect, notes }), [symptoms, photos, suspect, notes]);
+  const { dirty, markSaved } = useFormDirty(formState, `${id}-suspect`);
 
   if (!p)
     return (
@@ -40,6 +43,7 @@ export default function SuspectScreen() {
     if (!suspect) return toast.error("Choose the suspected NTD, or None");
     const rec = addSuspect({ patientId: p.id, symptoms, photos, suspect, notes });
     setSaved(rec);
+    markSaved(formState);
     toast.success(
       online
         ? `Suspect screening ${rec.id} saved to device`
@@ -50,6 +54,14 @@ export default function SuspectScreen() {
   const startEncounter = (diseaseId) => {
     addDisease(p.id, diseaseId);
     navigate(`/patients/${p.id}/encounter/${diseaseId}?sus=${saved?.id || ""}`);
+  };
+
+  const requestLeave = () => {
+    if (dirty) {
+      const ok = window.confirm("Discard unsaved changes and leave?");
+      if (!ok) return;
+    }
+    navigate(`/patients/${p.id}`);
   };
 
   return (
@@ -78,7 +90,7 @@ export default function SuspectScreen() {
                 {p.facility || "No facility"} · Step 1 — presenting complaints
               </p>
             </div>
-            <Button variant="outline" className="h-11" data-testid="back-btn" onClick={() => navigate(`/patients/${p.id}`)}>
+            <Button variant="outline" className="h-11" data-testid="back-btn" onClick={requestLeave}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Exit to record
             </Button>
           </div>
@@ -153,9 +165,9 @@ export default function SuspectScreen() {
       <div className="fixed bottom-16 left-0 right-0 z-30 border-t border-border bg-white lg:bottom-0">
         <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-3 sm:px-6">
           <span className="hidden text-xs text-muted-foreground sm:block" data-testid="suspect-saved-indicator">
-            {saved ? `Saved: ${saved.id}` : "Not saved yet"}
+            {saved ? (dirty ? "Unsaved changes" : `Saved: ${saved.id}`) : dirty ? "Unsaved changes" : "Not saved yet"}
           </span>
-          <Button className="ml-auto h-12 flex-1 text-base sm:flex-none sm:px-10" data-testid="save-suspect-btn" onClick={save}>
+          <Button className="ml-auto h-12 flex-1 text-base sm:flex-none sm:px-10" data-testid="save-suspect-btn" disabled={!dirty || !user?.canEdit} onClick={save}>
             Save suspect screening
           </Button>
         </div>

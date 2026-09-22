@@ -22,7 +22,7 @@ import { LF_DRUGS, ivermectinDose, albendazoleDose, decDose } from "@/components
 import { BURULI_DRUGS, rifampicinDose, clarithromycinDose } from "@/components/BuruliMedications";
 import { LEPROSY_DRUGS, mdtBand, prednisoloneSchedule, mdtAdherenceConfig } from "@/components/LeprosyMedications";
 import { formatDosePhysical, physicalUnits, hideVisitPosology } from "@/lib/medications";
-import { AdherenceGrid, HouseholdCountTable, normalizeLepOccasion } from "@/components/FormRenderer";
+import { AdherenceGrid, HouseholdCountTable, normalizeLepOccasion, LeprosyAdherenceDashboard } from "@/components/FormRenderer";
 import LeprosyHouseholdMonitoring from "@/components/LeprosyHouseholdMonitoring";
 import { REACTION_COLS, REACTION_GRID } from "@/components/LeprosyReaction";
 import AntenatalDashboard from "@/components/AntenatalDashboard";
@@ -78,17 +78,19 @@ const rowsForChangedSection = (visits, key, spec, patient) => {
     return byDate || String(a.id).localeCompare(String(b.id));
   });
   const keep = new Set();
-  let prev = "";
-  chronological.forEach((e) => {
+  const prevVisitById = {};
+  let prevFp = "";
+  chronological.forEach((e, i) => {
     const fp = sectionFingerprint(key, e);
-    if (!fp || fp === prev) return;
+    if (!fp || fp === prevFp) return;
     keep.add(e.id);
-    prev = fp;
+    prevVisitById[e.id] = chronological[i - 1] || null;
+    prevFp = fp;
   });
   return (visits || [])
     .filter((e) => keep.has(e.id))
     .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
-    .map((e) => ({ e, s: summarise(key, e, spec, patient) }))
+    .map((e) => ({ e, s: summarise(key, e, spec, patient, prevVisitById[e.id]) }))
     .filter((r) => r.s);
 };
 
@@ -134,11 +136,11 @@ const episodeStatus = (outcome) => {
 };
 
 const episodeStatusChipClass = (status) => {
-  const s = String(status || "").toLowerCase();
+  const s = String(status || "").toLowerCase().replace(/[\u2010-\u2015\u2212]/g, "-");
   if (s === "active") return "border-transparent bg-emerald-600 text-white";
   if (/cured|healed/.test(s)) return "border-transparent bg-primary text-white";
-  if (/lost to follow-up/.test(s)) return "border-amber-300 bg-amber-50 text-amber-900";
-  if (/^no\b/.test(s)) return "border-slate-200 bg-slate-100 text-slate-700";
+  if (/lost to follow/.test(s)) return "border-amber-300 bg-amber-50 text-amber-900";
+  if (/^no\s+(scabies|yaws|leprosy|buruli|lymphatic)/.test(s)) return "border-slate-200 bg-slate-100 text-slate-700";
   return "border-primary/20 bg-secondary text-secondary-foreground";
 };
 
@@ -178,6 +180,36 @@ const nestedHistoryItems = (fields, data) =>
       return value ? { label: field.label, value } : null;
     })
     .filter(Boolean);
+
+const formatCaseDetailsValue = (field, value) => {
+  if (value == null || value === "") return "";
+  if (field?.type === "note" || field?.type === "section") return "";
+  const raw = typeof value === "string" || typeof value === "number" ? String(value).trim() : formatHistoryValue(field, value);
+  if (!raw) return "";
+  if (field?.k === "height" && !/cm/i.test(raw)) return `${raw} cms`;
+  if (field?.k === "weight" && !/kg/i.test(raw)) return `${raw} kgs`;
+  return raw;
+};
+
+const summariseCaseDetails = (caseDetails, spec) => {
+  if (!caseDetails || typeof caseDetails !== "object") return "";
+  const fields = spec?.caseDetails || [];
+  const items = [];
+  for (const field of fields) {
+    if (field.type === "note" || field.type === "section") continue;
+    const value = formatCaseDetailsValue(field, caseDetails[field.k]);
+    if (value) items.push({ label: field.label, value });
+  }
+  // Include any extra saved keys not in the current spec so nothing is dropped
+  const known = new Set(fields.map((f) => f.k));
+  Object.entries(caseDetails).forEach(([k, v]) => {
+    if (known.has(k) || v == null || v === "") return;
+    const value = typeof v === "string" || typeof v === "number" ? String(v).trim() : "";
+    if (value) items.push({ label: k, value });
+  });
+  if (!items.length) return "";
+  return { kind: "history", sections: [{ label: "", items }] };
+};
 
 const summariseHistory = (history, spec) => {
   if (!history || typeof history !== "object") return "";
@@ -357,12 +389,8 @@ const hasClock = (v) => /T\d{2}:\d{2}/.test(String(v || ""));
 const entryDateTime = (primary, fallback) =>
   fmtDateTime(hasClock(primary) ? primary : (hasClock(fallback) ? fallback : primary || fallback));
 
-const examChipLabel = (exam) => {
-  const base = `${entryDateTime(exam.date, exam.editedAt || exam.encounterDate)} · ${exam.type || "Examination"}`;
-  const round = exam.roundCount > 1 ? ` · Assessment ${exam.roundIndex + 1}` : "";
-  const occasion = exam.occasion ? ` · ${exam.occasion}` : "";
-  return `${base}${round}${occasion}`;
-};
+const examChipLabel = (exam) =>
+  `${entryDateTime(exam.date, exam.editedAt || exam.encounterDate)} · ${exam.type || "Examination"}`;
 
 const summariseExam = (e, spec) => {
   const x = e.data || {};
@@ -427,13 +455,27 @@ const summariseExam = (e, spec) => {
 const ExamSummary = ({ exam }) => {
   if (!exam) return null;
   const lep = exam.leprosy;
+  const showAssessment = exam.roundCount > 1;
   return (
     <div className="mt-2 space-y-1" data-testid="exam-summary">
-      {exam.findings.length > 0 && (
-        <p className="text-sm font-medium">{exam.findings.join(" · ")}</p>
+      {(showAssessment || exam.occasion) && (
+        <div className="space-y-1" data-testid="exam-assessment-meta">
+          {showAssessment && (
+            <p className="text-sm text-primary">
+              <span className="font-medium">Assessment</span>{" "}
+              <span className="font-medium">{exam.roundIndex + 1}</span>{" - "}
+              <span className="font-medium">{exam.occasion}</span>
+            </p>
+       
+          )}
+        </div>
       )}
-      {exam.occasion && (
-        <p className="text-sm" data-testid="exam-occasion">{exam.occasion}</p>
+      {exam.findings.length > 0 && (
+        <div className="space-y-1" data-testid="exam-findings">
+          {exam.findings.map((finding, i) => (
+            <p key={`${finding}-${i}`} className="text-sm font-medium">{finding}</p>
+          ))}
+        </div>
       )}
       {exam.secondaryInfection && (
         <p className="text-sm" data-testid="exam-secondary-infection">
@@ -785,10 +827,35 @@ const medicationRows = (e, spec, patient) => {
   return rows;
 };
 
-const summariseMedications = (e, spec, patient) => {
+const drugNamesOf = (e) => {
+  const x = e?.data || {};
+  return new Set(
+    [...(x.topical || []), ...(x.oral || []), ...(x.topicalAntibiotics || []), ...(x.oralAntibiotics || [])]
+      .map((n) => String(n || "").trim())
+      .filter(Boolean)
+  );
+};
+
+/** True when this drug was newly selected on this visit (not carried from the previous visit). */
+const isDrugAddedOnVisit = (name, e, prev) => {
+  if (!name) return false;
+  if (!prev) return true;
+  return !drugNamesOf(prev).has(name);
+};
+
+const summariseMedications = (e, spec, patient, prevEncounter = null) => {
   const rows = medicationRows(e, spec, patient);
   if (!rows.length) return "";
-  return { kind: "meds", rows };
+  if (!prevEncounter) return { kind: "meds", rows };
+
+  const filtered = [];
+  let keepBlock = false;
+  for (const row of rows) {
+    if (row.name) keepBlock = isDrugAddedOnVisit(row.name, e, prevEncounter);
+    if (keepBlock) filtered.push(row);
+  }
+  if (!filtered.length) return "";
+  return { kind: "meds", rows: filtered };
 };
 
 const summariseAdherence = (e, spec) => {
@@ -1005,9 +1072,9 @@ const MedsSummary = ({ rows }) => {
   );
 };
 
-const summarise = (key, e, spec, patient) => {
+const summarise = (key, e, spec, patient, prevEncounter = null) => {
   const x = e.data || {};
-  if (key === "caseDetails") return [x.caseDetails?.mode, x.caseDetails?.caseType, x.caseDetails?.weight && `${x.caseDetails.weight} kg`].filter(Boolean).join(" · ");
+  if (key === "caseDetails") return summariseCaseDetails(x.caseDetails || {}, spec || DISEASE_SPECS[e.disease]);
   if (key === "history") return summariseHistory(x.history || {}, spec || DISEASE_SPECS[e.disease]);
   if (key === "marks") return summariseExam(e, spec || DISEASE_SPECS[e.disease]);
   if (key === "lab") return summariseLab(x.lab || {}, spec || DISEASE_SPECS[e.disease], e.date);
@@ -1015,7 +1082,7 @@ const summarise = (key, e, spec, patient) => {
     const dx = x.diagnosis || e.diagnosis;
     return hasValue(dx) ? dx : "";
   }
-  if (key === "drugs") return summariseMedications(e, spec || DISEASE_SPECS[e.disease], patient);
+  if (key === "drugs") return summariseMedications(e, spec || DISEASE_SPECS[e.disease], patient, prevEncounter);
   if (key === "adherence") return summariseAdherence(e, spec || DISEASE_SPECS[e.disease]);
   if (key === "household") return summariseHousehold(e, spec || DISEASE_SPECS[e.disease]);
   if (key === "reactions") return summariseReactions(e);
@@ -1056,7 +1123,7 @@ const UnfoldLessIcon = ({ className = "h-5 w-5" }) => (
 );
 
 export default function PatientRecord() {
-  const { id } = useParams();
+  const { id, diseaseId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { patients, encounters, user, suspects, facilities, settings } = useStore();
@@ -1123,7 +1190,7 @@ export default function PatientRecord() {
   const start = () => {
     if (enc.referral === "Yes" && (!enc.province || !enc.district)) return toast.error("Choose province and district for the referral");
     if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
-    const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}`;
+    const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}&new=${Date.now()}`;
     setEnc({ ...enc, show: false });
     const path =
       EXTRA_IDS.includes(enc.disease)
@@ -1221,7 +1288,7 @@ export default function PatientRecord() {
               {tabs.map(([k, label]) => {
                 if (k === "suspect" || EXTRA_IDS.includes(k)) {
                   return (
-                    <button key={k} data-testid={`tab-${k}`} onClick={() => setTab(k)}
+                    <button key={k} data-testid={`tab-${k}`} onClick={() => selectTab(k)}
                       className={`h-11 shrink-0 rounded-md border px-4 text-sm font-semibold ${activeTab === k ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"}`}>{label}</button>
                   );
                 }
@@ -1236,7 +1303,7 @@ export default function PatientRecord() {
                       <button
                         type="button"
                         data-testid={`tab-${k}`}
-                        onClick={() => setTab(k)}
+                        onClick={() => selectTab(k)}
                         className={`${tabCls} rounded-r-none border-r-0 px-4`}
                       >
                         {label}{visits ? ` · ${visits}` : ""}
@@ -1248,7 +1315,7 @@ export default function PatientRecord() {
                             data-testid={`tab-${k}-episodes`}
                             aria-label={`${label} episodes`}
                             className={`${tabCls} rounded-l-none px-2`}
-                            onClick={() => setTab(k)}
+                            onClick={() => selectTab(k)}
                           >
                             <ChevronDown className="h-4 w-4" />
                           </button>
@@ -1260,7 +1327,7 @@ export default function PatientRecord() {
                               data-testid={`tab-${k}-episode-${ep.id}`}
                               className={`flex flex-col items-start gap-0.5 py-2 ${current?.id === ep.id ? "bg-secondary" : ""}`}
                               onClick={() => {
-                                setTab(k);
+                                selectTab(k);
                                 setEpisodeSel((s) => ({ ...s, [k]: ep.id }));
                               }}
                             >
@@ -1278,7 +1345,7 @@ export default function PatientRecord() {
                   );
                 }
                 return (
-                  <button key={k} data-testid={`tab-${k}`} onClick={() => setTab(k)}
+                  <button key={k} data-testid={`tab-${k}`} onClick={() => selectTab(k)}
                     className={`${tabCls} px-4`}>{label}{visits ? ` · ${visits}` : ""}</button>
                 );
               })}
@@ -1478,12 +1545,42 @@ export default function PatientRecord() {
                               </div>
                             );
                           })
+                        ) : k === "adherence" && activeTab === "leprosy" ? (
+                          <div className="px-4 py-3" data-testid="feature-adherence-leprosy">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-primary">
+                                <span>
+                                  {rows[0]?.e
+                                    ? `${entryDateTime(rows[0].e.date, rows[0].e.editedAt)} · ${rows[0].e.worker} · ${rows[0].e.type}`
+                                    : "MDT adherence"}
+                                </span>
+                                {rows.some(({ e }) => isEditedSection(e, "adherence")) && <EditedBadge />}
+                              </p>
+                              {canEdit && rows[0]?.e && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-9 w-9 text-primary"
+                                  data-testid="feature-edit-adherence"
+                                  aria-label="Edit adherence"
+                                  onClick={() => openFeatureEncounter(rows[0].e, "adherence")}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                            <LeprosyAdherenceDashboard
+                              visits={rows.map(({ e }) => e)}
+                              diagnosis={rows[0]?.s?.diagnosis || selectedEpisode?.diagnosis || ""}
+                            />
+                          </div>
                         ) : (
                           rows.map(({ e, s }) => (
                             <div key={e.id} className="px-4 py-3">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-primary">
-                                  <span>{entryDateTime(e.date, e.editedAt)} · {e.worker} · {e.type}</span>
+                                  <span>{entryDateTime(isEditedSection(e, k) ? e.editedAt : e.date, e.date)} · {e.worker} · {e.type}</span>
                                   {isEditedSection(e, k) && <EditedBadge />}
                                 </p>
                                 {canEdit && (

@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { SelectField, ChoiceRow, SectionCard, TextField, capitalizeName } from "@/components/Fields";
 import PhoneField from "@/components/PhoneField";
-import { PhotoCapture, FingerprintCapture, DocumentCapture, ageFromDob, dobFromAge } from "@/components/Capture";
+import { PhotoCapture, FingerprintCapture, DocumentCapture, ageYmdFromDob, dobFromAgeYmd, dobFromAge } from "@/components/Capture";
 import { GEO, REGISTERED_ATS, BLOOD_GROUPS } from "@/mock/data";
 import { defaultPhoneCountryFromFacilities, digitsOnly, formatInternational, getPhoneMaxLength, parseStoredPhone } from "@/lib/phone";
 import { Plus, Trash2 } from "lucide-react";
@@ -22,6 +22,9 @@ export const emptyPatientForm = (user, facilities = []) => ({
   lastName: "",
   dob: "",
   age: "",
+  ageY: "",
+  ageM: "",
+  ageD: "",
   gender: "",
   email: "",
   bloodGroup: "Unknown",
@@ -72,11 +75,21 @@ export const formFromPatient = (p, user, facilities = []) => {
     p.countryCode || p.phoneCountry,
     defaultPhoneCountryFromFacilities(user, facilities),
   );
+  const dob = p.dob || dobFromAge(p.age, p.createdAt) || "";
+  const ymd = ageYmdFromDob(dob);
+  const ageY = p.ageY != null && p.ageY !== ""
+    ? String(p.ageY)
+    : (ymd.y !== "" ? ymd.y : (p.age != null && p.age !== "" ? String(p.age) : ""));
+  const ageM = p.ageM != null && p.ageM !== "" ? String(p.ageM) : ymd.m;
+  const ageD = p.ageD != null && p.ageD !== "" ? String(p.ageD) : ymd.d;
   return {
     ...emptyPatientForm(user, facilities),
     ...names,
-    dob: p.dob || dobFromAge(p.age, p.createdAt) || "",
-    age: p.age ?? ageFromDob(p.dob || dobFromAge(p.age, p.createdAt)) ?? "",
+    dob,
+    age: ageY,
+    ageY,
+    ageM,
+    ageD,
     gender: p.gender || p.sex || "",
     email: p.email || "",
     bloodGroup: p.bloodGroup || "Unknown",
@@ -96,11 +109,15 @@ export const formFromPatient = (p, user, facilities = []) => {
 
 export const patientPayload = (f) => {
   const primary = f.addresses[0] || emptyAddress();
+  const ageY = f.ageY !== "" && f.ageY != null ? f.ageY : f.age;
   return {
     ...f,
     firstName: f.name,
     name: [f.name, f.middleName, f.lastName].filter(Boolean).join(" "),
-    age: Number(f.age) || 0,
+    age: Number(ageY) || 0,
+    ageY: ageY !== "" && ageY != null ? String(ageY) : "",
+    ageM: f.ageM !== "" && f.ageM != null ? String(f.ageM) : "",
+    ageD: f.ageD !== "" && f.ageD != null ? String(f.ageD) : "",
     sex: f.gender,
     gender: f.gender,
     phone: formatInternational(f.phoneCountry, f.phone),
@@ -115,6 +132,27 @@ export const patientPayload = (f) => {
 
 export default function PatientForm({ f, setF, patientId, mode = "create" }) {
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v }));
+
+  const setDob = (dob) => {
+    const parts = ageYmdFromDob(dob);
+    setF((s) => ({
+      ...s,
+      dob,
+      ageY: parts.y,
+      ageM: parts.m,
+      ageD: parts.d,
+      age: parts.y,
+    }));
+  };
+
+  const setAgePart = (part) => (value) => {
+    setF((s) => {
+      const next = { ...s, [part]: value };
+      if (part === "ageY") next.age = value;
+      next.dob = dobFromAgeYmd({ y: next.ageY, m: next.ageM, d: next.ageD });
+      return next;
+    });
+  };
 
   const patchAddress = (index, changes) =>
     setF((s) => ({
@@ -159,17 +197,40 @@ export default function PatientForm({ f, setF, patientId, mode = "create" }) {
             testid="patient-dob-input"
             value={f.dob}
             allowEmpty
-            onChange={(e) => setF((s) => ({ ...s, dob: e.target.value, age: ageFromDob(e.target.value) }))}
+            onChange={(e) => setDob(e.target.value)}
             hint="Age is calculated automatically"
           />
-          <TextField
-            label="Age (years)"
-            testid="patient-age-input"
-            type="number"
-            value={f.age}
-            onChange={(e) => setF((s) => ({ ...s, age: e.target.value, dob: dobFromAge(e.target.value) }))}
-            hint={mode === "edit" ? "Changing age updates the date of birth from today" : "Entering age fills the date of birth from today's registration date"}
-          />
+          <div>
+            <p className="mb-2 text-sm font-medium">Age</p>
+            <div className="grid grid-cols-3 gap-2">
+              <TextField
+                label="YY"
+                type="number"
+                testid="patient-age-y"
+                value={f.ageY}
+                onChange={(e) => setAgePart("ageY")(e.target.value)}
+              />
+              <TextField
+                label="MM"
+                type="number"
+                testid="patient-age-m"
+                value={f.ageM}
+                onChange={(e) => setAgePart("ageM")(e.target.value)}
+              />
+              <TextField
+                label="DD"
+                type="number"
+                testid="patient-age-d"
+                value={f.ageD}
+                onChange={(e) => setAgePart("ageD")(e.target.value)}
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {mode === "edit"
+                ? "Changing age updates the date of birth from today"
+                : "Entering age fills the date of birth from today's registration date"}
+            </p>
+          </div>
           <ChoiceRow label="Gender" options={["Male", "Female", "Other"]} value={f.gender} onChange={set("gender")} testid="patient-gender-select" />
           <PhoneField
             country={f.phoneCountry}

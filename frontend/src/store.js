@@ -63,6 +63,25 @@ const load = () => {
           }),
         };
       }
+      const seedDrugs = initial().settings.drugs || [];
+      const savedDrugs = merged.settings?.drugs;
+      if (Array.isArray(savedDrugs) && seedDrugs.length) {
+        const byName = Object.fromEntries(seedDrugs.map((d) => [d.name, d]));
+        merged.settings = {
+          ...merged.settings,
+          drugs: savedDrugs.map((d) => {
+            const seed = byName[d.name];
+            if (!seed) return d;
+            return {
+              ...d,
+              dosage: d.dosage || seed.dosage || "",
+              frequency: d.frequency || seed.frequency || "",
+              duration: d.duration || seed.duration || "",
+              durationUnit: d.durationUnit || seed.durationUnit || "",
+            };
+          }),
+        };
+      }
       return merged;
     }
   } catch (e) {}
@@ -326,37 +345,41 @@ export function StoreProvider({ children }) {
           ),
         })),
       saveEncounter: (enc) => {
-        const existing = enc.id && state.encounters.find((e) => e.id === enc.id);
-        if (existing) {
-          const merged = {
-            ...existing,
-            ...enc,
-            id: existing.id,
-            date: existing.date,
+        let saved = null;
+        let nextPending = 0;
+        patch((s) => {
+          const existing = enc.id && s.encounters.find((e) => e.id === enc.id);
+          if (existing) {
+            const merged = {
+              ...existing,
+              ...enc,
+              id: existing.id,
+              date: existing.date,
+              synced: false,
+              editedAt: new Date().toISOString(),
+              editedSections: [...new Set([...(existing.editedSections || []), ...(enc.editedSections || [])])],
+            };
+            saved = merged;
+            const nextEncounters = s.encounters.map((e) => (e.id === merged.id ? merged : e));
+            nextPending = queuedCount({ ...s, encounters: nextEncounters, pendingSync: s.pendingSync + 1 });
+            return { encounters: nextEncounters, pendingSync: nextPending };
+          }
+          const { id: _dropId, ...rest } = enc;
+          const rec = {
+            id: `ENC-${String(Math.floor(Math.random() * 900000) + 100000)}`,
+            date: new Date().toISOString(),
+            disease: "scabies",
             synced: false,
-            editedAt: new Date().toISOString(),
-            editedSections: [...new Set([...(existing.editedSections || []), ...(enc.editedSections || [])])],
+            complete: true,
+            ...rest,
           };
-          const nextEncounters = state.encounters.map((e) => (e.id === merged.id ? merged : e));
-          const nextPending = queuedCount({ ...state, encounters: nextEncounters, pendingSync: state.pendingSync + 1 });
-          patch(() => ({ encounters: nextEncounters, pendingSync: nextPending }));
-          offerSyncAfterSave(nextPending);
-          return merged;
-        }
-        const { id: _dropId, ...rest } = enc;
-        const rec = {
-          id: `ENC-${String(Math.floor(Math.random() * 900000) + 100000)}`,
-          date: new Date().toISOString(),
-          disease: "scabies",
-          synced: false,
-          complete: true,
-          ...rest,
-        };
-        const nextEncounters = [...state.encounters, rec];
-        const nextPending = queuedCount({ ...state, encounters: nextEncounters, pendingSync: state.pendingSync + 1 });
-        patch(() => ({ encounters: nextEncounters, pendingSync: nextPending }));
+          saved = rec;
+          const nextEncounters = [...s.encounters, rec];
+          nextPending = queuedCount({ ...s, encounters: nextEncounters, pendingSync: s.pendingSync + 1 });
+          return { encounters: nextEncounters, pendingSync: nextPending };
+        });
         offerSyncAfterSave(nextPending);
-        return rec;
+        return saved;
       },
       dismissSyncPrompt: () => setSyncPrompt(null),
       syncNow: () => {

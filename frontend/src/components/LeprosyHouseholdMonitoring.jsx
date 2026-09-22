@@ -96,12 +96,15 @@ const emptySdrFields = () => ({
 const emptyTreatmentFields = () => ({
   treatmentConsent: "",
   treatmentCounselling: "",
+  sdrAvailable: "",
   administrationDate: "",
   ...emptySdrFields(),
 });
 
-const applySdrFields = (row, consentYes) => {
-  const details = consentYes ? sdrDetails(contactAgeYears(row)) : null;
+const sdrShouldApply = (row) => row.treatmentConsent === "Yes" && row.sdrAvailable === "Yes";
+
+const applySdrFields = (row, apply) => {
+  const details = apply ? sdrDetails(contactAgeYears(row)) : null;
   if (!details) return { ...row, ...emptySdrFields() };
   return {
     ...row,
@@ -195,7 +198,7 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
       next.dob = dobFromAgeYmd({ y: next.ageY, m: next.ageM, d: next.ageD });
     }
     if (k === "ageY" || k === "ageM" || k === "ageD" || k === "dob") {
-      return applySdrFields(next, next.treatmentConsent === "Yes");
+      return applySdrFields(next, sdrShouldApply(next));
     }
     return next;
   });
@@ -219,7 +222,10 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
     } else if (!row.dob && (row.ageY !== "" || row.ageM !== "" || row.ageD !== "")) {
       row.dob = dobFromAgeYmd({ y: row.ageY, m: row.ageM, d: row.ageD });
     }
-    setDraft(applySdrFields(row, row.treatmentConsent === "Yes"));
+    if (!row.sdrAvailable && (row.treatmentDrug || row.treatment)) {
+      row.sdrAvailable = "Yes";
+    }
+    setDraft(applySdrFields(row, sdrShouldApply(row)));
     setOpen(true);
   };
 
@@ -277,8 +283,11 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
     const healthy = draft.outcome === "Healthy Contact";
     let row = { ...draft, id: draft.id || `hc-${Date.now()}` };
     row = healthy
-      ? applySdrFields(row, row.treatmentConsent === "Yes")
+      ? applySdrFields(row, sdrShouldApply(row))
       : { ...row, ...emptyTreatmentFields() };
+    if (healthy && row.sdrAvailable !== "Yes") {
+      row = { ...row, administrationDate: "", ...emptySdrFields() };
+    }
     row = ensureRegisteredPatient(row);
 
     if (editIndex >= 0) {
@@ -290,6 +299,7 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
   };
 
   const treatmentEnabled = draft.treatmentConsent === "Yes";
+  const sdrEnabled = treatmentEnabled && draft.sdrAvailable === "Yes";
 
   const title = useMemo(() => {
     if (mode === "view") return "View household contact";
@@ -453,7 +463,7 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
 
             {draft.outcome === "Healthy Contact" && (
             <section className="space-y-4" data-testid={`${id}-treatment-section`}>
-              <SectionTitle>Treatment</SectionTitle>
+              <SectionTitle>SDR PEP treatment</SectionTitle>
               <ChoiceRow
                 label="Consented for Treatment"
                 options={["Yes", "No"]}
@@ -462,64 +472,85 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
                   const next = { ...s, treatmentConsent: v };
                   if (v !== "Yes") {
                     return {
-                      ...applySdrFields(next, false),
+                      ...applySdrFields({ ...next, sdrAvailable: "" }, false),
                       treatmentCounselling: "",
+                      sdrAvailable: "",
                       administrationDate: "",
                     };
                   }
-                  return {
-                    ...applySdrFields(next, true),
-                    administrationDate: s.administrationDate || localISODate(),
-                  };
+                  return applySdrFields(next, sdrShouldApply(next));
                 })}
                 testid={`${id}-tx-consent`}
               />
               <div className={`space-y-4 ${treatmentEnabled ? "" : "pointer-events-none opacity-50"}`}>
                 <ChoiceRow label="Counselling" options={["Yes", "No"]} value={draft.treatmentCounselling} onChange={set("treatmentCounselling")} testid={`${id}-tx-counsel`} />
-                <TextField label="Administration Date" type="date" testid={`${id}-admin-date`} value={draft.administrationDate} onChange={(e) => set("administrationDate")(e.target.value)} />
-                {sdr ? (
+                <ChoiceRow
+                  label="SDR available"
+                  options={["Yes", "No"]}
+                  value={draft.sdrAvailable}
+                  onChange={(v) => setDraft((s) => {
+                    const next = { ...s, sdrAvailable: v };
+                    if (v !== "Yes") {
+                      return {
+                        ...applySdrFields(next, false),
+                        administrationDate: "",
+                      };
+                    }
+                    return {
+                      ...applySdrFields(next, s.treatmentConsent === "Yes"),
+                      administrationDate: s.administrationDate || localISODate(),
+                    };
+                  })}
+                  testid={`${id}-sdr-available`}
+                />
+                {sdrEnabled && (
                   <>
-                    <ChoiceRow
-                      label="Treatment"
-                      options={treatmentOptions}
-                      value={draft.treatment || sdr.label}
-                      onChange={set("treatment")}
-                      testid={`${id}-treatment`}
-                    />
-                    <div className="space-y-3 rounded-lg border border-primary bg-secondary/40 p-4" data-testid={`${id}-sdr-card`}>
-                      <div>
-                        <p className="font-semibold" data-testid={`${id}-sdr-drug`}>{sdr.drug}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{sdr.label}</p>
-                      </div>
-                      <DosePhysicalBox
-                        testid={`${id}-sdr-physical`}
-                        doseText={sdr.dosage}
-                        hint={`${sdr.tabletMg} mg capsules · single-dose PEP`}
-                      />
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <div>
-                          <p className="text-xs font-semibold text-muted-foreground">Dosage</p>
-                          <p className="mt-1 text-sm font-semibold" data-testid={`${id}-sdr-dosage`}>{sdr.dosage}</p>
+                    <TextField label="Administration Date" type="date" testid={`${id}-admin-date`} value={draft.administrationDate} onChange={(e) => set("administrationDate")(e.target.value)} />
+                    {sdr ? (
+                      <>
+                        <ChoiceRow
+                          label="SDR PEP treatment"
+                          options={treatmentOptions}
+                          value={draft.treatment || sdr.label}
+                          onChange={set("treatment")}
+                          testid={`${id}-treatment`}
+                        />
+                        <div className="space-y-3 rounded-lg border border-primary bg-secondary/40 p-4" data-testid={`${id}-sdr-card`}>
+                          <div>
+                            <p className="font-semibold" data-testid={`${id}-sdr-drug`}>{sdr.drug}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">{sdr.label}</p>
+                          </div>
+                          <DosePhysicalBox
+                            testid={`${id}-sdr-physical`}
+                            doseText={sdr.dosage}
+                            hint={`${sdr.tabletMg} mg capsules · single-dose PEP`}
+                          />
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground">Dosage</p>
+                              <p className="mt-1 text-sm font-semibold" data-testid={`${id}-sdr-dosage`}>{sdr.dosage}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground">Frequency</p>
+                              <p className="mt-1 text-sm font-semibold" data-testid={`${id}-sdr-frequency`}>{sdr.frequency}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground">Duration</p>
+                              <p className="mt-1 text-sm font-semibold" data-testid={`${id}-sdr-duration`}>{sdr.duration}</p>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-semibold text-muted-foreground">Frequency</p>
-                          <p className="mt-1 text-sm font-semibold" data-testid={`${id}-sdr-frequency`}>{sdr.frequency}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold text-muted-foreground">Duration</p>
-                          <p className="mt-1 text-sm font-semibold" data-testid={`${id}-sdr-duration`}>{sdr.duration}</p>
-                        </div>
-                      </div>
-                    </div>
+                      </>
+                    ) : (
+                      <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground" data-testid={`${id}-treatment-none`}>
+                        {ageYears == null || ageYears === ""
+                          ? "Enter contact age (YY) to show the matching Rifampicin dose."
+                          : ageYears < 2
+                            ? "Rifampicin PEP is not indicated under 2 years of age."
+                            : "No matching Rifampicin dose for this age."}
+                      </p>
+                    )}
                   </>
-                ) : (
-                  <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground" data-testid={`${id}-treatment-none`}>
-                    {ageYears == null || ageYears === ""
-                      ? "Enter contact age (YY) to show the matching Rifampicin dose."
-                      : ageYears < 2
-                        ? "Rifampicin PEP is not indicated under 2 years of age."
-                        : "No matching Rifampicin dose for this age."}
-                  </p>
                 )}
               </div>
             </section>

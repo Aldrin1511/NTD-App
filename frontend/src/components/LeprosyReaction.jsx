@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { TextField, ChoiceRow, AreaField } from "@/components/Fields";
 import { localISODate } from "@/mock/specs";
-import { Plus, Stethoscope } from "lucide-react";
+import { Check, Plus, Stethoscope } from "lucide-react";
 
 export const REACTION_TYPES = [
   "Reversal reaction (Type 1 reaction)",
@@ -43,7 +43,6 @@ export const REACTION_GRID = [
       { label: "Painful", priority: 0 },
       { label: "Tender", priority: 0 },
       { label: "Enlarged nerves when palpated (felt)", priority: 0 },
-      { label: "Red patches", priority: 1 },
       { label: "Raised patches on or around a nerve", priority: 1 },
     ],
     type2: [
@@ -131,13 +130,6 @@ export const REACTION_GRID = [
   },
 ];
 
-const priorityClass = (p) => {
-  if (p === 1) return "text-sky-700";
-  if (p === 2) return "text-orange-600";
-  if (p === 3) return "text-emerald-700";
-  return "text-foreground";
-};
-
 const emptySelections = () =>
   Object.fromEntries(
     REACTION_GRID.map((row) => [
@@ -159,9 +151,6 @@ export const emptyReaction = () => ({
   notes: "",
   typeManual: false,
 });
-
-const toggleInList = (list, item) =>
-  (list || []).includes(item) ? list.filter((x) => x !== item) : [...(list || []), item];
 
 const inferReactionType = (selections) => {
   const scores = new Set();
@@ -209,13 +198,19 @@ function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
   const toggleFinding = (category, colKey, label) => {
     const selections = { ...emptySelections(), ...(draft.selections || {}) };
     const cat = selections[category] || { type1: [], type2: [], drug: [] };
-    const nextSel = {
-      ...selections,
-      [category]: {
-        ...cat,
-        [colKey]: toggleInList(cat[colKey], label),
-      },
-    };
+    const turningOn = !(cat[colKey] || []).includes(label);
+    const row = REACTION_GRID.find((r) => r.category === category);
+    // Same label text in Type 1 / Type 2 / Drug within this body part stays in sync.
+    const nextCat = { ...cat };
+    REACTION_COLS.forEach(({ key }) => {
+      const hasOption = key === colKey || (row?.[key] || []).some((o) => o.label === label);
+      if (!hasOption) return;
+      const list = nextCat[key] || [];
+      nextCat[key] = turningOn
+        ? (list.includes(label) ? list : [...list, label])
+        : list.filter((x) => x !== label);
+    });
+    const nextSel = { ...selections, [category]: nextCat };
     onPatch({
       selections: nextSel,
       reactionType: draft.typeManual ? draft.reactionType : inferReactionType(nextSel),
@@ -258,8 +253,8 @@ function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
           testid={`${id}-occurred`}
         />
 
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[900px] text-sm" data-testid={`${id}-grid`}>
+        <div className="overflow-x-auto rounded-md border border-border bg-white" data-testid={`${id}-grid`}>
+          <table className="w-full min-w-[900px] text-sm">
             <thead className="bg-muted">
               <tr>
                 <th className="sticky left-0 z-10 bg-muted p-3 text-left text-xs font-semibold text-muted-foreground">Reaction</th>
@@ -271,32 +266,40 @@ function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
             <tbody>
               {REACTION_GRID.map((row) => (
                 <tr key={row.category} className="border-t border-border align-top">
-                  <td className="sticky left-0 z-10 bg-white p-3 font-semibold">{row.category}</td>
+                  <td className="sticky left-0 z-10 bg-white p-3 text-sm font-semibold text-foreground">{row.category}</td>
                   {REACTION_COLS.map((col) => (
                     <td key={col.key} className="p-3">
-                      <div className="space-y-2">
-                        {(row[col.key] || []).map((opt) => {
-                          const on = (draft.selections?.[row.category]?.[col.key] || []).includes(opt.label);
-                          return (
-                            <label
-                              key={`${col.key}-${opt.label}`}
-                              className={`flex cursor-pointer items-start gap-2 text-sm ${priorityClass(opt.priority)}`}
-                            >
-                              <input
-                                type="checkbox"
-                                className="mt-1 h-4 w-4 accent-primary"
-                                checked={on}
-                                onChange={() => toggleFinding(row.category, col.key, opt.label)}
+                      {(row[col.key] || []).length === 0 ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <div className="grid gap-2">
+                          {(row[col.key] || []).map((opt) => {
+                            const on = (draft.selections?.[row.category]?.[col.key] || []).includes(opt.label);
+                            return (
+                              <button
+                                key={`${col.key}-${opt.label}`}
+                                type="button"
                                 data-testid={`${id}-${row.category}-${col.key}-${opt.label}`.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
-                              />
-                              <span className={on ? "font-semibold" : ""}>{opt.label}</span>
-                            </label>
-                          );
-                        })}
-                        {(row[col.key] || []).length === 0 && (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
-                      </div>
+                                onClick={() => toggleFinding(row.category, col.key, opt.label)}
+                                className={`flex min-h-12 items-center gap-3 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors ${
+                                  on
+                                    ? "border-primary bg-secondary text-secondary-foreground"
+                                    : "border-border bg-white text-foreground hover:bg-muted"
+                                }`}
+                              >
+                                <span
+                                  className={`grid h-6 w-6 shrink-0 place-items-center rounded border ${
+                                    on ? "border-primary bg-primary text-white" : "border-input bg-white"
+                                  }`}
+                                >
+                                  {on && <Check className="h-4 w-4" />}
+                                </span>
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </td>
                   ))}
                 </tr>
@@ -323,10 +326,13 @@ function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
 
         <Button
           type="button"
-          variant="outline"
           className="h-12 w-full sm:w-auto"
           data-testid={`${id}-start-exam`}
-          onClick={() => onStartExam?.("Upon Reaction")}
+          disabled={Boolean(draft.examStarted)}
+          onClick={() => {
+            onPatch({ examStarted: true });
+            onStartExam?.("Upon Reaction");
+          }}
         >
           <Stethoscope className="mr-2 h-4 w-4" /> Start Leprosy Assessment Upon Reaction
         </Button>
@@ -335,11 +341,12 @@ function ReactionForm({ draft, onPatch, onStartExam, id, heading }) {
   );
 }
 
-export default function LeprosyReaction({ value = [], onChange, onStartExam, followUp = false, id = "lep-reaction" }) {
+export default function LeprosyReaction({ value = [], onChange, onStartExam, followUp = false, allowAdd = false, id = "lep-reaction" }) {
   const rows = Array.isArray(value) ? value : [];
   const seedRef = useRef(null);
   if (!seedRef.current) seedRef.current = emptyReaction();
 
+  const showAdd = followUp && allowAdd;
   const forms = followUp ? rows : (rows.length ? rows : [seedRef.current]);
 
   const patchAt = (i) => (partial) => {
@@ -360,7 +367,7 @@ export default function LeprosyReaction({ value = [], onChange, onStartExam, fol
               : "Record findings for this reaction"}
           </p>
         </div>
-        {followUp && (
+        {showAdd && (
           <Button type="button" className="h-11" data-testid={`${id}-add`} onClick={add}>
             <Plus className="mr-2 h-4 w-4" /> Add
           </Button>
@@ -380,7 +387,9 @@ export default function LeprosyReaction({ value = [], onChange, onStartExam, fol
 
       {followUp && rows.length === 0 && (
         <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          No reaction assessments this visit. Use Add to record one.
+          {showAdd
+            ? "No reaction assessments this visit. Use Add to record one."
+            : "No reaction assessments this visit."}
         </p>
       )}
     </div>

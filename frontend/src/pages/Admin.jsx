@@ -361,30 +361,61 @@ const FacilitiesTab = ({ s }) => {
 };
 
 const DrugsMaster = ({ s }) => {
-  const [d, setD] = useState({ name: "", form: "Oral", strength: "" });
+  const [d, setD] = useState({ name: "", form: "Oral", strength: "", dosage: "", frequency: "", duration: "", durationUnit: "Day(s)" });
   return (
     <SectionCard title="Drugs" desc="Drug catalogue used by the treatment section — configurable per country protocol" right={<Badge variant="outline" className="rounded" data-testid="drug-count">{s.settings.drugs.length} drugs</Badge>}>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Drug name" testid="new-drug-name" value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} />
-        <SelectField label="Form" options={["Oral", "Topical", "Injection"]} value={d.form} onChange={(v) => setD({ ...d, form: v })} testid="new-drug-form" />
+        <SelectField label="Form" options={["Oral", "Topical", "Injection", "Injectable", "Supportive"]} value={d.form} onChange={(v) => setD({ ...d, form: v })} testid="new-drug-form" />
         <TextField label="Strength" testid="new-drug-strength" value={d.strength} onChange={(e) => setD({ ...d, strength: e.target.value })} />
+        <TextField label="Dosage" testid="new-drug-dosage" value={d.dosage} onChange={(e) => setD({ ...d, dosage: e.target.value })} placeholder="e.g. 400 mg" />
+        <SelectField label="Frequency" options={DRUG_FREQUENCIES} value={d.frequency} onChange={(v) => setD({ ...d, frequency: v })} testid="new-drug-frequency" />
+        <Field label="Duration">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
+            <Input
+              className="h-12 bg-white text-base"
+              placeholder="e.g. 1"
+              data-testid="new-drug-duration"
+              value={d.duration}
+              onChange={(e) => setD({ ...d, duration: e.target.value })}
+            />
+            <Select value={d.durationUnit || undefined} onValueChange={(v) => setD({ ...d, durationUnit: v })}>
+              <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid="new-drug-duration-unit">
+                <SelectValue placeholder="Unit" />
+              </SelectTrigger>
+              <SelectContent>
+                {DRUG_DURATION_UNITS.map((o) => (
+                  <SelectItem key={o} value={o} className="text-base">{o}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </Field>
       </div>
       <Button
         className="h-12"
         data-testid="add-drug-btn"
         onClick={() => {
           if (!d.name.trim()) return toast.error("Drug name is required");
-          s.addDrug({ name: d.name.trim(), form: d.form, strength: d.strength });
-          setD({ name: "", form: "Oral", strength: "" });
+          s.addDrug({
+            name: d.name.trim(),
+            form: d.form,
+            strength: d.strength,
+            dosage: d.dosage.trim(),
+            frequency: d.frequency,
+            duration: d.duration,
+            durationUnit: d.durationUnit,
+          });
+          setD({ name: "", form: "Oral", strength: "", dosage: "", frequency: "", duration: "", durationUnit: "Day(s)" });
           toast.success("Drug added to the catalogue");
         }}
       >
         <Plus className="mr-2 h-4 w-4" /> Add drug
       </Button>
       <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full min-w-[560px] text-sm" data-testid="drug-table">
+        <table className="w-full min-w-[720px] text-sm" data-testid="drug-table">
           <thead className="bg-muted">
-            <tr>{["Drug", "Form", "Strength", ""].map((h) => (<th key={h} className="p-3 text-left font-semibold">{h}</th>))}</tr>
+            <tr>{["Drug", "Form", "Strength", "Dosage", "Frequency", "Duration", ""].map((h) => (<th key={h} className="p-3 text-left font-semibold">{h}</th>))}</tr>
           </thead>
           <tbody>
             {s.settings.drugs.map((x) => (
@@ -392,6 +423,9 @@ const DrugsMaster = ({ s }) => {
                 <td className="p-3 font-semibold">{x.name}</td>
                 <td className="p-3">{x.form}</td>
                 <td className="p-3">{x.strength}</td>
+                <td className="p-3">{x.dosage || "—"}</td>
+                <td className="p-3">{x.frequency || "—"}</td>
+                <td className="p-3">{[x.duration, x.durationUnit].filter((v) => v !== "" && v != null).join(" ") || "—"}</td>
                 <td className="p-3">
                   <Button
                     variant="ghost"
