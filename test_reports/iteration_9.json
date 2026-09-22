@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only end-to-end test of the new Ante Natal (ANC) module for TRIAS Skin & NTD. All 11 review items passed in a single browser session on Chromium 1400x1000. Login as admin@trias.health lands on /patients. Opening PNG0000002 (Grace Waim) and clicking the Encounter button opens the Add encounter dialog (data-testid=add-encounter-dialog). After selecting Visit Type (Initial encounter), Facility (Bilbil Health Centre) and Go to = 'Ante Natal' (all three exposed as Radix Select triggers), Start navigates to /patients/PNG0000002/antenatal?fac=...&vt=...&ref=No. On the entry view, section 1 LMP (data-testid=anc-lmp) is a direct <input type=date>; setting it to 2026-06-15 auto-populated the dating panel (data-testid=anc-dating-panel) with From LMP GA 14w 0d, EDD 22-Mar-2027, and the Final card (data-testid=anc-dating-final) showed GA 14w 0d, EDD 22-Mar-2027, Second trimester. Section 3 mother vitals sliders (data-testid=anc-mv-systolic-slider with role=slider thumb) responded to ArrowRight and the display anc-mv-systolic updated to 125 mmHg with the 'normal 90-139' colour band. Section 4 Laboratory: typing 'Hb' in anc-lab-search revealed suggestion button anc-lab-opt-haemoglobin-hb-; clicking it added anc-lab-row-0 with anc-lab-result-0/location-0/date-0, and setting a Result via the popover persisted (Haemoglobin (Hb) Normal · Bedside). Section 9: Add baby created anc-baby-0 with sex/weight/length/apgar fields and Live birth default; after selecting Female, weight 3.2, Register baby button turned into 'Registered · PNG0000007'. Save & close navigated to /patients/PNG0000002?tab=antenatal and rendered anc-dashboard containing anc-dash-dating (GA 14w 0d, EDD 22-Mar-2027, 1 visit, T1 0 · T2 1 · T3 0), 'ANC visits by trimester' card (visit in Second trimester), Vitals table (BP Systolic 120), Laboratory card (Haemoglobin (Hb)), and Immunization/Delivery cards. Edit round-trip via anc-visit-chip-ENC-772475 reopened the entry view at /patients/PNG0000002/antenatal?enc=ENC-772475 with LMP retained (2026-06-15) and anc-lab-row-0 still present. The registered baby 'Baby of Grace Waim' (PNG0000007, Female, 3.2kg, DOB 21-Sep-2026, Bilbil, Madang District) appeared as a top row in /patients. No console errors during flow (only a benign Radix DialogContent aria-describedby warning).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Add encounter dialog", "issues": ["Radix DialogContent is missing Description/aria-describedby, causing a console warning. Purely a11y hygiene."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "anc-final-edd data-testid only mounts when Final Dating Source = Manual; once LMP is filled the source auto-switches to LMP and the anc-final-edd node disappears. Not a bug (EDD is still shown inside anc-dating-final), but if the review checklist expects anc-final-edd to always be present the source selector default may need revisiting.",
+    "New encounter ids use the safe 'ENC-<random>' pattern (fix from iteration 8 still in place) — reopen via ?enc=ENC-772475 works correctly and marks/labs/LMP persist."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (11/11 review items)"},
+  "test_credentials": "admin@trias.health / Admin@123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None — all data written to browser localStorage 'trias.state.v1' during the run (Grace Waim ANC encounter ENC-772475 and baby PNG0000007).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "ANC entry route: /patients/:id/antenatal?fac=<facility>&vt=<visitType>&ref=No|Yes. Reopen: /patients/:id/antenatal?enc=<encId>. Dashboard tab: /patients/:id?tab=antenatal (tab-antenatal appears only after at least one ANC encounter is saved). Key testids: anc-lmp (direct <input type=date>), anc-dating-panel/anc-dating-lmp/anc-dating-scan/anc-dating-final, anc-final-source (Radix Select, Manual/LMP/Scan), anc-final-edd (input, only visible when source=Manual), anc-mv-<field>-slider containing [role=slider] thumbs (ArrowLeft/Right to change), anc-lab-search -> suggestion buttons anc-lab-opt-<slug>, added rows anc-lab-row-N with anc-lab-result-N/location-N/date-N, anc-add-baby -> anc-baby-N with sex/weight/length/apgar1/apgar5/outcome + anc-baby-register-N, anc-save-btn / anc-save-close-btn. Dashboard testids: anc-dashboard, anc-dash-dating, anc-visit-chip-<encId>, anc-dash-vac-<code>. Single-run testing required because localStorage does not persist across browser_automation invocations."
+}

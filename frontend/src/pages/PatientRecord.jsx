@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Fragment, useLayoutEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,19 @@ import { formatDosePhysical, physicalUnits, hideVisitPosology } from "@/lib/medi
 import { AdherenceGrid, HouseholdCountTable, normalizeLepOccasion, LeprosyAdherenceDashboard } from "@/components/FormRenderer";
 import LeprosyHouseholdMonitoring from "@/components/LeprosyHouseholdMonitoring";
 import { REACTION_COLS, REACTION_GRID } from "@/components/LeprosyReaction";
+import AntenatalDashboard from "@/components/AntenatalDashboard";
+import WellBabyDashboard from "@/components/WellBabyDashboard";
+import MalnutritionDashboard from "@/components/MalnutritionDashboard";
+import { ANTENATAL_ID, ANTENATAL_NAME } from "@/mock/antenatal";
+import { WELLBABY_ID, WELLBABY_NAME } from "@/mock/wellbaby";
+import { MAL_ID, MAL_NAME } from "@/mock/malnutrition";
+
+const EXTRA_CONDITIONS = [
+  { id: ANTENATAL_ID, name: ANTENATAL_NAME, route: "antenatal" },
+  { id: WELLBABY_ID, name: WELLBABY_NAME, route: "wellbaby" },
+  { id: MAL_ID, name: MAL_NAME, route: "malnutrition" },
+];
+const EXTRA_IDS = EXTRA_CONDITIONS.map((c) => c.id);
 
 const FEATURES = [
   ["caseDetails", "Case details"], ["history", "Clinical history"], ["marks", "Examination"],
@@ -1112,9 +1125,10 @@ const UnfoldLessIcon = ({ className = "h-5 w-5" }) => (
 export default function PatientRecord() {
   const { id, diseaseId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { patients, encounters, user, suspects, facilities, settings } = useStore();
   const p = patients.find((x) => x.id === id);
-  const [tab, setTab] = useState(() => diseaseId || "");
+  const [tab, setTab] = useState(searchParams.get("tab") || "");
   const [lhs, setLhs] = useState(true);
   const [featureOpen, setFeatureOpen] = useState(() => Object.fromEntries(FEATURES.map(([k]) => [k, true])));
   const [enc, setEnc] = useState({ show: false, facility: "", date: localISODate(), visitType: "", referral: "No", disease: "", province: "", district: "", prevFacility: "" });
@@ -1134,34 +1148,20 @@ export default function PatientRecord() {
   const encs = useMemo(() => encounters.filter((e) => e.patientId === id).sort((a, b) => b.date.localeCompare(a.date)), [encounters, id]);
   const mySuspects = useMemo(() => suspects.filter((s) => s.patientId === id).sort((a, b) => b.date.localeCompare(a.date)), [suspects, id]);
   const myDiseases = useMemo(() => assessmentSpecs(id, { encounters: encs }), [id, encs]);
+  const presentExtras = useMemo(() => EXTRA_CONDITIONS.filter((c) => encs.some((e) => e.disease === c.id)), [encs]);
+  const isExtra = (t) => presentExtras.some((c) => c.id === t);
+  const sidebarDiseases = useMemo(() => [...myDiseases, ...presentExtras.map((c) => ({ id: c.id, name: c.name }))], [myDiseases, presentExtras]);
   const hasSuspects = mySuspects.length > 0;
   const activeTab =
     tab === "suspect" && hasSuspects
       ? "suspect"
-      : myDiseases.some((d) => d.id === tab)
+      : isExtra(tab)
         ? tab
-        : diseaseId && myDiseases.some((d) => d.id === diseaseId)
-          ? diseaseId
+        : myDiseases.some((d) => d.id === tab)
+          ? tab
           : hasSuspects
             ? "suspect"
-            : myDiseases[0]?.id || "";
-
-  useEffect(() => {
-    if (!diseaseId) return;
-    if (diseaseId === "suspect" && hasSuspects) {
-      setTab("suspect");
-      return;
-    }
-    if (myDiseases.some((d) => d.id === diseaseId)) setTab(diseaseId);
-  }, [diseaseId, hasSuspects, myDiseases]);
-
-  const selectTab = (k) => {
-    setTab(k);
-    if (!p?.id) return;
-    if (k === "suspect") navigate(`/patients/${p.id}`, { replace: true });
-    else navigate(`/patients/${p.id}/disease/${k}`, { replace: true });
-  };
-
+            : myDiseases[0]?.id || presentExtras[0]?.id || "";
   const episodesByDisease = useMemo(() => {
     const map = {};
     for (const d of myDiseases) map[d.id] = groupDiseaseEpisodes(encs, d.id, p?.episodeId);
@@ -1192,7 +1192,13 @@ export default function PatientRecord() {
     if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
     const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}&new=${Date.now()}`;
     setEnc({ ...enc, show: false });
-    navigate(enc.disease ? `/patients/${p.id}/encounter/${enc.disease}?${q}` : `/patients/${p.id}/suspect?${q}`);
+    const path =
+      EXTRA_IDS.includes(enc.disease)
+        ? `/patients/${p.id}/${EXTRA_CONDITIONS.find((c) => c.id === enc.disease).route}?${q}`
+        : enc.disease
+          ? `/patients/${p.id}/encounter/${enc.disease}?${q}`
+          : `/patients/${p.id}/suspect?${q}`;
+    navigate(path);
   };
 
   const openFeatureEncounter = (visit, featureKey) => {
@@ -1207,7 +1213,7 @@ export default function PatientRecord() {
     navigate(`/patients/${p.id}/encounter/${disease}?enc=${encodeURIComponent(target.id)}&section=${section}`);
   };
 
-  const tabs = [...(hasSuspects ? [["suspect", "Suspect"]] : []), ...myDiseases.map((d) => [d.id, d.name])];
+  const tabs = [...(hasSuspects ? [["suspect", "Suspect"]] : []), ...myDiseases.map((d) => [d.id, d.name]), ...presentExtras.map((c) => [c.id, c.name])];
   const allExpanded = featureRows.length > 0 && featureRows.every((f) => featureOpen[f.k] !== false);
   const referralDistricts = enc.province ? Object.keys(GEO[enc.province] || {}) : [];
   const locationOptions = facilities
@@ -1222,7 +1228,7 @@ export default function PatientRecord() {
 
   const actions = (
     <div className="flex shrink-0 flex-wrap justify-end gap-2" data-testid="record-actions">
-      <Button className="h-11" data-testid="add-encounter-btn" disabled={!canEdit} onClick={() => setEnc({ ...enc, show: true, disease: activeTab !== "suspect" && DISEASE_SPECS[activeTab] ? activeTab : "" })}>
+      <Button className="h-11" data-testid="add-encounter-btn" disabled={!canEdit} onClick={() => setEnc({ ...enc, show: true, disease: DISEASE_SPECS[activeTab] ? activeTab : EXTRA_IDS.includes(activeTab) ? activeTab : "" })}>
         <Plus className="h-4 w-4" /> Encounter
       </Button>
       {p.phone && (
@@ -1258,7 +1264,7 @@ export default function PatientRecord() {
           <PatientSidebar
             patient={p}
             encounters={encs}
-            diseases={myDiseases}
+            diseases={sidebarDiseases}
             onCollapse={() => setLhs(false)}
             onEdit={canEdit ? () => navigate(`/patients/${p.id}/edit`) : undefined}
             testid="lhs-panel"
@@ -1280,7 +1286,7 @@ export default function PatientRecord() {
             )}
             <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto" data-testid="record-tabs">
               {tabs.map(([k, label]) => {
-                if (k === "suspect") {
+                if (k === "suspect" || EXTRA_IDS.includes(k)) {
                   return (
                     <button key={k} data-testid={`tab-${k}`} onClick={() => selectTab(k)}
                       className={`h-11 shrink-0 rounded-md border px-4 text-sm font-semibold ${activeTab === k ? "border-primary bg-primary text-white" : "border-border bg-white text-muted-foreground hover:bg-muted"}`}>{label}</button>
@@ -1349,10 +1355,39 @@ export default function PatientRecord() {
 
           {!canEdit && <div className="mb-4"><AlertPanel level="review" title="View-only access" testid="readonly-alert">Your access level allows viewing this record but not editing.</AlertPanel></div>}
 
-          {!hasSuspects && myDiseases.length === 0 && (
+          {!hasSuspects && myDiseases.length === 0 && presentExtras.length === 0 && (
             <AlertPanel level="info" title="No encounters yet" testid="no-encounters">
               Click Encounter to start suspect screening, then continue with the procedure.
             </AlertPanel>
+          )}
+
+          {activeTab === ANTENATAL_ID && isExtra(ANTENATAL_ID) && (
+            <AntenatalDashboard
+              patient={p}
+              encounters={encs}
+              canEdit={canEdit}
+              onEdit={(v) => navigate(`/patients/${p.id}/antenatal?enc=${encodeURIComponent(v.id)}`)}
+              onAddVisit={() => setEnc({ ...enc, show: true, disease: ANTENATAL_ID })}
+            />
+          )}
+          {activeTab === WELLBABY_ID && isExtra(WELLBABY_ID) && (
+            <WellBabyDashboard
+              patient={p}
+              encounters={encs}
+              settings={settings}
+              canEdit={canEdit}
+              onEdit={(v) => navigate(`/patients/${p.id}/wellbaby?enc=${encodeURIComponent(v.id)}`)}
+              onAddVisit={() => setEnc({ ...enc, show: true, disease: WELLBABY_ID })}
+            />
+          )}
+          {activeTab === MAL_ID && isExtra(MAL_ID) && (
+            <MalnutritionDashboard
+              patient={p}
+              encounters={encs}
+              canEdit={canEdit}
+              onEdit={(v) => navigate(`/patients/${p.id}/malnutrition?enc=${encodeURIComponent(v.id)}`)}
+              onAddVisit={() => setEnc({ ...enc, show: true, disease: MAL_ID })}
+            />
           )}
 
           {activeTab === "suspect" && hasSuspects && (
@@ -1713,9 +1748,9 @@ export default function PatientRecord() {
               testid="encounter-facility-select"
               hint={enc.referral === "Yes" && !enc.district ? "Select province and district to see referral locations" : enc.referral === "Yes" && locationOptions.length === 0 ? "No facilities listed for this district" : undefined}
             />
-            <SelectField label="Go to" options={["Suspect screening", ...SPEC_LIST.map((s) => s.name)]}
-              value={enc.disease && DISEASE_SPECS[enc.disease] ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
-              onChange={(v) => setEnc({ ...enc, disease: SPEC_LIST.find((s) => s.name === v)?.id || "" })} testid="encounter-target-select" />
+            <SelectField label="Go to" options={["Suspect screening", ...SPEC_LIST.map((s) => s.name), ...EXTRA_CONDITIONS.map((c) => c.name)]}
+              value={EXTRA_IDS.includes(enc.disease) ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease).name : enc.disease && DISEASE_SPECS[enc.disease] ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
+              onChange={(v) => setEnc({ ...enc, disease: EXTRA_CONDITIONS.find((c) => c.name === v)?.id || SPEC_LIST.find((s) => s.name === v)?.id || "" })} testid="encounter-target-select" />
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" className="h-12" data-testid="encounter-cancel" onClick={() => setEnc({ ...enc, show: false })}>Cancel</Button>

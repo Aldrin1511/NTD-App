@@ -116,3 +116,41 @@ Source: client's "TRIAS Skin and NTD App - Final.docx".
 1. Client review of this prototype and design sign-off
 2. On go-ahead: backend + auth integration, then wire the wizard to persisted encounters
 3. Replace localStorage with IndexedDB sync engine
+
+---
+
+## Phase 1 — Ante Natal (added Jun 2026)
+New Patient-record condition **Ante Natal**, built to mirror existing NTD conditions with an entry view + dashboard view, stored in localStorage (disease `antenatal`), kept separate from the DISEASE_SPECS NTD pipeline.
+
+**Implemented & tested (frontend 11/11 passed, iteration_9):**
+- Entry view `pages/AntenatalEncounter.jsx` — collapsible sections: Case details (LMP/scan → auto GA & EDD, 3 sources: LMP/Scan/Final-manual), History, Vitals (mother + fetal via sliders/chips with green/amber/red status), Laboratory (searchable test list, result + bedside/Lab location + send-to-lab), Radiology, Drugs (standard + from drug list), Immunization (TT schedule, overdue=red, mark given), Visit notes, Delivery & new born (add baby for twins → "Register baby" creates patient "Baby of <mother>" / "Baby N of..."), Outcome (closes episode).
+- Dashboard view `components/AntenatalDashboard.jsx` — episode selector, GA/EDD panel, ANC visits by trimester, and per-feature summary cards (vitals table, labs, radiology, drugs, immunization, delivery/babies, notes, outcome). Edit round-trip works.
+- Config/helpers `mock/antenatal.js`; store `registerBaby`; route `/patients/:id/antenatal`; PatientRecord tab + "Go to" option; maternal drugs/vaccines added to drug list.
+
+**Backlog (next phases, awaiting user command):**
+- P1: Well Baby (growth chart WHO/CDC/IAP, immunization, gross-motor milestones, drugs/labs by age)
+- P1: Malnutrition (case details, 12-week monitoring, red/amber/green alerts, outcome)
+- P1: School Health (new top-level tab, per-child exams, PDF report)
+- P1: Admin Masters (Immunization schedule editor, Lab master, Feature config per condition)
+- Note: baby birth details are stored on the registered baby (`deliveryDetails`) for Well Baby auto-populate later.
+
+---
+
+## Phase 2 — Well Baby, Malnutrition, School Health, Admin Masters (added Jun 2026)
+All built to match established patterns (entry + dashboard, localStorage, representative WHO/CDC/IAP curves, browser print-to-PDF). Verified 100% by testing agent (iteration_10) after fixing a routing bug (extras must route via EXTRA_IDS, not derived isExtra).
+
+**Well Baby** (`pages/WellBabyEncounter.jsx`, `components/WellBabyDashboard.jsx`, `mock/wellbaby.js`)
+- Delivery/newborn (auto from registered baby), Chief complaints & Allergy (chips + free text), Growth chart (slider entry with live percentile/SD/colour + WHO/CDC/IAP + Percentile/SD toggle), Immunization (EPI schedule from Masters, overdue=red, mark given), Gross motor milestones (WHO windows, delayed=red), Visit notes, Drugs, Laboratory. Dashboard: growth table + graph, immunization, milestones.
+
+**Growth engine** (`mock/growth.js`, `components/GrowthChart.jsx`) — representative median+SD anchor tables birth→18y, z-score/percentile, colour bands, GrowthEntry + GrowthReview (recharts).
+
+**Malnutrition** (`pages/MalnutritionEncounter.jsx`, `components/MalnutritionDashboard.jsx`, `mock/malnutrition.js`)
+- Case details (case type, admission type MAM/SAM/Others, auto age/gender/case-no per facility), Anthropometry (sliders + WFA/WFH/HFA indices), danger signs, history, physical, routine meds + RUTF, live red/amber/green alert. Dashboard: 12-week monitoring table (add weeks), progress graph (weight/target/MUAC), outcome.
+
+**School Health** (new top-level nav) (`pages/SchoolHealth.jsx`, `mock/schoolhealth.js`)
+- Visit cards (province/district/village/school/donor/status/#M-F/conducted/date), per-child screening (demographics + vitals status, physical exam list, TT/PigBel/BCG immunization, referral), edit per child (partial data retained), Create/Edit report → print-to-PDF (window.print).
+
+**Admin Masters** (`pages/Admin.jsx`, `mock/masters.js`)
+- Immunization schedule editor (build from vaccine drug list, add/delete), Lab master (tests + result options + default Bedside/Lab location), per-condition Feature config (enable, reorder, print-in-summary). Stored in settings; store deep-merges settings on load.
+
+**Store additions**: registerBaby, immunization-schedule/lab/feature-config actions, schoolHealth array + actions.

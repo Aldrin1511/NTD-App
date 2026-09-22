@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { GEO, DISEASES, DRUG_FREQUENCIES, DRUG_DURATION_UNITS } from "@/mock/data";
 import { DISEASE_SPECS, SPEC_LIST } from "@/mock/specs";
 import { COMPARE_OPS, formatRegimenAge, formatRegimenWeight, isRegimenActive } from "@/lib/medications";
+import { CONDITION_LABELS } from "@/mock/masters";
 import { scrollViewToTop } from "@/lib/scroll";
 import { toast } from "sonner";
 import { UserPlus, Trash2, Plus, KeyRound, Building2, Users, Library } from "lucide-react";
@@ -31,6 +32,9 @@ const TABS = [
 const MASTER_TABS = [
   { id: "drugs", label: "Drugs" },
   { id: "regiment", label: "Regiment" },
+  { id: "immunization", label: "Immunization schedule" },
+  { id: "labmaster", label: "Lab master" },
+  { id: "features", label: "Feature config" },
   { id: "symptoms", label: "Symptoms" },
   { id: "visits", label: "Visit type" },
   { id: "rules", label: "Programme rules" },
@@ -92,6 +96,9 @@ export default function Admin() {
           </div>
           {master === "drugs" && <DrugsMaster s={s} />}
           {master === "regiment" && <RegimentMaster s={s} />}
+          {master === "immunization" && <ImmunizationMaster s={s} />}
+          {master === "labmaster" && <LabMaster s={s} />}
+          {master === "features" && <FeatureConfigMaster s={s} />}
           {master === "symptoms" && <SymptomsMaster s={s} />}
           {master === "visits" && <VisitTypeMaster s={s} />}
           {master === "rules" && <RulesMaster s={s} />}
@@ -695,6 +702,149 @@ const RulesMaster = ({ s }) => {
         A patient with no new encounter this many days after their treatment end date is tagged “Lost to follow-up” in the
         patient list and MIS, using the threshold of their most recent disease record.
       </AlertPanel>
+    </SectionCard>
+  );
+};
+
+
+/* ---------------- Immunization schedule master ---------------- */
+const ImmunizationMaster = ({ s }) => {
+  const schedules = s.settings.immunizationSchedules || [];
+  const vaccineList = (s.settings.drugs || []).filter((d) => d.type === "Vaccine" || d.form === "Vaccine");
+  const [sel, setSel] = useState(schedules[0]?.id || "");
+  const current = schedules.find((x) => x.id === sel) || schedules[0];
+  const [nf, setNf] = useState({ name: "", condition: "wellbaby" });
+  const [vacName, setVacName] = useState("");
+
+  const addSchedule = () => {
+    if (!nf.name) return toast.error("Schedule name required");
+    s.addImmunizationSchedule({ name: nf.name, condition: nf.condition, vaccines: [] });
+    setNf({ name: "", condition: "wellbaby" });
+    toast.success("Schedule added");
+  };
+  const addVaccine = () => {
+    if (!current || !vacName) return;
+    const id = vacName.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + Math.floor(Math.random() * 1000);
+    s.updateImmunizationSchedule(current.id, { vaccines: [...(current.vaccines || []), { id, name: vacName, offsetDays: 0, note: "" }] });
+    setVacName("");
+  };
+  const updVac = (vid, patch) => s.updateImmunizationSchedule(current.id, { vaccines: current.vaccines.map((v) => (v.id === vid ? { ...v, ...patch } : v)) });
+  const rmVac = (vid) => s.updateImmunizationSchedule(current.id, { vaccines: current.vaccines.filter((v) => v.id !== vid) });
+
+  return (
+    <SectionCard title="Immunization schedule" desc="Build schedules from the vaccine list (drug type = Vaccine). Used by Well Baby & Ante Natal." right={<Badge variant="outline" className="rounded" data-testid="imm-count">{schedules.length} schedules</Badge>}>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,220px)_1fr]">
+        <TextField label="New schedule name" value={nf.name} onChange={(e) => setNf({ ...nf, name: e.target.value })} testid="imm-new-name" />
+        <div className="flex items-end gap-2">
+          <SelectField label="Condition" options={Object.keys(CONDITION_LABELS).map((k) => CONDITION_LABELS[k])} value={CONDITION_LABELS[nf.condition]} onChange={(v) => setNf({ ...nf, condition: Object.keys(CONDITION_LABELS).find((k) => CONDITION_LABELS[k] === v) })} testid="imm-new-condition" />
+          <Button className="h-11" onClick={addSchedule} data-testid="imm-add-schedule"><Plus className="mr-1 h-4 w-4" /> Add</Button>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {schedules.map((sc) => (
+          <button key={sc.id} type="button" data-testid={`imm-sel-${sc.id}`} onClick={() => setSel(sc.id)} className={`flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${current?.id === sc.id ? "border-primary bg-primary text-white" : "border-border bg-white"}`}>
+            {sc.name} <span className="opacity-70">({CONDITION_LABELS[sc.condition] || sc.condition})</span>
+            <Trash2 className="h-3.5 w-3.5" onClick={(e) => { e.stopPropagation(); s.removeImmunizationSchedule(sc.id); setSel(""); }} />
+          </button>
+        ))}
+      </div>
+
+      {current && (
+        <div className="mt-4 space-y-2" data-testid="imm-vaccines">
+          <div className="flex items-end gap-2">
+            {vaccineList.length > 0 ? (
+              <SelectField label="Add vaccine from list" options={vaccineList.map((v) => v.name)} value={vacName} onChange={setVacName} testid="imm-vac-select" />
+            ) : (
+              <TextField label="Vaccine name" value={vacName} onChange={(e) => setVacName(e.target.value)} testid="imm-vac-name" />
+            )}
+            <Button className="h-11" onClick={addVaccine} data-testid="imm-add-vaccine"><Plus className="mr-1 h-4 w-4" /> Add vaccine</Button>
+          </div>
+          {(current.vaccines || []).map((v) => (
+            <div key={v.id} className="grid grid-cols-[1fr_120px_1fr_40px] items-center gap-2 rounded-md border border-border bg-white p-2" data-testid={`imm-vac-${v.id}`}>
+              <span className="text-sm font-semibold">{v.name}</span>
+              <TextField label="" type="number" value={v.offsetDays} onChange={(e) => updVac(v.id, { offsetDays: Number(e.target.value) })} hint="days from birth/contact" />
+              <TextField label="" value={v.note} onChange={(e) => updVac(v.id, { note: e.target.value })} placeholder="note" />
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600" onClick={() => rmVac(v.id)} data-testid={`imm-vac-remove-${v.id}`}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+};
+
+/* ---------------- Lab master ---------------- */
+const LabMaster = ({ s }) => {
+  const tests = s.settings.labMaster || [];
+  const facilityHasLab = (s.facilities || []).some((f) => f.hasLab);
+  const [t, setT] = useState({ name: "", results: "", location: "Bedside" });
+  const add = () => {
+    if (!t.name) return toast.error("Test name required");
+    s.addLabTest({ name: t.name, results: t.results.split(",").map((x) => x.trim()).filter(Boolean), location: t.location });
+    setT({ name: "", results: "", location: "Bedside" });
+    toast.success("Test added");
+  };
+  return (
+    <SectionCard title="Lab master" desc="Standard lab tests with result options and default location. Bedside is the default; Lab is available when a facility has a lab." right={<Badge variant="outline" className="rounded" data-testid="lab-count">{tests.length} tests</Badge>}>
+      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_150px_auto]">
+        <TextField label="Test name" value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} testid="lab-new-name" />
+        <TextField label="Result options (comma separated)" value={t.results} onChange={(e) => setT({ ...t, results: e.target.value })} testid="lab-new-results" />
+        <SelectField label="Default location" options={facilityHasLab ? ["Bedside", "Lab"] : ["Bedside"]} value={t.location} onChange={(v) => setT({ ...t, location: v })} testid="lab-new-location" />
+        <div className="flex items-end"><Button className="h-11" onClick={add} data-testid="lab-add"><Plus className="mr-1 h-4 w-4" /> Add</Button></div>
+      </div>
+      <div className="mt-4 space-y-2" data-testid="lab-list">
+        {tests.map((test) => (
+          <div key={test.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-white p-3" data-testid={`lab-row-${test.id}`}>
+            <div><p className="font-semibold">{test.name}</p><p className="text-xs text-muted-foreground">{(test.results || []).join(" · ") || "free text result"} · default {test.location}</p></div>
+            <div className="flex items-center gap-2">
+              <SelectField label="" options={facilityHasLab ? ["Bedside", "Lab"] : ["Bedside"]} value={test.location} onChange={(v) => s.updateLabTest(test.id, { location: v })} testid={`lab-loc-${test.id}`} />
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-red-600" onClick={() => s.removeLabTest(test.id)} data-testid={`lab-remove-${test.id}`}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </SectionCard>
+  );
+};
+
+/* ---------------- Feature config master ---------------- */
+const FeatureConfigMaster = ({ s }) => {
+  const config = s.settings.featureConfig || {};
+  const conditions = Object.keys(CONDITION_LABELS);
+  const [cond, setCond] = useState(conditions[0]);
+  const features = [...(config[cond] || [])].sort((a, b) => a.order - b.order);
+
+  const save = (next) => s.setFeatureConfig(cond, next);
+  const move = (i, dir) => {
+    const arr = [...features];
+    const j = i + dir;
+    if (j < 0 || j >= arr.length) return;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    save(arr.map((f, idx) => ({ ...f, order: idx })));
+  };
+  const toggle = (key, field) => save(features.map((f) => (f.key === key ? { ...f, [field]: !f[field] } : f)));
+
+  return (
+    <SectionCard title="Feature configuration" desc="Choose which features appear for each condition, their sequence, and whether they print in the summary.">
+      <div className="mb-4 flex flex-wrap gap-2">
+        {conditions.map((c) => (
+          <button key={c} type="button" data-testid={`feat-cond-${c}`} onClick={() => setCond(c)} className={`h-10 rounded-md border px-4 text-sm font-semibold ${cond === c ? "border-primary bg-primary text-white" : "border-border bg-white"}`}>{CONDITION_LABELS[c]}</button>
+        ))}
+      </div>
+      <div className="space-y-2" data-testid="feat-list">
+        {features.map((f, i) => (
+          <div key={f.key} className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-white p-3" data-testid={`feat-row-${f.key}`}>
+            <div className="flex flex-col">
+              <button type="button" className="text-muted-foreground hover:text-primary" onClick={() => move(i, -1)} data-testid={`feat-up-${f.key}`}>▲</button>
+              <button type="button" className="text-muted-foreground hover:text-primary" onClick={() => move(i, 1)} data-testid={`feat-down-${f.key}`}>▼</button>
+            </div>
+            <span className="min-w-0 flex-1 font-semibold">{f.label}</span>
+            <label className="flex items-center gap-2 text-sm"><Switch checked={f.enabled !== false} onCheckedChange={() => toggle(f.key, "enabled")} data-testid={`feat-enabled-${f.key}`} /> Enabled</label>
+            <label className="flex items-center gap-2 text-sm"><Switch checked={!!f.print} onCheckedChange={() => toggle(f.key, "print")} data-testid={`feat-print-${f.key}`} /> Print in summary</label>
+          </div>
+        ))}
+      </div>
     </SectionCard>
   );
 };
