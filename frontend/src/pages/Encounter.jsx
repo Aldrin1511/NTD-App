@@ -916,6 +916,7 @@ export default function Encounter() {
                 type="button"
                 className="h-12"
                 data-testid="leprosy-cured-exam-btn"
+                disabled={(examRounds || []).some((r, idx, all) => lepExamOccasion(r, idx, all) === "Upon Completion (RFT)")}
                 onClick={() => openLeprosyExam("Upon Completion (RFT)")}
               >
                 <Stethoscope className="mr-2 h-4 w-4" /> Conduct Leprosy examination (assessment)
