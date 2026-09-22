@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
@@ -1128,7 +1128,7 @@ export default function PatientRecord() {
   const [searchParams] = useSearchParams();
   const { patients, encounters, user, suspects, facilities, settings } = useStore();
   const p = patients.find((x) => x.id === id);
-  const [tab, setTab] = useState(searchParams.get("tab") || "");
+  const [tab, setTab] = useState(() => diseaseId || searchParams.get("tab") || "");
   const [lhs, setLhs] = useState(true);
   const [featureOpen, setFeatureOpen] = useState(() => Object.fromEntries(FEATURES.map(([k]) => [k, true])));
   const [enc, setEnc] = useState({ show: false, facility: "", date: localISODate(), visitType: "", referral: "No", disease: "", province: "", district: "", prevFacility: "" });
@@ -1159,9 +1159,28 @@ export default function PatientRecord() {
         ? tab
         : myDiseases.some((d) => d.id === tab)
           ? tab
-          : hasSuspects
-            ? "suspect"
-            : myDiseases[0]?.id || presentExtras[0]?.id || "";
+          : diseaseId && (myDiseases.some((d) => d.id === diseaseId) || isExtra(diseaseId))
+            ? diseaseId
+            : hasSuspects
+              ? "suspect"
+              : myDiseases[0]?.id || presentExtras[0]?.id || "";
+
+  useEffect(() => {
+    if (!diseaseId) return;
+    if (diseaseId === "suspect" && hasSuspects) {
+      setTab("suspect");
+      return;
+    }
+    if (myDiseases.some((d) => d.id === diseaseId) || isExtra(diseaseId)) setTab(diseaseId);
+  }, [diseaseId, hasSuspects, myDiseases, presentExtras]);
+
+  const selectTab = (k) => {
+    setTab(k);
+    if (!p?.id) return;
+    if (k === "suspect") navigate(`/patients/${p.id}`, { replace: true });
+    else navigate(`/patients/${p.id}/disease/${k}`, { replace: true });
+  };
+
   const episodesByDisease = useMemo(() => {
     const map = {};
     for (const d of myDiseases) map[d.id] = groupDiseaseEpisodes(encs, d.id, p?.episodeId);
