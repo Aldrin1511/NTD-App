@@ -1,4 +1,4 @@
-#!/Users/aldrinimmanuvel/Repos/ntd-app/backend/venv/bin/python3.12
+#!/Users/vishnu/Downloads/ntd/NTD-App/backend/venv/bin/python3
 
 import sys
 import json
