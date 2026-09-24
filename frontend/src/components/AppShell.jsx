@@ -10,7 +10,6 @@ import {
   LogOut,
   Download,
   CalendarDays,
-  School,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -20,7 +19,6 @@ const nav = [
   // MIS hidden for now — re-enable when ready: { to: "/dashboard", label: "MIS", icon: LayoutDashboard, testid: "nav-dashboard" },
   { to: "/patients", label: "Patients", icon: Users, testid: "nav-patients" },
   { to: "/appointments", label: "Appointments", icon: CalendarDays, testid: "nav-appointments" },
-  { to: "/school-health", label: "School Health", icon: School, testid: "nav-school-health" },
   { to: "/sync", label: "Sync", icon: RefreshCw, testid: "nav-sync" },
   { to: "/admin", label: "Admin", icon: Shield, testid: "nav-admin" },
 ];

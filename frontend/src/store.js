@@ -23,7 +23,6 @@ const initial = () => ({
     { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "STAT", durationUnit: "BOLUS", drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
     { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "STAT", duration: 1, durationUnit: "Day(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
-  schoolHealth: [],
   currentUserId: null,
   branding: {
     clientName: "PNG National NTD Programme",
@@ -41,7 +40,6 @@ const load = () => {
       const saved = JSON.parse(raw);
       const merged = { ...initial(), ...saved };
       merged.settings = { ...initial().settings, ...(saved.settings || {}) };
-      if (!Array.isArray(merged.schoolHealth)) merged.schoolHealth = [];
       const have = new Set((merged.encounters || []).map((e) => e.id));
       const extra = ENCOUNTERS.filter((e) => !have.has(e.id));
       if (extra.length) merged.encounters = [...(merged.encounters || []), ...extra];
@@ -178,29 +176,6 @@ export function StoreProvider({ children }) {
       // ---- Masters: per-condition feature config ----
       setFeatureConfig: (condition, features) =>
         patch((s) => ({ settings: { ...s.settings, featureConfig: { ...(s.settings.featureConfig || {}), [condition]: features } } })),
-      // ---- School Health ----
-      addSchoolVisit: (v) => {
-        const rec = { id: `SCH-${String(Math.floor(Math.random() * 900000) + 100000)}`, createdBy: state.currentUserId, worker: state.users.find((u) => u.id === state.currentUserId)?.name, children: [], report: null, status: v.status || "Planned", ...v };
-        const nextPending = queuedCount(state) + 1;
-        patch((s) => ({ schoolHealth: [rec, ...s.schoolHealth], pendingSync: nextPending }));
-        return rec;
-      },
-      updateSchoolVisit: (id, changes) =>
-        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === id ? { ...v, ...changes } : v)) })),
-      removeSchoolVisit: (id) => patch((s) => ({ schoolHealth: s.schoolHealth.filter((v) => v.id !== id) })),
-      saveSchoolChild: (visitId, child) =>
-        patch((s) => ({
-          schoolHealth: s.schoolHealth.map((v) => {
-            if (v.id !== visitId) return v;
-            const children = v.children || [];
-            if (child.id) return { ...v, children: children.map((c) => (c.id === child.id ? { ...c, ...child } : c)) };
-            return { ...v, children: [...children, { ...child, id: `CH-${Date.now()}` }] };
-          }),
-        })),
-      removeSchoolChild: (visitId, childId) =>
-        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, children: (v.children || []).filter((c) => c.id !== childId) } : v)) })),
-      saveSchoolReport: (visitId, report) =>
-        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, report } : v)) })),
       addSymptom: (text) =>
         patch((s) => ({
           settings: { ...s.settings, symptoms: s.settings.symptoms.includes(text) ? s.settings.symptoms : [...s.settings.symptoms, text] },
