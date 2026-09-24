@@ -6,6 +6,10 @@ import { yawsTreatmentSummary } from "@/components/YawsMedications";
 import { lfTreatmentSummary } from "@/components/LfMedications";
 import { buruliTreatmentSummary } from "@/components/BuruliMedications";
 import { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
+import { ANTENATAL_ID, ancRiskLevel, autoRiskFactors } from "@/mock/antenatal";
+import {
+  MAL_ID, malDisplayStatus, malColorGrade, malWeeksVisited, malLastVisitLabel,
+} from "@/mock/malnutrition";
 import { PanelLeftClose, Pencil } from "lucide-react";
 
 export default function PatientSidebar({
@@ -22,13 +26,9 @@ export default function PatientSidebar({
     const s = String(v).trim();
     return s && s !== "—" ? s : "";
   };
-  const lastWithDx = [...encounters]
-    .sort((a, b) => b.date.localeCompare(a.date))
-    .find((e) => real(e.diagnosis) || real(e.data?.diagnosis));
   const lastWithTx = [...encounters]
     .sort((a, b) => b.date.localeCompare(a.date))
     .find((e) => real(e.treatment) || (e.data?.topical || []).length || (e.data?.oral || []).length);
-  const lastDiagnosis = real(lastWithDx?.diagnosis) || real(lastWithDx?.data?.diagnosis) || "—";
   const lastTreatment =
     real(lastWithTx?.treatment) ||
     (lastWithTx?.disease === "scabies"
@@ -47,6 +47,24 @@ export default function PatientSidebar({
   const diseaseNames = diseases
     .map((d) => (typeof d === "string" ? DISEASE_SPECS[d]?.name || d : d.name))
     .filter(Boolean);
+
+  const ancEnc = [...encounters]
+    .filter((e) => e.disease === ANTENATAL_ID)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  const ancRisks = ancEnc?.data?.history?.riskFactors?.length
+    ? ancEnc.data.history.riskFactors
+    : autoRiskFactors(ancEnc?.data || {}, p);
+  const ancRisk = ancRiskLevel(ancRisks);
+
+  const malVisits = [...encounters]
+    .filter((e) => e.disease === MAL_ID)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const malAdmission = malVisits.find((v) => /admission/i.test(v.data?.visitType || v.type || "")) || malVisits[0];
+  const malType = real(malAdmission?.data?.caseDetails?.admissionType);
+  const malGrade = malColorGrade(malType);
+  const malStatus = malVisits.length ? malDisplayStatus(malVisits) : "";
+  const malWeeks = malWeeksVisited(malVisits);
+  const malLast = malVisits.length ? malLastVisitLabel(malVisits, fmtDate) : "";
 
   return (
     <aside className="min-w-0 space-y-4 lg:sticky lg:top-24 lg:self-start" data-testid={testid}>
@@ -91,10 +109,9 @@ export default function PatientSidebar({
       <section className="rounded-lg border border-border bg-white p-4" data-testid="clinical-ready-reckoner">
         <p className="text-xs font-semibold text-muted-foreground">Clinical summary</p>
         <p className="mt-2 text-sm">
-          <b>Last encounter:</b> {last ? fmtDate(last.date) : "—"}
-        </p>
-        <p className="mt-1 text-sm">
-          <b>Last diagnosis:</b> {lastDiagnosis}
+          <b>Last encounter:</b>{" "}
+          {malLast || (last ? fmtDate(last.date) : "—")}
+          {!malLast && malWeeks > 0 ? ` (${malWeeks} week${malWeeks === 1 ? "" : "s"})` : ""}
         </p>
         <p className="mt-1 text-sm">
           <b>Active drugs:</b> {lastTreatment}
@@ -102,6 +119,20 @@ export default function PatientSidebar({
         <p className="mt-1 text-sm">
           <b>Conditions:</b> {diseaseNames.join(", ") || "None"}
         </p>
+        {ancRisks.length > 0 && (
+          <p className="mt-1 text-sm">
+            <b>ANC risk:</b>{" "}
+            <span className={ancRisk === "high" ? "font-semibold text-red-700" : "font-semibold text-amber-800"}>{ancRisks.join(" · ")}</span>
+          </p>
+        )}
+        {malType && (
+          <p className="mt-1 text-sm" data-testid="mal-sidebar-summary">
+            <b>Malnutrition:</b>{" "}
+            <span className={malGrade.level === "red" ? "font-semibold text-red-700" : malGrade.level === "amber" ? "font-semibold text-amber-800" : "font-semibold"}>
+              {malType}{malGrade.label ? ` · ${malGrade.label}` : ""} · {malStatus}
+            </span>
+          </p>
+        )}
       </section>
     </aside>
   );

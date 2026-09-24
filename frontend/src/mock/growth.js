@@ -35,11 +35,11 @@ const MUAC = [[3, 13], [6, 14], [12, 15], [24, 15.5], [36, 16], [60, 16.5]];
 const CV = { weight: 0.12, height: 0.038, hc: 0.028, bmi: 0.13, muac: 0.08 };
 
 export const GROWTH_METRICS = [
-  { k: "weight", label: "Weight", unit: "kg", min: 1, max: 90, step: 0.1, minAgeMo: 0, maxAgeMo: 216 },
-  { k: "height", label: "Height / Length", unit: "cm", min: 40, max: 190, step: 0.5, minAgeMo: 0, maxAgeMo: 216 },
-  { k: "hc", label: "Head circumference", unit: "cm", min: 30, max: 55, step: 0.2, minAgeMo: 0, maxAgeMo: 60 },
-  { k: "muac", label: "MUAC", unit: "cm", min: 7, max: 25, step: 0.1, minAgeMo: 3, maxAgeMo: 60 },
-  { k: "bmi", label: "BMI", unit: "kg/m²", min: 10, max: 35, step: 0.1, minAgeMo: 24, maxAgeMo: 216, derived: true },
+  { k: "height", label: "Length", unit: "cm", forAge: "Height For Age", min: 40, max: 190, step: 0.5, minAgeMo: 0, maxAgeMo: 216 },
+  { k: "weight", label: "Weight", unit: "kg", forAge: "Weight For Age", min: 1, max: 90, step: 0.1, minAgeMo: 0, maxAgeMo: 216 },
+  { k: "bmi", label: "BMI", unit: "kg/m²", forAge: "BMI For Age", min: 10, max: 35, step: 0.1, minAgeMo: 24, maxAgeMo: 216, derived: true },
+  { k: "hc", label: "Head Circumference", unit: "cm", forAge: "For Age", min: 30, max: 55, step: 0.2, minAgeMo: 0, maxAgeMo: 60 },
+  { k: "muac", label: "Arm Circumference", unit: "cm", forAge: "For Age", min: 7, max: 25, step: 0.1, minAgeMo: 3, maxAgeMo: 60 },
 ];
 
 export const metricApplies = (metric, ageMonths) => {

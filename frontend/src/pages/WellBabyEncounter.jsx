@@ -10,7 +10,7 @@ import { monthsBetween, ageMonthsToLabel } from "@/mock/growth";
 import { localISODate, fmtDate } from "@/mock/specs";
 import {
   WELLBABY_ID, WELLBABY_NAME, CHIEF_COMPLAINTS, ALLERGIES, MILESTONES, WELLBABY_DRUGS,
-  immunizationDueFromDob, isVaccineOverdue, milestoneFlag, newWbEpisodeId,
+  immunizationDueFromDob, isVaccineOverdue, groupVaccinesByFamily, milestoneFlag, newWbEpisodeId,
 } from "@/mock/wellbaby";
 import { toast } from "sonner";
 import { Check, Trash2, Plus, Search } from "lucide-react";
@@ -98,18 +98,39 @@ export default function WellBabyEncounter() {
       body: (
         <div className="space-y-2" data-testid="wb-immunization">
           <p className="text-xs text-muted-foreground">Schedule: <b>{schedule.name || "—"}</b> (edit in Admin → Masters)</p>
-          {(schedule.vaccines || []).map((item) => {
-            const rec = d.immunization[item.id];
-            const overdue = isVaccineOverdue(item, rec, dob);
-            const due = immunizationDueFromDob(item, dob);
-            return (
-              <div key={item.id} className={`flex flex-wrap items-center gap-3 rounded-md border p-3 ${rec?.given ? "border-green-500 bg-green-50" : overdue ? "border-red-500 bg-red-50" : "border-border bg-white"}`} data-testid={`wb-vac-${item.id}`}>
-                <button type="button" onClick={() => toggleVaccine(item)} data-testid={`wb-vac-toggle-${item.id}`} className={`grid h-8 w-8 shrink-0 place-items-center rounded border ${rec?.given ? "border-green-600 bg-green-600 text-white" : "border-input"}`}>{rec?.given && <Check className="h-4 w-4" />}</button>
-                <div className="min-w-0 flex-1"><p className="font-semibold">{item.name}</p><p className="text-xs text-muted-foreground">{item.note} · due {due ? fmtDate(due) : "—"}{overdue ? " · OVERDUE" : ""}</p></div>
-                {rec?.given && <TextField label="" type="date" className="w-40" value={rec.date || ""} onChange={(e) => setVaccineDate(item.id, e.target.value)} testid={`wb-vac-date-${item.id}`} />}
-              </div>
-            );
-          })}
+          {groupVaccinesByFamily(schedule.vaccines || []).map((group) => (
+            <div key={group.family} className="flex flex-wrap gap-2" data-testid={`wb-vac-group-${group.family}`}>
+              {group.doses.map((item) => {
+                const rec = d.immunization[item.id];
+                const overdue = isVaccineOverdue(item, rec, dob);
+                const due = immunizationDueFromDob(item, dob);
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex w-[calc((100%-1rem)/3)] items-start gap-1.5 rounded-md border p-2 ${rec?.given ? "border-green-500 bg-green-50" : overdue ? "border-red-500 bg-red-50" : "border-border bg-white"}`}
+                    data-testid={`wb-vac-${item.id}`}
+                  >
+                    <button type="button" onClick={() => toggleVaccine(item)} data-testid={`wb-vac-toggle-${item.id}`} className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center" aria-label={rec?.given ? "Mark not given" : "Mark given"}>
+                      <Check className={`h-3.5 w-3.5 ${rec?.given ? "text-green-600" : "text-muted-foreground/40"}`} strokeWidth={rec?.given ? 3 : 2} />
+                    </button>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="text-sm font-semibold leading-tight">{item.name}</p>
+                      <p className="text-[10px] leading-snug text-muted-foreground">{item.note} · due {due ? fmtDate(due) : "—"}{overdue ? " · OVERDUE" : ""}</p>
+                      {rec?.given && (
+                        <input
+                          type="date"
+                          className="h-7 w-[7.5rem] max-w-full rounded border border-input bg-white px-1.5 text-[11px]"
+                          value={rec.date || ""}
+                          onChange={(e) => setVaccineDate(item.id, e.target.value)}
+                          data-testid={`wb-vac-date-${item.id}`}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
           {vaccineDrugs.length > 0 && <Field label="Add additional vaccine from drug list"><SelectField label="" options={vaccineDrugs.map((v) => v.name).filter((n) => !d.immunization[n])} value="" onChange={(n) => n && setVaccineDate(n, localISODate())} testid="wb-vac-add" placeholder="Choose a vaccine…" /></Field>}
         </div>
       ),

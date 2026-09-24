@@ -1405,7 +1405,13 @@ export default function PatientRecord() {
               encounters={encs}
               canEdit={canEdit}
               onEdit={(v) => navigate(`/patients/${p.id}/malnutrition?enc=${encodeURIComponent(v.id)}`)}
-              onAddVisit={() => setEnc({ ...enc, show: true, disease: MAL_ID })}
+              onAddVisit={(week) => {
+                if (week != null && week !== "") {
+                  navigate(`/patients/${p.id}/malnutrition?week=${encodeURIComponent(week)}`);
+                  return;
+                }
+                setEnc({ ...enc, show: true, disease: MAL_ID });
+              }}
             />
           )}
 

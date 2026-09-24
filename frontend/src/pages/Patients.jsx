@@ -11,6 +11,7 @@ import { fmtDate, fmtDateTime } from "@/mock/specs";
 import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
 import StatusChips, { PendingSyncChip, patientStatusRecords } from "@/components/StatusChips";
+import { MAL_ID, malLastVisitLabel } from "@/mock/malnutrition";
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -306,7 +307,14 @@ export default function Patients() {
                   {patientAgeLabel(p)} · {p.sex} · {p.weight}kg · Date of Birth {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {p.village}, {p.district}
                 </p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {p.id} · Last encounter {lastEnc ? fmtDate(lastEnc.date) : "—"}
+                  {p.id} · Last encounter{" "}
+                  {(() => {
+                    const malVisits = encs.filter((e) => e.disease === MAL_ID);
+                    if (malVisits.length && lastEnc?.disease === MAL_ID) {
+                      return malLastVisitLabel(malVisits, fmtDate) || "—";
+                    }
+                    return lastEnc ? fmtDate(lastEnc.date) : "—";
+                  })()}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">

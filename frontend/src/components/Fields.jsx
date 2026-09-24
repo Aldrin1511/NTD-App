@@ -76,10 +76,10 @@ export const AreaField = ({ label, testid, rows = 5, placeholder, ...rest }) => 
   </Field>
 );
 
-export const SelectField = ({ label, value, onChange, options, placeholder = "Select…", testid, hint }) => (
+export const SelectField = ({ label, value, onChange, options, placeholder = "Select…", testid, hint, disabled }) => (
   <Field label={label} hint={hint}>
-    <Select key={value || "none"} value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid}>
+    <Select key={value || "none"} value={value || undefined} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid} disabled={disabled}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
@@ -160,7 +160,7 @@ export const MultiSelectField = ({
 
 export const ChoiceRow = ({ label, options, value, onChange, testid, hint }) => (
   <Field label={label} hint={hint}>
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2.5">
       {options.map((o) => {
         const active = value === o;
         return (
@@ -169,7 +169,7 @@ export const ChoiceRow = ({ label, options, value, onChange, testid, hint }) => 
             type="button"
             data-testid={`${testid}-${slug(o)}`}
             onClick={() => onChange(active ? "" : o)}
-            className={`h-12 rounded-md border px-4 text-sm font-semibold transition-colors ${
+            className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
               active
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-white text-foreground hover:bg-muted"
@@ -183,11 +183,11 @@ export const ChoiceRow = ({ label, options, value, onChange, testid, hint }) => 
   </Field>
 );
 
-export const CheckGrid = ({ label, options, value = [], onChange, testid, cols = "sm:grid-cols-2 lg:grid-cols-3" }) => {
+export const CheckGrid = ({ label, options, value = [], onChange, testid, cols = "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" }) => {
   const toggle = (o) => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
   return (
     <Field label={label}>
-      <div className={`grid gap-2 ${cols}`}>
+      <div className={`grid gap-2 ${cols}`} data-testid={testid ? `${testid}-grid` : undefined}>
         {options.map((o) => {
           const active = value.includes(o);
           return (
@@ -196,18 +196,20 @@ export const CheckGrid = ({ label, options, value = [], onChange, testid, cols =
               type="button"
               data-testid={`${testid}-${slug(o)}`}
               onClick={() => toggle(o)}
-              className={`flex min-h-12 items-center gap-3 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors ${
-                active ? "border-primary bg-secondary text-secondary-foreground" : "border-border bg-white hover:bg-muted"
+              className={`flex min-h-11 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition-colors ${
+                active
+                  ? "border-primary/40 bg-secondary text-foreground"
+                  : "border-border bg-white text-foreground hover:bg-muted/60"
               }`}
             >
               <span
-                className={`grid h-6 w-6 shrink-0 place-items-center rounded border ${
+                className={`grid h-[1.125rem] w-[1.125rem] shrink-0 place-items-center rounded border ${
                   active ? "border-primary bg-primary text-white" : "border-input bg-white"
                 }`}
               >
-                {active && <Check className="h-4 w-4" />}
+                {active && <Check className="h-3 w-3" strokeWidth={3} />}
               </span>
-              {o}
+              <span className="min-w-0 leading-snug">{o}</span>
             </button>
           );
         })}

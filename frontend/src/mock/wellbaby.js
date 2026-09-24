@@ -40,6 +40,36 @@ export const isVaccineOverdue = (item, rec, dob) => {
   return new Date(due).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
 };
 
+/** Family key so OPV-0 / OPV-1 / OPV-2 share one row (also TT 1/TT 2, Measles-Rubella-1/2). */
+export const vaccineFamilyKey = (name = "") => {
+  const n = String(name).trim();
+  const ttDash = n.match(/^(.*?)\s*[—–-]\s*TT\d+/i);
+  if (ttDash) return ttDash[1].trim() || "TT";
+  const ttSpaced = n.match(/^TT\s*\d+/i);
+  if (ttSpaced) return "TT";
+  const dose = n.match(/^(.*)-\d+$/);
+  if (dose) return dose[1].trim() || n;
+  return n;
+};
+
+/** Group schedule vaccines by family; doses ordered by offsetDays (sequence). */
+export const groupVaccinesByFamily = (vaccines = []) => {
+  const order = [];
+  const map = new Map();
+  for (const v of vaccines) {
+    const key = vaccineFamilyKey(v.name);
+    if (!map.has(key)) {
+      map.set(key, []);
+      order.push(key);
+    }
+    map.get(key).push(v);
+  }
+  return order.map((family) => ({
+    family,
+    doses: [...map.get(family)].sort((a, b) => (a.offsetDays || 0) - (b.offsetDays || 0)),
+  }));
+};
+
 export const milestoneFlag = (m, rec, ageMonths) => {
   if (rec?.achieved) return "green";
   if (ageMonths == null) return "";

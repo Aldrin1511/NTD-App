@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -12,21 +12,89 @@ const txt = { green: "text-green-700", amber: "text-amber-700", red: "text-red-7
 
 export const statusClasses = { ring, txt };
 
+const roundStep = (v, step) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "";
+  if (step < 1) {
+    const p = Math.round(1 / step);
+    return Math.round(n * p) / p;
+  }
+  return Math.round(n);
+};
+
+/** Slider + typed number input. */
 export const SliderStat = ({ field, value, onChange, status = "", testid }) => {
   const has = value !== undefined && value !== "" && value !== null;
-  const cur = has ? Number(value) : (field.normal ? Math.round((field.normal[0] + field.normal[1]) / 2) : Math.round((field.min + field.max) / 2));
+  const mid = field.normal
+    ? (field.normal[0] + field.normal[1]) / 2
+    : (field.min + field.max) / 2;
+  const cur = has ? Number(value) : mid;
+  const [draft, setDraft] = useState(has ? String(value) : "");
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setDraft(has ? String(value) : "");
+  }, [value, has, editing]);
+
+  const commit = (raw) => {
+    setEditing(false);
+    if (raw === "" || raw === "-" || raw === ".") {
+      onChange("");
+      setDraft("");
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      setDraft(has ? String(value) : "");
+      return;
+    }
+    const next = roundStep(Math.min(field.max, Math.max(field.min, n)), field.step);
+    onChange(next);
+    setDraft(String(next));
+  };
+
   return (
     <div className={`rounded-md border ${ring[status]} bg-white p-3`} data-testid={testid}>
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs font-semibold text-muted-foreground">{field.label}</span>
-        <span className={`text-lg font-bold tabular-nums ${txt[status]}`}>{has ? value : "—"}<span className="ml-1 text-xs font-medium text-muted-foreground">{field.unit}</span></span>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            step={field.step}
+            min={field.min}
+            max={field.max}
+            className={`h-8 w-20 rounded border border-input bg-white px-2 text-right text-sm font-bold tabular-nums ${txt[status]}`}
+            value={editing ? draft : (has ? value : "")}
+            placeholder="—"
+            onFocus={() => { setEditing(true); setDraft(has ? String(value) : ""); }}
+            onChange={(e) => { setEditing(true); setDraft(e.target.value); }}
+            onBlur={(e) => commit(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            data-testid={`${testid}-input`}
+          />
+          <span className="text-xs font-medium text-muted-foreground">{field.unit}</span>
+        </div>
       </div>
-      <Slider className="mt-3" min={field.min} max={field.max} step={field.step} value={[cur]} onValueChange={([v]) => onChange(field.step < 1 ? Math.round(v * 10) / 10 : Math.round(v))} data-testid={`${testid}-slider`} />
+      <Slider
+        className="mt-3"
+        min={field.min}
+        max={field.max}
+        step={field.step}
+        value={[has ? Number(value) : roundStep(cur, field.step)]}
+        onValueChange={([v]) => {
+          const next = roundStep(v, field.step);
+          onChange(next);
+          setDraft(String(next));
+          setEditing(false);
+        }}
+        data-testid={`${testid}-slider`}
+      />
       <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
         <span>{field.min}</span>
         {field.normal && <span>normal {field.normal[0]}–{field.normal[1]}</span>}
         <span>{field.max}</span>
       </div>
+      <p className="mt-1 text-[10px] text-muted-foreground">Type or drag</p>
     </div>
   );
 };
@@ -38,12 +106,48 @@ export const ChoiceChips = ({ label, options, value, onChange, testid, multi = f
     if (multi) onChange(arr.includes(o) ? arr.filter((x) => x !== o) : [...arr, o]);
     else onChange(value === o ? "" : o);
   };
+  if (multi) {
+    return (
+      <Field label={label}>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid={testid}>
+          {options.map((o) => {
+            const active = isOn(o);
+            return (
+              <button
+                key={o}
+                type="button"
+                data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                onClick={() => toggle(o)}
+                className={`flex min-h-11 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition-colors ${
+                  active ? "border-primary/40 bg-secondary text-foreground" : "border-border bg-white hover:bg-muted/60"
+                }`}
+              >
+                <span className={`grid h-[1.125rem] w-[1.125rem] shrink-0 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-input bg-white"}`}>
+                  {active && <Check className="h-3 w-3" strokeWidth={3} />}
+                </span>
+                <span className="min-w-0 leading-snug">{o}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Field>
+    );
+  }
   return (
     <Field label={label}>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2.5">
         {options.map((o) => (
-          <button key={o} type="button" data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} onClick={() => toggle(o)}
-            className={`min-h-10 rounded-full border px-4 text-sm font-semibold transition-colors ${isOn(o) ? "border-primary bg-primary text-white" : "border-border bg-white hover:bg-muted"}`}>{o}</button>
+          <button
+            key={o}
+            type="button"
+            data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+            onClick={() => toggle(o)}
+            className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
+              isOn(o) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white text-foreground hover:bg-muted"
+            }`}
+          >
+            {o}
+          </button>
         ))}
       </div>
     </Field>
@@ -78,11 +182,23 @@ export const ChipMultiWithOther = ({ label, options, value = [], onChange, testi
 
 export const YesNo = ({ label, value, onChange, testid }) => (
   <Field label={label}>
-    <div className="flex gap-2">
-      {["Yes", "No"].map((o) => (
-        <button key={o} type="button" data-testid={`${testid}-${o.toLowerCase()}`} onClick={() => onChange(value === o ? "" : o)}
-          className={`h-10 min-w-16 rounded-md border px-4 text-sm font-semibold ${value === o ? (o === "Yes" ? "border-red-500 bg-red-500 text-white" : "border-primary bg-primary text-white") : "border-border bg-white hover:bg-muted"}`}>{o}</button>
-      ))}
+    <div className="flex flex-wrap gap-2.5">
+      {["Yes", "No"].map((o) => {
+        const active = value === o;
+        return (
+          <button
+            key={o}
+            type="button"
+            data-testid={`${testid}-${o.toLowerCase()}`}
+            onClick={() => onChange(active ? "" : o)}
+            className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
+              active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white text-foreground hover:bg-muted"
+            }`}
+          >
+            {o}
+          </button>
+        );
+      })}
     </div>
   </Field>
 );
@@ -102,7 +218,7 @@ export const MiniFieldRenderer = ({ fields, data, onChange, prefix }) => (
 );
 
 /** Full entry-view shell: sidebar + collapsible sections + progress + save bar. */
-export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, title, context, sections, onSave, savedAt, backTo }) => {
+export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, title, context, sections, onSave, savedAt, backTo, preface }) => {
   const [open, setOpen] = useState({});
   const doneCount = sections.filter((s) => s.done).length;
   return (
@@ -124,6 +240,7 @@ export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, tit
             </div>
             <Progress value={(doneCount / sections.length) * 100} className="mt-3 h-2.5" />
           </div>
+          {preface}
           {sections.map((s, i) => (
             <section key={i} className="rounded-lg border border-border bg-white" data-testid={`cond-section-${i + 1}`}>
               <button type="button" data-testid={`cond-section-toggle-${i + 1}`} onClick={() => setOpen((o) => ({ ...o, [i]: o[i] === false }))} className="flex w-full items-center gap-3 px-5 py-4 text-left">
