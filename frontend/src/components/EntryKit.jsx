@@ -66,7 +66,13 @@ export const SliderStat = ({ field, value, onChange, status = "", testid }) => {
             className={`h-8 w-20 rounded border border-input bg-white px-2 text-right text-sm font-bold tabular-nums ${txt[status]}`}
             value={editing ? draft : (has ? value : "")}
             placeholder="—"
-            onFocus={() => { setEditing(true); setDraft(has ? String(value) : ""); }}
+            onFocus={(e) => {
+              setEditing(true);
+              setDraft(has ? String(value) : "");
+              requestAnimationFrame(() => {
+                try { e.target.select(); } catch { /* ignore */ }
+              });
+            }}
             onChange={(e) => { setEditing(true); setDraft(e.target.value); }}
             onBlur={(e) => commit(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
@@ -99,9 +105,10 @@ export const SliderStat = ({ field, value, onChange, status = "", testid }) => {
   );
 };
 
-export const ChoiceChips = ({ label, options, value, onChange, testid, multi = false }) => {
+export const ChoiceChips = ({ label, options, value, onChange, testid, multi = false, negativeOptions = [] }) => {
   const arr = multi ? (Array.isArray(value) ? value : []) : null;
   const isOn = (o) => (multi ? arr.includes(o) : value === o);
+  const isNeg = (o) => negativeOptions.includes(o);
   const toggle = (o) => {
     if (multi) onChange(arr.includes(o) ? arr.filter((x) => x !== o) : [...arr, o]);
     else onChange(value === o ? "" : o);
@@ -112,6 +119,7 @@ export const ChoiceChips = ({ label, options, value, onChange, testid, multi = f
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid={testid}>
           {options.map((o) => {
             const active = isOn(o);
+            const alert = active && isNeg(o);
             return (
               <button
                 key={o}
@@ -119,10 +127,16 @@ export const ChoiceChips = ({ label, options, value, onChange, testid, multi = f
                 data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                 onClick={() => toggle(o)}
                 className={`flex min-h-11 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition-colors ${
-                  active ? "border-primary/40 bg-secondary text-foreground" : "border-border bg-white hover:bg-muted/60"
+                  alert
+                    ? "border-red-500 bg-red-50 text-red-800"
+                    : active
+                      ? "border-primary/40 bg-secondary text-foreground"
+                      : "border-border bg-white hover:bg-muted/60"
                 }`}
               >
-                <span className={`grid h-[1.125rem] w-[1.125rem] shrink-0 place-items-center rounded border ${active ? "border-primary bg-primary text-white" : "border-input bg-white"}`}>
+                <span className={`grid h-[1.125rem] w-[1.125rem] shrink-0 place-items-center rounded border ${
+                  alert ? "border-red-600 bg-red-600 text-white" : active ? "border-primary bg-primary text-white" : "border-input bg-white"
+                }`}>
                   {active && <Check className="h-3 w-3" strokeWidth={3} />}
                 </span>
                 <span className="min-w-0 leading-snug">{o}</span>
@@ -136,19 +150,27 @@ export const ChoiceChips = ({ label, options, value, onChange, testid, multi = f
   return (
     <Field label={label}>
       <div className="flex flex-wrap gap-2.5">
-        {options.map((o) => (
-          <button
-            key={o}
-            type="button"
-            data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-            onClick={() => toggle(o)}
-            className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
-              isOn(o) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white text-foreground hover:bg-muted"
-            }`}
-          >
-            {o}
-          </button>
-        ))}
+        {options.map((o) => {
+          const active = isOn(o);
+          const alert = active && isNeg(o);
+          return (
+            <button
+              key={o}
+              type="button"
+              data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+              onClick={() => toggle(o)}
+              className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
+                alert
+                  ? "border-red-600 bg-red-600 text-white"
+                  : active
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-white text-foreground hover:bg-muted"
+              }`}
+            >
+              {o}
+            </button>
+          );
+        })}
       </div>
     </Field>
   );
@@ -180,11 +202,12 @@ export const ChipMultiWithOther = ({ label, options, value = [], onChange, testi
   );
 };
 
-export const YesNo = ({ label, value, onChange, testid }) => (
+export const YesNo = ({ label, value, onChange, testid, negativeValue = "Yes" }) => (
   <Field label={label}>
     <div className="flex flex-wrap gap-2.5">
       {["Yes", "No"].map((o) => {
         const active = value === o;
+        const alert = active && negativeValue && o === negativeValue;
         return (
           <button
             key={o}
@@ -192,7 +215,11 @@ export const YesNo = ({ label, value, onChange, testid }) => (
             data-testid={`${testid}-${o.toLowerCase()}`}
             onClick={() => onChange(active ? "" : o)}
             className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
-              active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-white text-foreground hover:bg-muted"
+              alert
+                ? "border-red-600 bg-red-600 text-white"
+                : active
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-white text-foreground hover:bg-muted"
             }`}
           >
             {o}
@@ -218,9 +245,20 @@ export const MiniFieldRenderer = ({ fields, data, onChange, prefix }) => (
 );
 
 /** Full entry-view shell: sidebar + collapsible sections + progress + save bar. */
-export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, title, context, sections, onSave, savedAt, backTo, preface }) => {
+export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, title, context, sections, onSave, savedAt, backTo, preface, focusSection }) => {
   const [open, setOpen] = useState({});
   const doneCount = sections.filter((s) => s.done).length;
+  const focusIdx = focusSection != null && focusSection !== "" ? Number(focusSection) - 1 : null;
+
+  useEffect(() => {
+    if (focusIdx == null || Number.isNaN(focusIdx) || focusIdx < 0) return undefined;
+    setOpen((o) => ({ ...o, [focusIdx]: true }));
+    const timer = window.setTimeout(() => {
+      document.querySelector(`[data-testid="cond-section-${focusIdx + 1}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [focusIdx]);
+
   return (
     <AppShell>
       <div className="grid gap-6 pb-28 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">

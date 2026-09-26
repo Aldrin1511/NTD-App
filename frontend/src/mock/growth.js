@@ -111,13 +111,30 @@ export const compute = ({ metric, value, ageMonths, sex, standard = "WHO", direc
   return { z, percentile, status: statusForZ(z, direction), median: Math.round(med * 10) / 10, sd: Math.round(sd * 100) / 100 };
 };
 
-/** Reference series for a graph: median, ±2SD across an age range. */
-export const referenceSeries = (metric, sex, standard, fromMo, toMo, stepMo = 6) => {
+/** Approximate z-scores for common growth-chart percentiles. */
+const PCT_Z = { p3: -1.88, p15: -1.04, p50: 0, p85: 1.04, p97: 1.88 };
+
+/** Reference series for a graph: percentile curves across age in months. */
+export const referenceSeries = (metric, sex, standard, fromMo, toMo, stepMo = 1) => {
   const out = [];
-  for (let a = fromMo; a <= toMo; a += stepMo) {
+  const start = Math.max(0, Math.floor(fromMo));
+  const end = Math.max(start, Math.ceil(toMo));
+  for (let a = start; a <= end; a += stepMo) {
     const med = medianFor(metric, a, sex, standard);
     const sd = sdFor(metric, a, sex, standard);
-    out.push({ age: Math.round((a / 12) * 10) / 10, median: Math.round(med * 10) / 10, p2: Math.round((med + 2 * sd) * 10) / 10, m2: Math.round((med - 2 * sd) * 10) / 10 });
+    const round = (v) => Math.round(v * 10) / 10;
+    out.push({
+      months: a,
+      age: Math.round((a / 12) * 10) / 10,
+      median: round(med),
+      p2: round(med + 2 * sd),
+      m2: round(med - 2 * sd),
+      p3: round(med + PCT_Z.p3 * sd),
+      p15: round(med + PCT_Z.p15 * sd),
+      p50: round(med),
+      p85: round(med + PCT_Z.p85 * sd),
+      p97: round(med + PCT_Z.p97 * sd),
+    });
   }
   return out;
 };

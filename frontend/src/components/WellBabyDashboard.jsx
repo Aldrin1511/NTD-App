@@ -1,56 +1,56 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertPanel } from "@/components/Fields";
 import { FeatureCard } from "@/components/EntryKit";
 import { GrowthReview } from "@/components/GrowthChart";
+import MilestoneChart from "@/components/MilestoneChart";
 import { dobFromAge } from "@/components/Capture";
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes } from "@/mock/specs";
-import { WELLBABY_ID, MILESTONES, milestoneFlag, immunizationDueFromDob, isVaccineOverdue, groupVaccinesByFamily } from "@/mock/wellbaby";
+import { WELLBABY_ID, immunizationDueFromDob, isVaccineOverdue, WELLBABY_DRUG_META } from "@/mock/wellbaby";
 import { monthsBetween, ageMonthsToLabel } from "@/mock/growth";
-import { Pencil, Plus, Check } from "lucide-react";
+import { ImmunizationDashCards } from "@/components/ImmunizationCards";
+import { medicationRows } from "@/components/AntenatalMedications";
+import { Pencil, Plus } from "lucide-react";
 
-const chip = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-muted-foreground" };
-
-const VisitHead = ({ v, onEdit, canEdit, testid }) => (
+const VisitHead = ({ v, onEdit, canEdit, testid, section }) => (
   <div className="mb-2 flex items-start justify-between gap-2">
     <p className="text-xs font-semibold text-primary">{fmtDateTime(v.date)} · {v.worker} · {v.type}</p>
     {canEdit && onEdit && (
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => onEdit(v)} data-testid={testid || `wb-edit-${v.id}`} aria-label="Edit visit">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-primary"
+        onClick={() => onEdit(v, section)}
+        data-testid={testid || `wb-edit-${v.id}`}
+        aria-label="Edit visit"
+      >
         <Pencil className="h-4 w-4" />
       </Button>
     )}
   </div>
 );
 
+/** 1-based section indexes in WellBabyEncounter. */
+export const WB_SECTIONS = {
+  delivery: 1,
+  complaints: 2,
+  allergy: 3,
+  growth: 4,
+  immunization: 5,
+  milestones: 6,
+  notes: 7,
+  drugs: 8,
+  lab: 9,
+};
+
 const VaccineBoxes = ({ vaccines, records, dob, testidPrefix = "wb-dash-vac" }) => (
-  <div className="space-y-2">
-    {groupVaccinesByFamily(vaccines || []).map((group) => (
-      <div key={group.family} className="flex flex-wrap gap-2" data-testid={`${testidPrefix}-group-${group.family}`}>
-        {group.doses.map((item) => {
-          const rec = records[item.id];
-          const overdue = isVaccineOverdue(item, rec, dob);
-          const due = immunizationDueFromDob(item, dob);
-          return (
-            <div
-              key={item.id}
-              className={`flex w-[calc((100%-1rem)/3)] items-start gap-1.5 rounded-md border p-2 ${rec?.given ? "border-green-500 bg-green-50" : overdue ? "border-red-500 bg-red-50" : "border-border bg-white"}`}
-              data-testid={`${testidPrefix}-${item.id}`}
-            >
-              <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center">
-                {rec?.given && <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={3} />}
-              </span>
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <p className="text-sm font-semibold leading-tight">{item.name}</p>
-                <p className={`text-[10px] leading-snug ${rec?.given ? "font-semibold text-green-700" : overdue ? "font-semibold text-red-700" : "text-muted-foreground"}`}>
-                  {rec?.given ? `Given ${rec.date ? fmtDate(rec.date) : ""}` : overdue ? `Overdue · due ${due ? fmtDate(due) : "—"}` : `${item.note || ""} · due ${due ? fmtDate(due) : "—"}`}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    ))}
-  </div>
+  <ImmunizationDashCards
+    vaccines={vaccines}
+    records={records}
+    getDue={(item) => immunizationDueFromDob(item, dob)}
+    getOverdue={(item, rec) => isVaccineOverdue(item, rec, dob)}
+    testidPrefix={testidPrefix}
+  />
 );
 
 export default function WellBabyDashboard({ patient, encounters, settings, canEdit, onEdit, onAddVisit }) {
@@ -72,6 +72,11 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
   const complaintVisits = visits.filter((v) => (v.data?.complaints || []).length);
   const allergyAll = [...new Set(visits.flatMap((v) => v.data?.allergy || []))];
   const noteVisits = visits.filter((v) => (v.data?.notes || []).some((n) => String(n).trim()));
+  const drugVisits = visits.filter((v) => (v.data?.drugs || []).length);
+  const labRowFilled = (row) => !!(row?.result || row?.analyte || row?.sentToLab);
+  const labVisits = visits
+    .map((v) => ({ ...v, data: { ...v.data, lab: (v.data?.lab || []).filter(labRowFilled) } }))
+    .filter((v) => v.data.lab.length > 0);
   const editVisit = immunVisits[0] || visits[0];
 
   return (
@@ -84,7 +89,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       {allergyAll.length > 0 && <AlertPanel level="review" title="Allergies" testid="wb-allergy-banner">{allergyAll.join(" · ")}</AlertPanel>}
 
       <FeatureCard title="Growth chart" count={growthVisits.length || undefined} lastAt={growthVisits[0] ? fmtDateTime(growthVisits[0].date) : undefined} testid="wb-feat-growth">
-        {growthVisits[0] && <VisitHead v={growthVisits[0]} onEdit={onEdit} canEdit={canEdit} testid={`wb-growth-edit-${growthVisits[0].id}`} />}
+        {growthVisits[0] && <VisitHead v={growthVisits[0]} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.growth} testid={`wb-growth-edit-${growthVisits[0].id}`} />}
         <GrowthReview sex={patient.sex || patient.gender} dob={dob} entries={growthEntries} testid="wb-growth-review" />
       </FeatureCard>
 
@@ -100,39 +105,117 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
               : (schedule.vaccines || []).filter((item) => visitGiven[item.id]);
             return (
               <div key={v.id} className="border-b border-border/60 py-2 last:border-0" data-testid={`wb-immun-entry-${v.id}`}>
-                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} testid={`wb-immun-edit-${v.id}`} />
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.immunization} testid={`wb-immun-edit-${v.id}`} />
                 <VaccineBoxes vaccines={vaccines} records={records} dob={dob} testidPrefix={`wb-dash-vac-${v.id}`} />
               </div>
             );
           })
         ) : (
           <div data-testid="wb-immun-entry-empty">
-            {editVisit && <VisitHead v={editVisit} onEdit={onEdit} canEdit={canEdit} testid={`wb-immun-edit-${editVisit.id}`} />}
+            {editVisit && <VisitHead v={editVisit} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.immunization} testid={`wb-immun-edit-${editVisit.id}`} />}
             <VaccineBoxes vaccines={schedule.vaccines} records={mergedImmun} dob={dob} />
           </div>
         )}
       </FeatureCard>
 
       <FeatureCard title="Gross motor milestones" count={msVisits.length || Object.keys(mergedMs).length} lastAt={msVisits[0] ? fmtDateTime(msVisits[0].date) : undefined} testid="wb-feat-milestones">
-        {(msVisits[0] || visits[0]) && <VisitHead v={msVisits[0] || visits[0]} onEdit={onEdit} canEdit={canEdit} testid="wb-ms-edit" />}
-        <div className="space-y-2">
-          {MILESTONES.map((m) => { const rec = mergedMs[m.id]; const flag = milestoneFlag(m, rec, ageMonths); return (
-            <div key={m.id} className="flex items-center justify-between rounded-md border border-border bg-white px-3 py-2 text-sm" data-testid={`wb-dash-ms-${m.id}`}>
-              <span className="font-semibold">{m.name}</span>
-              <span className={`font-semibold ${chip[flag]}`}>{rec?.achieved ? `Achieved ${rec.date ? fmtDate(rec.date) : ""}` : flag === "red" ? "Delayed" : `Expected ${m.min}–${m.max} mo`}</span>
-            </div>
-          ); })}
-        </div>
+        {(msVisits[0] || visits[0]) && <VisitHead v={msVisits[0] || visits[0]} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.milestones} testid="wb-ms-edit" />}
+        <MilestoneChart records={mergedMs} dob={dob} ageMonths={ageMonths} readOnly testid="wb-dash-milestones" />
       </FeatureCard>
 
       {complaintVisits.length > 0 && (
         <FeatureCard title="Chief complaints" count={complaintVisits.length} lastAt={fmtDateTime(complaintVisits[0].date)} testid="wb-feat-complaints">
           {complaintVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0">
-              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} testid={`wb-complaint-edit-${v.id}`} />
+              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.complaints} testid={`wb-complaint-edit-${v.id}`} />
               <p className="text-sm font-medium">{v.data.complaints.join(" · ")}</p>
             </div>
           ))}
+        </FeatureCard>
+      )}
+
+      {drugVisits.length > 0 && (
+        <FeatureCard title="Medications" count={drugVisits.reduce((n, v) => n + (v.data?.drugs?.length || 0), 0)} lastAt={fmtDateTime(drugVisits[0].date)} testid="wb-feat-drugs">
+          <div className="space-y-4">
+            {drugVisits.map((v) => {
+              const rows = medicationRows(v, WELLBABY_DRUG_META);
+              return (
+                <div key={v.id} data-testid={`wb-meds-visit-${v.id}`}>
+                  <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.drugs} testid={`wb-drug-edit-${v.id}`} />
+                  <div className="overflow-x-auto" data-testid={`wb-meds-table-${v.id}`}>
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-border text-xs text-muted-foreground">
+                          <th className="py-2 pr-3 font-semibold">Name</th>
+                          <th className="py-2 pr-3 font-semibold">Dosage</th>
+                          <th className="py-2 pr-3 font-semibold">Frequency</th>
+                          <th className="py-2 pr-3 font-semibold">Duration</th>
+                          <th className="py-2 font-semibold">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, i) => (
+                          <Fragment key={`${row.name}-${i}`}>
+                            <tr className="border-b border-border/70 align-top">
+                              <td className="py-2 pr-3 font-medium">{row.name}</td>
+                              <td className="py-2 pr-3">{row.dosage}</td>
+                              <td className="py-2 pr-3">{row.frequency}</td>
+                              <td className="py-2 pr-3">{row.duration}</td>
+                              <td className="py-2 whitespace-nowrap">{row.date ? fmtDate(row.date) : "—"}</td>
+                            </tr>
+                            {row.advice ? (
+                              <tr className="border-b border-border/40">
+                                <td colSpan={5} className="pb-2 text-xs text-muted-foreground">{row.advice}</td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </FeatureCard>
+      )}
+
+      {labVisits.length > 0 && (
+        <FeatureCard title="Laboratory" count={labVisits.reduce((n, v) => n + v.data.lab.length, 0)} lastAt={fmtDateTime(labVisits[0].date)} testid="wb-feat-lab">
+          <div className="space-y-4">
+            {labVisits.map((v) => (
+              <div key={v.id} data-testid={`wb-lab-visit-${v.id}`}>
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.lab} testid={`wb-lab-edit-${v.id}`} />
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-xs text-muted-foreground">
+                        <th className="py-1.5 pr-3 font-semibold">Test</th>
+                        <th className="py-1.5 pr-3 font-semibold">Result</th>
+                        <th className="py-1.5 pr-3 font-semibold">Value</th>
+                        <th className="py-1.5 pr-3 font-semibold">Location</th>
+                        <th className="py-1.5 font-semibold">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {v.data.lab.map((row, i) => (
+                        <tr key={i} className="border-b border-border/60 last:border-0">
+                          <td className="py-1.5 pr-3 font-medium">{row.test}</td>
+                          <td className="py-1.5 pr-3">{row.result || (row.sentToLab ? "Sent" : "—")}</td>
+                          <td className="py-1.5 pr-3 tabular-nums">{row.analyte || "—"}</td>
+                          <td className="py-1.5 pr-3 text-muted-foreground">
+                            {row.location || "—"}
+                            {row.sentToLab ? " · sent" : ""}
+                          </td>
+                          <td className="py-1.5 whitespace-nowrap text-muted-foreground">{row.date ? fmtDate(row.date) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
         </FeatureCard>
       )}
 
@@ -140,7 +223,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
         <FeatureCard title="Visit notes" count={noteVisits.length} lastAt={fmtDateTime(noteVisits[0].date)} testid="wb-feat-notes">
           {noteVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0">
-              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} testid={`wb-note-edit-${v.id}`} />
+              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.notes} testid={`wb-note-edit-${v.id}`} />
               {(v.data.notes || []).filter((n) => String(n).trim()).map((n, i) => <p key={i} className="mt-1 whitespace-pre-line text-sm">{n}</p>)}
             </div>
           ))}

@@ -158,14 +158,15 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
       {grade.level && (
         <section className={`rounded-lg border px-4 py-3 ${grade.level === "red" ? "border-red-300 bg-red-50" : grade.level === "amber" ? "border-amber-300 bg-amber-50" : "border-primary/30 bg-secondary"}`} data-testid="mal-risk-status">
           <p className={`text-sm font-semibold ${grade.level === "red" ? "text-red-800" : grade.level === "amber" ? "text-amber-900" : "text-primary"}`}>
-            Risk status · {grade.label} grading · {cd.admissionType}
+            Risk status · {cd.admissionType}
           </p>
         </section>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {[
-          ["Current wt", `${latestData.weight || cd.admissionWeight || "—"} kg`],
+          ["Wt during adm", `${cd.admissionWeight || "—"} kg`],
+          ["Current wt", `${latestData.weight || "—"} kg`],
           ["Targeted wt", `${cd.targetWeight || "—"} kg`],
           ["MUAC", `${latestData.muac || "—"} cm`],
           ["Oedema", latestData.oedema || "—"],
@@ -192,7 +193,8 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
             ["Transferred from", cd.fromFacility],
             ["Admission type", cd.admissionType === "Others" && cd.admissionOther ? `Others · ${cd.admissionOther}` : cd.admissionType],
             ["Admission date", cd.admissionDate ? fmtDate(cd.admissionDate) : ""],
-            ["Admission weight", cd.admissionWeight ? `${cd.admissionWeight} kg` : ""],
+            ["Weight during admission", cd.admissionWeight ? `${cd.admissionWeight} kg` : ""],
+            ["Current weight", latestData.weight ? `${latestData.weight} kg` : ""],
             ["Targeted weight", cd.targetWeight ? `${cd.targetWeight} kg` : ""],
             ["Admission age", ageMonthsToLabel(admission?.data?.ageMonths)],
             ["Gender", patient?.gender || patient?.sex],

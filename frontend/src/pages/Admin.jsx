@@ -37,6 +37,8 @@ const MASTER_TABS = [
   { id: "features", label: "Feature config" },
   { id: "symptoms", label: "Symptoms" },
   { id: "visits", label: "Visit type" },
+  { id: "schools", label: "Schools" },
+  { id: "donors", label: "Donors" },
   { id: "rules", label: "Programme rules" },
 ];
 
@@ -101,6 +103,8 @@ export default function Admin() {
           {master === "features" && <FeatureConfigMaster s={s} />}
           {master === "symptoms" && <SymptomsMaster s={s} />}
           {master === "visits" && <VisitTypeMaster s={s} />}
+          {master === "schools" && <SchoolsMaster s={s} />}
+          {master === "donors" && <DonorsMaster s={s} />}
           {master === "rules" && <RulesMaster s={s} />}
         </div>
       )}
@@ -669,6 +673,155 @@ const VisitTypeMaster = ({ s }) => {
         ))}
       </ul>
     </SectionCard>
+  );
+};
+
+const SchoolsMaster = ({ s }) => {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ name: "", province: "", district: "", village: "" });
+  const districts = f.province ? Object.keys(GEO[f.province] || {}) : [];
+  const villages = f.province && f.district ? GEO[f.province]?.[f.district] || [] : [];
+
+  const create = () => {
+    if (!f.name || !f.province) return toast.error("School name and province are required");
+    s.addSchool(f);
+    setOpen(false);
+    setF({ name: "", province: "", district: "", village: "" });
+    toast.success("School added");
+  };
+
+  return (
+    <>
+      <SectionCard
+        title="Schools"
+        desc="Schools appear in School Health visit dropdowns"
+        right={
+          <Button className="h-12" data-testid="add-school-btn" onClick={() => setOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Add school
+          </Button>
+        }
+      >
+        <div className="overflow-x-auto rounded-md border border-border">
+          <table className="w-full min-w-[600px] text-sm" data-testid="school-master-table">
+            <thead className="bg-muted">
+              <tr>
+                {["School", "Province", "District", "Village", ""].map((h) => (
+                  <th key={h} className="p-3 text-left font-semibold">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(s.schools || []).map((x) => (
+                <tr key={x.id} className="border-t border-border" data-testid={`school-row-${x.id}`}>
+                  <td className="p-3">
+                    <p className="font-semibold">{x.name}</p>
+                    <p className="text-xs text-muted-foreground">{x.id}</p>
+                  </td>
+                  <td className="p-3">{x.province}</td>
+                  <td className="p-3">{x.district}</td>
+                  <td className="p-3">{x.village}</td>
+                  <td className="p-3">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-10 w-10 text-red-600"
+                      data-testid={`remove-school-${x.id}`}
+                      onClick={() => {
+                        s.removeSchool(x.id);
+                        toast.success("School removed");
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg" data-testid="create-school-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-head text-xl">Add school</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5">
+            <TextField label="School name" testid="school-name-input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+            <SelectField label="Province" options={Object.keys(GEO)} value={f.province} onChange={(v) => setF({ ...f, province: v, district: "", village: "" })} testid="school-province-select" />
+            <SelectField label="District" options={districts} value={f.district} onChange={(v) => setF({ ...f, district: v, village: "" })} testid="school-district-select" />
+            <SelectField label="Village" options={villages} value={f.village} onChange={(v) => setF({ ...f, village: v })} testid="school-village-select" />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="h-11" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="h-11" data-testid="school-create-btn" onClick={create}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+};
+
+const DonorsMaster = ({ s }) => {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+
+  const create = () => {
+    if (!name.trim()) return toast.error("Donor name is required");
+    s.addDonor({ name: name.trim() });
+    setOpen(false);
+    setName("");
+    toast.success("Donor added");
+  };
+
+  return (
+    <>
+      <SectionCard
+        title="Donors"
+        desc="Donors appear in School Health visit dropdowns and filters"
+        right={
+          <Button className="h-12" data-testid="add-donor-btn" onClick={() => setOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Add donor
+          </Button>
+        }
+      >
+        <ul className="grid gap-2 sm:grid-cols-2" data-testid="donor-master-list">
+          {(s.donors || []).map((x) => (
+            <li key={x.id} className="flex items-center gap-2 rounded-md border border-border p-3 text-sm" data-testid={`donor-row-${x.id}`}>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold">{x.name}</p>
+                <p className="text-xs text-muted-foreground">{x.id}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-red-600"
+                data-testid={`remove-donor-${x.id}`}
+                onClick={() => {
+                  s.removeDonor(x.id);
+                  toast.success("Donor removed");
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </SectionCard>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="create-donor-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-head text-xl">Add donor</DialogTitle>
+          </DialogHeader>
+          <TextField label="Donor name" testid="donor-name-input" value={name} onChange={(e) => setName(e.target.value)} />
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="h-11" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="h-11" data-testid="donor-create-btn" onClick={create}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 

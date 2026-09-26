@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Check } from "lucide-react";
+import { Check, Plus } from "lucide-react";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { TextField, AreaField, SelectField, AlertPanel, ChoiceRow } from "@/components/Fields";
@@ -112,8 +112,15 @@ export default function MalnutritionEncounter() {
     return pool.find((v) => /admission/i.test(v.data?.visitType || v.type || "")) || pool[0] || null;
   }, [malEncs, existing, priorInEpisode]);
 
-  const [d, setD] = useState(() => {
-    const base = { ...empty(), ...(existing?.data || {}) };
+  /** Remount/reset key: each saved visit or each new week gets its own fresh form. */
+  const encounterKey = existing?.id || `new-week-${weekFromUrl || "next"}`;
+
+  const buildForm = () => {
+    // New follow-up / new week: start empty (do not copy admission monitoring data).
+    // Case details still seed from admission via lockedCaseDetails / seededCase.
+    const base = existing?.data
+      ? { ...empty(), ...existing.data }
+      : { ...empty() };
     base.outcome = { status: "Active", ...(base.outcome || {}) };
     if (!base.outcome.status) base.outcome.status = "Active";
     base.posology = { ...(base.posology || {}) };
@@ -127,6 +134,15 @@ export default function MalnutritionEncounter() {
       base.weight = base.caseDetails.admissionWeight;
     }
     if (visitType === "Follow-up") {
+      // Never keep clinical fields from a previous visit when opening a blank week
+      if (!existing) {
+        Object.assign(base, {
+          ...empty(),
+          visitType: "Follow-up",
+          outcome: { status: "Active" },
+          caseDetails: {},
+        });
+      }
       if (weekFromUrl && Number(weekFromUrl) >= 1) {
         base.week = String(Math.min(12, Number(weekFromUrl)));
       } else if (!base.week) {
@@ -135,7 +151,17 @@ export default function MalnutritionEncounter() {
       }
     }
     return base;
-  });
+  };
+
+  const [d, setD] = useState(buildForm);
+  const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
+
+  // URL/enc change (Adm → W2, W2 → W3, etc.) must reset — React keeps this page mounted
+  useEffect(() => {
+    setD(buildForm());
+    setSavedAt(existing ? "loaded from record" : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when visit identity changes
+  }, [encounterKey]);
 
   // Keep first-visit weight synced from case details admission weight when empty / matching prior
   useEffect(() => {
@@ -165,9 +191,8 @@ export default function MalnutritionEncounter() {
       if (s.visitType === nextType && String(s.week || "") === String(week || s.week || "")) return s;
       return { ...s, visitType: nextType, ...(nextType === "Follow-up" ? { week } : { week: s.week || "" }) };
     });
-  }, [isAdmissionVisit, priorInEpisode, weekFromUrl]);
+  }, [isAdmissionVisit, priorInEpisode, weekFromUrl, encounterKey]);
 
-  const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
 
   const dob = p?.dob || dobFromAge(p?.age, p?.createdAt);
@@ -189,26 +214,18 @@ export default function MalnutritionEncounter() {
   const lockedCaseDetails = useMemo(() => {
     const fromAdmission = admissionVisit?.data?.caseDetails || {};
     const fromExisting = existing?.data?.caseDetails || {};
-    // Prefer admission visit as source of truth for the episode
+    // Prefer admission visit as source of truth for the episode (carry-forward)
     const src = Object.keys(fromAdmission).length ? fromAdmission : fromExisting;
     return src;
   }, [admissionVisit, existing]);
 
-  const caseAlreadyEntered = !!(
-    lockedCaseDetails.caseType
-    || lockedCaseDetails.admissionType
-    || lockedCaseDetails.admissionDate
-    || lockedCaseDetails.admissionWeight
-    || lockedCaseDetails.targetWeight
+  // Always editable — carry-forward seeds values; user can change Case details when needed
+  const canEditCaseDetails = true;
+
+  const seededCase = useMemo(
+    () => ({ ...lockedCaseDetails, ...(d.caseDetails || {}) }),
+    [d.caseDetails, lockedCaseDetails],
   );
-
-  // Editable only on first admission before case details have been saved
-  const canEditCaseDetails = isAdmissionVisit && !caseAlreadyEntered;
-
-  const seededCase = useMemo(() => {
-    if (canEditCaseDetails) return d.caseDetails || {};
-    return { ...lockedCaseDetails, ...(d.caseDetails || {}) };
-  }, [canEditCaseDetails, d.caseDetails, lockedCaseDetails]);
 
   const grade = malColorGrade(seededCase.admissionType || lockedCaseDetails.admissionType || d.caseDetails.admissionType);
 
@@ -252,17 +269,13 @@ export default function MalnutritionEncounter() {
     const visitType = isAdmissionVisit ? "Admission" : "Follow-up";
     const type = visitType === "Follow-up" ? `Follow-up${d.week ? ` · Week ${d.week}` : ""}` : "Admission";
     const outcomeStatus = d.outcome?.status || "Active";
-    // Once entered, case details stay fixed for every encounter in the episode
-    const caseDetails = canEditCaseDetails
-      ? {
-          ...d.caseDetails,
-          caseNo,
-          admissionDate: d.caseDetails.admissionDate || localISODate(),
-        }
-      : {
-          ...lockedCaseDetails,
-          caseNo: lockedCaseDetails.caseNo || caseNo,
-        };
+    // Carry-forward episode case details; allow edits on any visit (Case details alone)
+    const caseDetails = {
+      ...lockedCaseDetails,
+      ...d.caseDetails,
+      caseNo: d.caseDetails?.caseNo || lockedCaseDetails.caseNo || caseNo,
+      admissionDate: d.caseDetails?.admissionDate || lockedCaseDetails.admissionDate || localISODate(),
+    };
     saveEncounter({
       id: existing?.id,
       patientId: p.id,
@@ -306,7 +319,7 @@ export default function MalnutritionEncounter() {
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground" data-testid="mal-auto-visit-type">
             Visit type: <span className="font-semibold text-foreground">{d.visitType}</span>
-            {d.visitType === "Follow-up" ? ` · Week ${d.week || "—"} (auto — subsequent encounter)` : " (auto — first encounter)"}
+            {d.visitType === "Follow-up" ? ` · Week ${d.week || "—"} (subsequent encounter)` : " (upon admission)"}
           </p>
           {d.visitType === "Follow-up" && (
             <TextField
@@ -320,14 +333,13 @@ export default function MalnutritionEncounter() {
               hint="Which follow-up week you are recording"
             />
           )}
-          <div className="grid gap-4 sm:grid-cols-2" data-testid={canEditCaseDetails ? "mal-case-edit" : "mal-case-readonly"}>
+          <div className="grid gap-4 sm:grid-cols-2" data-testid="mal-case-edit">
             <SelectField
               label="Case type"
               options={CASE_TYPES}
               value={seededCase.caseType || ""}
               onChange={(v) => setCase({ caseType: v })}
               testid="mal-case-type"
-              disabled={!canEditCaseDetails}
             />
             {(seededCase.caseType === "Transfer in") && (
               <TextField
@@ -335,7 +347,6 @@ export default function MalnutritionEncounter() {
                 value={seededCase.fromFacility || ""}
                 onChange={(e) => setCase({ fromFacility: e.target.value })}
                 testid="mal-from-facility"
-                disabled={!canEditCaseDetails}
               />
             )}
             <SelectField
@@ -344,7 +355,6 @@ export default function MalnutritionEncounter() {
               value={seededCase.admissionType || ""}
               onChange={(v) => setCase({ admissionType: v })}
               testid="mal-admission-type"
-              disabled={!canEditCaseDetails}
             />
             {seededCase.admissionType === "Others" && (
               <TextField
@@ -352,26 +362,22 @@ export default function MalnutritionEncounter() {
                 value={seededCase.admissionOther || ""}
                 onChange={(e) => setCase({ admissionOther: e.target.value })}
                 testid="mal-admission-other"
-                disabled={!canEditCaseDetails}
               />
             )}
             <TextField
               label="Admission date"
               type="date"
-              value={seededCase.admissionDate || (canEditCaseDetails ? localISODate() : "")}
+              value={seededCase.admissionDate || localISODate()}
               onChange={(e) => setCase({ admissionDate: e.target.value })}
               testid="mal-admission-date"
-              disabled={!canEditCaseDetails}
-              allowEmpty={!canEditCaseDetails}
             />
             <TextField
-              label="Admission weight (kg)"
+              label="Weight during admission (kg)"
               type="number"
               step="0.1"
               value={seededCase.admissionWeight || ""}
               onChange={(e) => setCase({ admissionWeight: e.target.value })}
               testid="mal-admission-weight"
-              disabled={!canEditCaseDetails}
             />
             <TextField
               label="Targeted weight (kg)"
@@ -380,7 +386,6 @@ export default function MalnutritionEncounter() {
               value={seededCase.targetWeight || ""}
               onChange={(e) => setCase({ targetWeight: e.target.value })}
               testid="mal-targeted-weight"
-              disabled={!canEditCaseDetails}
             />
             <TextField label="Admission age" value={ageMonthsToLabel(admissionVisit?.data?.ageMonths ?? ageMonths)} readOnly testid="mal-age" />
             <TextField label="Gender" value={sex || "—"} readOnly testid="mal-gender" />
@@ -394,6 +399,62 @@ export default function MalnutritionEncounter() {
       done: !!d.weight || !!d.muac,
       body: (
         <div className="space-y-6">
+          <div data-testid="mal-assessment-weeks">
+            <p className="mb-2 text-[11px] font-semibold text-muted-foreground">12 weeks · tap to open or enter</p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (admissionVisit) navigate(`/patients/${id}/malnutrition?enc=${encodeURIComponent(admissionVisit.id)}`);
+                }}
+                disabled={!admissionVisit}
+                className={`inline-flex h-9 min-w-[3.25rem] items-center justify-center rounded-md border px-2.5 text-xs font-bold transition-colors ${
+                  isAdmissionVisit
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : admissionVisit
+                      ? "border-primary/40 bg-secondary text-primary hover:bg-secondary/80"
+                      : "border-border bg-muted/40 text-muted-foreground"
+                }`}
+                data-testid="mal-assessment-week-adm"
+              >
+                Adm
+              </button>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((w) => {
+                const visit = [...priorInEpisode, ...(existing ? [existing] : [])].find((v) => visitWeekNumber(v) === w);
+                const selected = !isAdmissionVisit && Number(d.week) === w;
+                const filled = !!visit;
+                return (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => {
+                      if (visit) {
+                        if (existing?.id === visit.id) return;
+                        navigate(`/patients/${id}/malnutrition?enc=${encodeURIComponent(visit.id)}`);
+                        return;
+                      }
+                      // Empty week → always open a fresh follow-up form (no carry-forward of monitoring)
+                      if (!existing && String(weekFromUrl || d.week) === String(w)) return;
+                      navigate(`/patients/${id}/malnutrition?week=${encodeURIComponent(w)}`);
+                    }}
+                    className={`inline-flex h-9 min-w-[3.25rem] items-center justify-center gap-0.5 rounded-md border px-2.5 text-xs font-bold transition-colors ${
+                      selected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : filled
+                          ? "border-primary/40 bg-secondary text-primary hover:bg-secondary/80"
+                          : "border-dashed border-primary/50 bg-white text-primary hover:bg-secondary"
+                    }`}
+                    data-testid={`mal-assessment-week-${w}`}
+                    title={filled ? `Open Week ${w}` : `Enter Week ${w}`}
+                  >
+                    W{w}
+                    {!filled && <Plus className="h-3 w-3 opacity-70" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div>
             <p className="mb-2 font-head text-sm font-semibold text-primary">Anthropometry</p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -402,7 +463,7 @@ export default function MalnutritionEncounter() {
               ))}
             </div>
             {d.visitType === "Admission" && d.caseDetails.admissionWeight && (
-              <p className="mt-2 text-xs text-muted-foreground">Current weight prefilled from Admission weight in Case details.</p>
+              <p className="mt-2 text-xs text-muted-foreground">Weight during admission is in Case details; enter current weight here each visit.</p>
             )}
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <IndexBadge label="Weight-for-age" r={idx.wfa} />
@@ -410,8 +471,8 @@ export default function MalnutritionEncounter() {
               <IndexBadge label="Height-for-age" r={idx.hfa} />
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <ChoiceChips label="Oedema" options={OEDEMA} value={d.oedema} onChange={(v) => set("oedema", v)} testid="mal-oedema" />
-              <ChoiceChips label="Appetite test" options={APPETITE} value={d.appetite} onChange={(v) => set("appetite", v)} testid="mal-appetite" />
+              <ChoiceChips label="Oedema" options={OEDEMA} value={d.oedema} onChange={(v) => set("oedema", v)} negativeOptions={["+", "++", "+++"]} testid="mal-oedema" />
+              <ChoiceChips label="Appetite test" options={APPETITE} value={d.appetite} onChange={(v) => set("appetite", v)} negativeOptions={["Fail"]} testid="mal-appetite" />
             </div>
           </div>
 
@@ -428,7 +489,14 @@ export default function MalnutritionEncounter() {
             <p className="mb-2 font-head text-sm font-semibold text-primary">History</p>
             <div className="grid gap-3 sm:grid-cols-2">
               {HISTORY.map((h) => (
-                <YesNo key={h.k} label={h.label} value={d.history[h.k]} onChange={(v) => setHist(h.k, v)} testid={`mal-hist-${h.k}`} />
+                <YesNo
+                  key={h.k}
+                  label={h.label}
+                  value={d.history[h.k]}
+                  onChange={(v) => setHist(h.k, v)}
+                  negativeValue={h.k === "breastfeeding" ? "No" : "Yes"}
+                  testid={`mal-hist-${h.k}`}
+                />
               ))}
             </div>
           </div>
@@ -436,8 +504,8 @@ export default function MalnutritionEncounter() {
           <div>
             <p className="mb-2 font-head text-sm font-semibold text-primary">Physical examination</p>
             <div className="grid gap-4 sm:grid-cols-2">
-              <ChoiceChips label="Respiratory rate (/min)" options={RR_BANDS} value={d.rr} onChange={(v) => set("rr", v)} testid="mal-rr" />
-              <ChoiceChips label="Temperature" options={TEMP_OPTS} value={d.temp} onChange={(v) => set("temp", v)} testid="mal-temp" />
+              <ChoiceChips label="Respiratory rate (/min)" options={RR_BANDS} value={d.rr} onChange={(v) => set("rr", v)} negativeOptions={["40–49", "50+"]} testid="mal-rr" />
+              <ChoiceChips label="Temperature" options={TEMP_OPTS} value={d.temp} onChange={(v) => set("temp", v)} negativeOptions={["Febrile"]} testid="mal-temp" />
             </div>
           </div>
 

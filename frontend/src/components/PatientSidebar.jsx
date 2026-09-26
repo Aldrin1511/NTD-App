@@ -6,7 +6,6 @@ import { yawsTreatmentSummary } from "@/components/YawsMedications";
 import { lfTreatmentSummary } from "@/components/LfMedications";
 import { buruliTreatmentSummary } from "@/components/BuruliMedications";
 import { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
-import { ANTENATAL_ID, ancRiskLevel, autoRiskFactors } from "@/mock/antenatal";
 import {
   MAL_ID, malDisplayStatus, malColorGrade, malWeeksVisited, malLastVisitLabel,
 } from "@/mock/malnutrition";
@@ -47,14 +46,6 @@ export default function PatientSidebar({
   const diseaseNames = diseases
     .map((d) => (typeof d === "string" ? DISEASE_SPECS[d]?.name || d : d.name))
     .filter(Boolean);
-
-  const ancEnc = [...encounters]
-    .filter((e) => e.disease === ANTENATAL_ID)
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  const ancRisks = ancEnc?.data?.history?.riskFactors?.length
-    ? ancEnc.data.history.riskFactors
-    : autoRiskFactors(ancEnc?.data || {}, p);
-  const ancRisk = ancRiskLevel(ancRisks);
 
   const malVisits = [...encounters]
     .filter((e) => e.disease === MAL_ID)
@@ -119,12 +110,6 @@ export default function PatientSidebar({
         <p className="mt-1 text-sm">
           <b>Conditions:</b> {diseaseNames.join(", ") || "None"}
         </p>
-        {ancRisks.length > 0 && (
-          <p className="mt-1 text-sm">
-            <b>ANC risk:</b>{" "}
-            <span className={ancRisk === "high" ? "font-semibold text-red-700" : "font-semibold text-amber-800"}>{ancRisks.join(" · ")}</span>
-          </p>
-        )}
         {malType && (
           <p className="mt-1 text-sm" data-testid="mal-sidebar-summary">
             <b>Malnutrition:</b>{" "}

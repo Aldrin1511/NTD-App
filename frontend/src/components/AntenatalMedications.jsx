@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Check } from "lucide-react";
 import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { AddDrugSelect, DrugVisitFields } from "@/components/MedicationShared";
@@ -15,13 +16,14 @@ function AdviceList({ items = [] }) {
   );
 }
 
-function DrugCard({ id, title, selected, onToggle, children }) {
+function DrugCard({ id, title, selected, onToggle, onActivate, testidPrefix, children }) {
   return (
     <div
       className={`rounded-lg border p-4 ${selected ? "border-primary bg-secondary/40" : "border-border bg-white"}`}
-      data-testid={`anc-drug-${id}`}
+      data-testid={`${testidPrefix}-drug-${id}`}
+      onFocusCapture={selected ? onActivate : undefined}
     >
-      <button type="button" onClick={onToggle} className="flex w-full items-start gap-3 text-left" data-testid={`anc-drug-toggle-${id}`}>
+      <button type="button" onClick={onToggle} className="flex w-full items-start gap-3 text-left" data-testid={`${testidPrefix}-drug-toggle-${id}`}>
         <span
           className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded border ${
             selected ? "border-primary bg-primary text-white" : "border-input bg-white"
@@ -36,10 +38,30 @@ function DrugCard({ id, title, selected, onToggle, children }) {
   );
 }
 
-const metaFor = (name) => ANC_DRUG_META[name] || {};
+function CompactPosology({ name, meta, posology, onExpand, testidPrefix }) {
+  const ov = posology?.[name] || {};
+  const dosage = ov.dosage || meta.dosage || "—";
+  const frequency = ov.frequency || meta.frequency || "—";
+  const duration = ov.duration || meta.duration || "—";
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      className="w-full rounded-md border border-border/60 bg-white px-3 py-2 text-left text-sm hover:border-primary/40"
+      data-testid={`${testidPrefix}-drug-compact-${slugDrug(name)}`}
+    >
+      <p className="font-medium text-foreground">{dosage}</p>
+      <p className="text-muted-foreground">
+        {frequency}
+        {duration && duration !== "—" ? ` · ${duration}` : ""}
+      </p>
+    </button>
+  );
+}
 
 /**
- * ANC drugs — select first; advice + visit posology only appear after selection.
+ * Condition drug cards — same UX as ANC: advice when unselected,
+ * full posology when active, compact summary when selected earlier.
  */
 export default function AntenatalMedications({
   drugs = [],
@@ -47,9 +69,17 @@ export default function AntenatalMedications({
   medCourses = {},
   catalogue = [],
   onChange,
+  presetDrugs = ANC_DRUGS,
+  drugMeta = ANC_DRUG_META,
+  diseaseId = "antenatal",
+  testid = "anc-medications",
+  banner,
 }) {
+  const [activeDrug, setActiveDrug] = useState(null);
   const selected = new Set(drugs || []);
-  const extras = (drugs || []).filter((n) => !ANC_DRUGS.includes(n));
+  const extras = (drugs || []).filter((n) => !presetDrugs.includes(n));
+  const metaFor = (name) => drugMeta[name] || {};
+  const prefix = testid.replace(/-medications$/, "") || "anc";
 
   const toggle = (name, on) => {
     const next = on ? [...new Set([...(drugs || []), name])] : (drugs || []).filter((x) => x !== name);
@@ -63,6 +93,7 @@ export default function AntenatalMedications({
         advice: (meta.advice || []).join(" "),
       }, meta);
     }
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       drugs: next,
       medCourses: withDrugCourse(medCourses, name, on),
@@ -74,23 +105,9 @@ export default function AntenatalMedications({
 
   const renderCardBody = (name, on) => {
     const meta = metaFor(name);
-    const hasAdvice = meta.advice?.length > 0;
-    const hasNote = !!meta.note;
-    if (!hasAdvice && !hasNote && !on) return null;
-    return (
-      <>
-        {hasAdvice && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground">Advice</p>
-            <AdviceList items={meta.advice} />
-          </div>
-        )}
-        {hasNote && (
-          <AlertPanel level="info" title="Note" testid={`anc-drug-note-${slugDrug(name)}`}>
-            {meta.note}
-          </AlertPanel>
-        )}
-        {on && (
+    if (on) {
+      if (activeDrug === name) {
+        return (
           <DrugVisitFields
             name={name}
             selected
@@ -104,21 +121,46 @@ export default function AntenatalMedications({
               duration: meta.duration || "",
             }}
           />
+        );
+      }
+      return (
+        <CompactPosology
+          name={name}
+          meta={meta}
+          posology={posology}
+          onExpand={() => setActiveDrug(name)}
+          testidPrefix={prefix}
+        />
+      );
+    }
+    const hasAdvice = meta.advice?.length > 0;
+    const hasNote = !!meta.note;
+    if (!hasAdvice && !hasNote) return null;
+    return (
+      <>
+        {hasAdvice && (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground">Advice</p>
+            <AdviceList items={meta.advice} />
+          </div>
+        )}
+        {hasNote && (
+          <AlertPanel level="info" title="Note" testid={`${prefix}-drug-note-${slugDrug(name)}`}>
+            {meta.note}
+          </AlertPanel>
         )}
       </>
     );
   };
 
   return (
-    <div className="space-y-4" data-testid="anc-medications">
+    <div className="space-y-4" data-testid={testid}>
       <p className="text-sm text-muted-foreground">
-        Select medications for this visit. Advice and notes follow each option; posology appears after you select a drug.
+        Review advice before selecting. After you move to another drug, earlier selections show only the name and posology.
       </p>
-      <AlertPanel level="info" title="Regimen by GA" testid="anc-drug-ga-note">
-        GA-based regimen suggestions will be added later. Select standard drugs for now.
-      </AlertPanel>
+      {banner}
 
-      {ANC_DRUGS.map((name) => {
+      {presetDrugs.map((name) => {
         const on = selected.has(name);
         return (
           <DrugCard
@@ -127,6 +169,8 @@ export default function AntenatalMedications({
             title={name}
             selected={on}
             onToggle={() => toggle(name, !on)}
+            onActivate={() => setActiveDrug(name)}
+            testidPrefix={prefix}
           >
             {renderCardBody(name, on)}
           </DrugCard>
@@ -142,6 +186,8 @@ export default function AntenatalMedications({
             title={name}
             selected={on}
             onToggle={() => toggle(name, !on)}
+            onActivate={() => setActiveDrug(name)}
+            testidPrefix={prefix}
           >
             {renderCardBody(name, on)}
           </DrugCard>
@@ -150,23 +196,23 @@ export default function AntenatalMedications({
 
       <AddDrugSelect
         catalogue={catalogue}
-        diseaseId="antenatal"
+        diseaseId={diseaseId}
         selected={drugs}
-        testid="anc-drug-add"
+        testid={`${prefix}-drug-add`}
         onAdd={(name) => toggle(name, true)}
       />
     </div>
   );
 }
 
-/** Build dashboard / print rows for an ANC visit's drugs. */
-export function ancMedicationRows(visit) {
+/** Build dashboard / print rows for a visit's drugs. */
+export function medicationRows(visit, drugMeta = {}) {
   const x = visit?.data || {};
   const names = x.drugs || [];
   const dateFallback = visit?.date || "";
   const rows = [];
   names.forEach((name) => {
-    const meta = metaFor(name);
+    const meta = drugMeta[name] || {};
     const ov = (x.posology || {})[name] || {};
     const courses = Array.isArray(x.medCourses?.[name]) ? x.medCourses[name] : [];
     const stamps = courses.some((c) => c?.date)
@@ -184,4 +230,8 @@ export function ancMedicationRows(visit) {
     });
   });
   return rows;
+}
+
+export function ancMedicationRows(visit) {
+  return medicationRows(visit, ANC_DRUG_META);
 }

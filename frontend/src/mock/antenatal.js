@@ -339,26 +339,33 @@ export const BABY_OUTCOMES = [
 ];
 
 export const PHYSICAL_EXAM_FIELDS = [
-  { k: "generalCondition", label: "General Condition", options: ["Good", "Poor"] },
-  { k: "color", label: "Color", options: ["Pink", "Cyanosed"] },
-  { k: "size", label: "Size", options: ["Average", "Big", "Small"] },
-  { k: "ears", label: "Ears", options: ["Normal", "Abnormal"] },
-  { k: "moulding", label: "Moulding", options: ["None", "Moderate", "Severe"] },
-  { k: "lips", label: "Lips", options: ["Normal", "Cleft lip"] },
-  { k: "caput", label: "Caput", options: ["None", "Present"] },
-  { k: "palate", label: "Palate", options: ["Normal", "Cleft Palate"] },
-  { k: "fontanelles", label: "Fontanelles", options: ["Normal", "Bulging"] },
-  { k: "eyes", label: "Eyes", options: ["Clear", "Discharge"] },
-  { k: "breastTissue", label: "Breast Tissue", options: ["Present", "Absent"] },
-  { k: "threeVesselCord", label: "3 Vessel Cord", options: ["Present", "Absent"] },
-  { k: "testes", label: "Testes", options: ["Descended (In Scrotum)", "Undescended (not In Scrotum)"], sex: "Male" },
-  { k: "penis", label: "Penis", options: ["Normal", "Abnormal"], sex: "Male" },
-  { k: "vaginalDischarge", label: "Vaginal Discharge", options: ["Present", "Absent"], sex: "Female" },
-  { k: "meconiumPassed", label: "Meconium Passed", options: ["Yes", "No"] },
-  { k: "urinePassed", label: "Urine Passed", options: ["Yes", "No"] },
-  { k: "armsHands", label: "Arms/Hands", options: ["Normal", "Abnormal", "Extra Fingers"] },
-  { k: "legsToes", label: "Legs/Toes", options: ["Normal", "Abnormal", "Talipses"] },
-  { k: "spine", label: "Spine", options: ["Normal", "Abnormal", "Spina Bifida"] },
+  { k: "generalCondition", label: "General Condition", options: ["Good", "Poor"], alert: ["Poor"] },
+  { k: "color", label: "Color", options: ["Pink", "Cyanosed"], alert: ["Cyanosed"] },
+  { k: "size", label: "Size", options: ["Average", "Big", "Small"], alert: ["Small", "Big"] },
+  { k: "ears", label: "Ears", options: ["Normal", "Abnormal"], alert: ["Abnormal"] },
+  { k: "moulding", label: "Moulding", options: ["None", "Moderate", "Severe"], alert: ["Moderate", "Severe"] },
+  { k: "lips", label: "Lips", options: ["Normal", "Cleft lip"], alert: ["Cleft lip"] },
+  { k: "caput", label: "Caput", options: ["None", "Present"], alert: ["Present"] },
+  { k: "palate", label: "Palate", options: ["Normal", "Cleft Palate"], alert: ["Cleft Palate"] },
+  { k: "fontanelles", label: "Fontanelles", options: ["Normal", "Bulging"], alert: ["Bulging"] },
+  { k: "eyes", label: "Eyes", options: ["Clear", "Discharge"], alert: ["Discharge"] },
+  { k: "breastTissue", label: "Breast Tissue", options: ["Present", "Absent"], alert: ["Absent"] },
+  { k: "threeVesselCord", label: "3 Vessel Cord", options: ["Present", "Absent"], alert: ["Absent"] },
+  { k: "testes", label: "Testes", options: ["Descended (In Scrotum)", "Undescended (not In Scrotum)"], sex: "Male", alert: ["Undescended (not In Scrotum)"] },
+  { k: "penis", label: "Penis", options: ["Normal", "Abnormal"], sex: "Male", alert: ["Abnormal"] },
+  { k: "vaginalDischarge", label: "Vaginal Discharge", options: ["Present", "Absent"], sex: "Female", alert: ["Present"] },
+  { k: "meconiumPassed", label: "Meconium Passed", options: ["Yes", "No"], alert: ["No"] },
+  { k: "urinePassed", label: "Urine Passed", options: ["Yes", "No"], alert: ["No"] },
+  { k: "armsHands", label: "Arms/Hands", options: ["Normal", "Abnormal", "Extra Fingers"], alert: ["Abnormal", "Extra Fingers"] },
+  { k: "legsToes", label: "Legs/Toes", options: ["Normal", "Abnormal", "Talipses"], alert: ["Abnormal", "Talipses"] },
+  { k: "spine", label: "Spine", options: ["Normal", "Abnormal", "Spina Bifida"], alert: ["Abnormal", "Spina Bifida"] },
+];
+
+/** Baby outcomes that should show as red/alert when selected. */
+export const BABY_OUTCOME_ALERTS = [
+  "Neonatal Death",
+  "Still Birth - Fresh",
+  "Still Birth - Macerated Fetus",
 ];
 
 export const ANC_OUTCOMES = ["Active", "Discharged", "Maternal Death", "Lost to Follow up"];

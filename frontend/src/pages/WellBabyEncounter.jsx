@@ -3,31 +3,60 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Field, TextField, AreaField, SelectField, AlertPanel, ItemActions } from "@/components/Fields";
-import { ConditionEntryShell, ChipMultiWithOther, ChoiceChips } from "@/components/EntryKit";
+import { ConditionEntryShell, ChipMultiWithOther } from "@/components/EntryKit";
 import { GrowthEntry } from "@/components/GrowthChart";
+import MilestoneChart from "@/components/MilestoneChart";
 import { dobFromAge } from "@/components/Capture";
 import { monthsBetween, ageMonthsToLabel } from "@/mock/growth";
-import { localISODate, fmtDate } from "@/mock/specs";
+import { localISODate } from "@/mock/specs";
 import {
-  WELLBABY_ID, WELLBABY_NAME, CHIEF_COMPLAINTS, ALLERGIES, MILESTONES, WELLBABY_DRUGS,
-  immunizationDueFromDob, isVaccineOverdue, groupVaccinesByFamily, milestoneFlag, newWbEpisodeId,
+  WELLBABY_ID, WELLBABY_NAME, CHIEF_COMPLAINTS, ALLERGIES, WELLBABY_DRUGS, WELLBABY_DRUG_META,
+  WELLBABY_LAB_TESTS, immunizationDueFromDob, isVaccineOverdue, newWbEpisodeId,
+  entryVisibleVaccines, entryDropdownVaccines,
 } from "@/mock/wellbaby";
+import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
+import AntenatalMedications from "@/components/AntenatalMedications";
 import { toast } from "sonner";
-import { Check, Trash2, Plus, Search } from "lucide-react";
 
-const empty = () => ({ delivery: {}, complaints: [], allergy: [], growth: { standard: "WHO", mode: "Percentile", measures: {} }, immunization: {}, milestones: {}, notes: [""], drugs: [], lab: [] });
+const emptyLabRow = (name) => ({
+  test: name || WELLBABY_LAB_TESTS[0]?.name || "HIV test",
+  result: "",
+  analyte: "",
+  location: "Bedside",
+  date: localISODate(),
+  sentToLab: false,
+  completed: false,
+});
+
+const empty = () => ({
+  delivery: {}, complaints: [], allergy: [], growth: { standard: "WHO", mode: "Percentile", measures: {} },
+  immunization: {}, milestones: {}, notes: [""], drugs: [], posology: {}, medCourses: {},
+  lab: WELLBABY_LAB_TESTS.map((t) => emptyLabRow(t.name)),
+});
 
 export default function WellBabyEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, user, settings, online } = useStore();
+  const { patients, encounters, saveEncounter, user, settings, facilities, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.id === params.get("enc") && e.disease === WELLBABY_ID);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
-  const [d, setD] = useState(() => ({ ...empty(), ...(existing?.data || {}) }));
+  const [d, setD] = useState(() => {
+    const base = { ...empty(), ...(existing?.data || {}) };
+    if (!Array.isArray(base.lab)) base.lab = [];
+    if (!base.lab.length) {
+      base.lab = WELLBABY_LAB_TESTS.map((t) => emptyLabRow(t.name));
+    } else {
+      const missing = WELLBABY_LAB_TESTS.filter((t) => !base.lab.some((r) => r.test === t.name));
+      if (missing.length) {
+        base.lab = [...base.lab, ...missing.map((t) => emptyLabRow(t.name))];
+      }
+    }
+    return base;
+  });
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
-  const [labSearch, setLabSearch] = useState("");
+  const [revealedVacIds, setRevealedVacIds] = useState([]);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "Well baby visit";
 
@@ -35,8 +64,8 @@ export default function WellBabyEncounter() {
   const visitDate = existing?.date || localISODate();
   const ageMonths = monthsBetween(dob, visitDate);
   const schedule = (settings.immunizationSchedules || []).find((s) => s.condition === WELLBABY_ID) || { vaccines: [] };
-  const labMaster = settings.labMaster || [];
   const vaccineDrugs = (settings.drugs || []).filter((x) => x.type === "Vaccine" || x.form === "Vaccine");
+  const facilityHasLab = useMemo(() => (facilities || []).some((f) => f.name === facility && f.hasLab), [facilities, facility]);
 
   if (!p) return <div className="p-8">Patient not found. <Button onClick={() => navigate("/patients")}>Back</Button></div>;
 
@@ -46,18 +75,59 @@ export default function WellBabyEncounter() {
 
   const toggleVaccine = (item) => setD((s) => { const cur = s.immunization[item.id]; return { ...s, immunization: { ...s.immunization, [item.id]: cur?.given ? { given: false } : { given: true, date: localISODate() } } }; });
   const setVaccineDate = (k, date) => setD((s) => ({ ...s, immunization: { ...s.immunization, [k]: { given: true, date } } }));
+  const scheduleVaccines = schedule.vaccines || [];
+  const asOf = visitDate ? new Date(visitDate) : new Date();
+  const visibleVaccines = entryVisibleVaccines(scheduleVaccines, d.immunization, dob, revealedVacIds, asOf);
+  const dropdownScheduleDoses = entryDropdownVaccines(scheduleVaccines, d.immunization, dob, revealedVacIds, asOf);
+  const addVacOptions = [
+    ...dropdownScheduleDoses.map((v) => ({ value: `sch:${v.id}`, label: v.name })),
+    ...vaccineDrugs
+      .filter((v) => !d.immunization[v.name] && !scheduleVaccines.some((s) => s.name === v.name || s.id === v.name))
+      .map((v) => ({ value: `drug:${v.name}`, label: v.name })),
+  ];
+  const onAddVaccine = (raw) => {
+    if (!raw) return;
+    if (raw.startsWith("sch:")) {
+      const id = raw.slice(4);
+      setRevealedVacIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      return;
+    }
+    if (raw.startsWith("drug:")) setVaccineDate(raw.slice(5), localISODate());
+  };
   const toggleMilestone = (m) => setD((s) => { const cur = s.milestones[m.id]; return { ...s, milestones: { ...s.milestones, [m.id]: cur?.achieved ? { achieved: false } : { achieved: true, date: localISODate() } } }; });
   const setMilestoneDate = (mid, date) => setD((s) => ({ ...s, milestones: { ...s.milestones, [mid]: { achieved: true, date } } }));
+  const clearMilestone = (mid) => setD((s) => ({ ...s, milestones: { ...s.milestones, [mid]: { achieved: false } } }));
 
-  const addLab = (name) => { const def = labMaster.find((t) => t.name === name); setD((s) => ({ ...s, lab: [{ test: name, result: "", location: def?.location || "Bedside", date: localISODate() }, ...s.lab] })); setLabSearch(""); };
+  const labTestNames = WELLBABY_LAB_TESTS.map((t) => t.name);
+
+  const addLabForTest = (testName, afterIndex) => {
+    const row = emptyLabRow(testName);
+    setD((s) => {
+      if (afterIndex == null) {
+        const lastIdx = s.lab.reduce((acc, r, i) => (r.test === testName ? i : acc), -1);
+        if (lastIdx < 0) return { ...s, lab: [row, ...s.lab] };
+        const next = [...s.lab];
+        next.splice(lastIdx + 1, 0, row);
+        return { ...s, lab: next };
+      }
+      const next = [...s.lab];
+      next.splice(afterIndex + 1, 0, row);
+      return { ...s, lab: next };
+    });
+  };
   const updLab = (i, patch) => setD((s) => ({ ...s, lab: s.lab.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
-  const rmLab = (i) => setD((s) => ({ ...s, lab: s.lab.filter((_, j) => j !== i) }));
-  const labMatches = labMaster.filter((t) => t.name.toLowerCase().includes(labSearch.toLowerCase()) && !d.lab.some((x) => x.test === t.name));
+  const rmLab = (i) => setD((s) => {
+    const removed = s.lab[i];
+    const next = s.lab.filter((_, j) => j !== i);
+    if (removed && labTestNames.includes(removed.test) && !next.some((r) => r.test === removed.test)) {
+      return { ...s, lab: [...next, emptyLabRow(removed.test)] };
+    }
+    return { ...s, lab: next };
+  });
 
   const setNote = (i, v) => setD((s) => ({ ...s, notes: s.notes.map((n, j) => (j === i ? v : n)) }));
   const addNote = () => setD((s) => ({ ...s, notes: ["", ...s.notes] }));
   const rmNote = (i) => setD((s) => ({ ...s, notes: s.notes.length <= 1 ? [""] : s.notes.filter((_, j) => j !== i) }));
-  const toggleDrug = (name) => setD((s) => ({ ...s, drugs: s.drugs.includes(name) ? s.drugs.filter((x) => x !== name) : [...s.drugs, name] }));
   const catalogueDrugs = (settings.drugs || []).filter((x) => x.type !== "Vaccine" && x.form !== "Vaccine").map((x) => x.name);
 
   const persist = (close) => {
@@ -97,62 +167,45 @@ export default function WellBabyEncounter() {
       title: "Immunization", done: Object.values(d.immunization).some((x) => x?.given),
       body: (
         <div className="space-y-2" data-testid="wb-immunization">
-          <p className="text-xs text-muted-foreground">Schedule: <b>{schedule.name || "—"}</b> (edit in Admin → Masters)</p>
-          {groupVaccinesByFamily(schedule.vaccines || []).map((group) => (
-            <div key={group.family} className="flex flex-wrap gap-2" data-testid={`wb-vac-group-${group.family}`}>
-              {group.doses.map((item) => {
-                const rec = d.immunization[item.id];
-                const overdue = isVaccineOverdue(item, rec, dob);
-                const due = immunizationDueFromDob(item, dob);
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex w-[calc((100%-1rem)/3)] items-start gap-1.5 rounded-md border p-2 ${rec?.given ? "border-green-500 bg-green-50" : overdue ? "border-red-500 bg-red-50" : "border-border bg-white"}`}
-                    data-testid={`wb-vac-${item.id}`}
-                  >
-                    <button type="button" onClick={() => toggleVaccine(item)} data-testid={`wb-vac-toggle-${item.id}`} className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center" aria-label={rec?.given ? "Mark not given" : "Mark given"}>
-                      <Check className={`h-3.5 w-3.5 ${rec?.given ? "text-green-600" : "text-muted-foreground/40"}`} strokeWidth={rec?.given ? 3 : 2} />
-                    </button>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="text-sm font-semibold leading-tight">{item.name}</p>
-                      <p className="text-[10px] leading-snug text-muted-foreground">{item.note} · due {due ? fmtDate(due) : "—"}{overdue ? " · OVERDUE" : ""}</p>
-                      {rec?.given && (
-                        <input
-                          type="date"
-                          className="h-7 w-[7.5rem] max-w-full rounded border border-input bg-white px-1.5 text-[11px]"
-                          value={rec.date || ""}
-                          onChange={(e) => setVaccineDate(item.id, e.target.value)}
-                          data-testid={`wb-vac-date-${item.id}`}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-          {vaccineDrugs.length > 0 && <Field label="Add additional vaccine from drug list"><SelectField label="" options={vaccineDrugs.map((v) => v.name).filter((n) => !d.immunization[n])} value="" onChange={(n) => n && setVaccineDate(n, localISODate())} testid="wb-vac-add" placeholder="Choose a vaccine…" /></Field>}
+          <p className="text-xs text-muted-foreground">Schedule: <b>{schedule.name || "—"}</b> (edit in Admin → Masters). At-birth always; other doses from 1 week before due — else add below.</p>
+          <ImmunizationEntryCards
+            vaccines={visibleVaccines}
+            records={d.immunization}
+            getDue={(item) => immunizationDueFromDob(item, dob)}
+            getOverdue={(item, rec) => isVaccineOverdue(item, rec, dob)}
+            onToggle={toggleVaccine}
+            onSetDate={setVaccineDate}
+            testidPrefix="wb-vac"
+          />
+          {addVacOptions.length > 0 && (
+            <Field label="Add additional vaccine from drug list">
+              <SelectField
+                label=""
+                options={addVacOptions.map((o) => o.label)}
+                value=""
+                onChange={(label) => {
+                  const hit = addVacOptions.find((o) => o.label === label);
+                  if (hit) onAddVaccine(hit.value);
+                }}
+                testid="wb-vac-add"
+                placeholder="Choose a vaccine…"
+              />
+            </Field>
+          )}
         </div>
       ),
     },
     {
       title: "Gross motor milestones", done: Object.values(d.milestones).some((x) => x?.achieved),
       body: (
-        <div className="space-y-2" data-testid="wb-milestones">
-          <p className="text-xs text-muted-foreground">WHO windows · red = beyond expected age for current age {ageMonthsToLabel(ageMonths)}</p>
-          {MILESTONES.map((m) => {
-            const rec = d.milestones[m.id];
-            const flag = milestoneFlag(m, rec, ageMonths);
-            const cls = flag === "green" ? "border-green-500 bg-green-50" : flag === "red" ? "border-red-500 bg-red-50" : flag === "amber" ? "border-amber-500 bg-amber-50" : "border-border bg-white";
-            return (
-              <div key={m.id} className={`flex flex-wrap items-center gap-3 rounded-md border p-3 ${cls}`} data-testid={`wb-ms-${m.id}`}>
-                <button type="button" onClick={() => toggleMilestone(m)} data-testid={`wb-ms-toggle-${m.id}`} className={`grid h-8 w-8 shrink-0 place-items-center rounded border ${rec?.achieved ? "border-green-600 bg-green-600 text-white" : "border-input"}`}>{rec?.achieved && <Check className="h-4 w-4" />}</button>
-                <div className="min-w-0 flex-1"><p className="font-semibold">{m.name}</p><p className="text-xs text-muted-foreground">Expected {m.min}–{m.max} mo{flag === "red" && !rec?.achieved ? " · DELAYED" : ""}</p></div>
-                {rec?.achieved && <TextField label="" type="date" className="w-40" value={rec.date || ""} onChange={(e) => setMilestoneDate(m.id, e.target.value)} testid={`wb-ms-date-${m.id}`} />}
-              </div>
-            );
-          })}
-        </div>
+        <MilestoneChart
+          records={d.milestones}
+          dob={dob}
+          ageMonths={ageMonths}
+          onToggle={toggleMilestone}
+          onSetDate={setMilestoneDate}
+          onClear={clearMilestone}
+        />
       ),
     },
     {
@@ -165,45 +218,128 @@ export default function WellBabyEncounter() {
       ))}</div>,
     },
     {
-      title: "Drugs", done: d.drugs.length > 0,
+      title: "Drugs", done: (d.drugs || []).length > 0,
       body: (
-        <div className="space-y-4">
-          <ChoiceChips multi label="Age-relevant drugs" options={WELLBABY_DRUGS} value={d.drugs} onChange={(v) => set("drugs", v)} testid="wb-drug" />
-          <Field label="Add from drug list"><SelectField label="" options={catalogueDrugs.filter((n) => !d.drugs.includes(n))} value="" onChange={(v) => v && toggleDrug(v)} testid="wb-drug-add" placeholder="Choose a drug…" /></Field>
-        </div>
+        <AntenatalMedications
+          drugs={d.drugs || []}
+          posology={d.posology || {}}
+          medCourses={d.medCourses || {}}
+          catalogue={catalogueDrugs}
+          presetDrugs={WELLBABY_DRUGS}
+          drugMeta={WELLBABY_DRUG_META}
+          diseaseId={WELLBABY_ID}
+          testid="wb-medications"
+          onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+        />
       ),
     },
     {
-      title: "Laboratory", done: d.lab.length > 0,
+      title: "Laboratory",
+      done: (d.lab || []).some((x) => x.result || x.analyte || x.sentToLab),
       body: (
         <div className="space-y-4">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
-            <input data-testid="wb-lab-search" value={labSearch} onChange={(e) => setLabSearch(e.target.value)} placeholder="Search and add a lab test…" className="h-11 w-full rounded-md border border-input bg-white pl-10 pr-3 text-sm" />
-            {labSearch && <div className="mt-1 max-h-52 overflow-y-auto rounded-md border border-border bg-white shadow-sm">{labMatches.length ? labMatches.map((t) => <button key={t.id} type="button" data-testid={`wb-lab-opt-${t.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} onClick={() => addLab(t.name)} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted"><span>{t.name}</span><Plus className="h-4 w-4 text-primary" /></button>) : <p className="px-3 py-2 text-sm text-muted-foreground">No matching test</p>}</div>}
-          </div>
-          <div className="space-y-2" data-testid="wb-lab-list">
-            {d.lab.map((row, i) => { const def = labMaster.find((t) => t.name === row.test); return (
-              <div key={i} className="rounded-md border border-border bg-white p-3" data-testid={`wb-lab-row-${i}`}>
-                <div className="flex items-center justify-between"><p className="font-semibold">{row.test}</p><Button variant="ghost" size="icon" className="h-9 w-9 text-red-600" onClick={() => rmLab(i)} data-testid={`wb-lab-remove-${i}`}><Trash2 className="h-4 w-4" /></Button></div>
-                <div className="mt-2 grid gap-3 sm:grid-cols-3">
-                  <SelectField label="Result" options={def?.results || ["Normal", "Abnormal", "Pending"]} value={row.result} onChange={(v) => updLab(i, { result: v })} testid={`wb-lab-result-${i}`} />
-                  <SelectField label="Location" options={["Bedside", "Lab"]} value={row.location} onChange={(v) => updLab(i, { location: v })} testid={`wb-lab-location-${i}`} />
-                  <TextField label="Date" type="date" value={row.date} onChange={(e) => updLab(i, { date: e.target.value })} testid={`wb-lab-date-${i}`} />
+          <AlertPanel level="info" title="Bedside by default" testid="wb-lab-bedside-note">
+            Orders are completed at the bedside by default.
+            {facilityHasLab
+              ? " This facility has a Lab — choose Lab location to send an order, then enter results when completed."
+              : " This facility has no Lab location configured."}
+          </AlertPanel>
+
+          <div className="space-y-4" data-testid="wb-lab-list">
+            {labTestNames.map((testName) => {
+              const def = WELLBABY_LAB_TESTS.find((t) => t.name === testName);
+              const entries = (d.lab || [])
+                .map((row, i) => ({ row, i }))
+                .filter(({ row }) => row.test === testName);
+              const slug = testName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+              return (
+                <div key={testName} className="rounded-md border border-border bg-white p-4" data-testid={`wb-lab-group-${slug}`}>
+                  <p className="mb-3 font-semibold text-foreground">{testName}</p>
+                  <div className="space-y-3">
+                    {entries.map(({ row, i }, localIdx) => {
+                      const isLabOrder = facilityHasLab && row.location === "Lab";
+                      return (
+                        <div key={i} className="rounded-md border border-border/70 bg-muted/10 p-3" data-testid={`wb-lab-row-${i}`}>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-muted-foreground">Result {entries.length - localIdx}</p>
+                            <ItemActions
+                              onAdd={() => addLabForTest(testName, i)}
+                              addTestid={`wb-lab-add-${slug}-${localIdx}`}
+                              canRemove={entries.length > 1}
+                              onRemove={() => rmLab(i)}
+                              removeTestid={`wb-lab-remove-${i}`}
+                            />
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <SelectField
+                              label="Result"
+                              options={def?.results || ["Reactive", "Non-reactive", "Indeterminate"]}
+                              value={row.result}
+                              onChange={(v) => updLab(i, { result: v, completed: !!v })}
+                              testid={`wb-lab-result-${i}`}
+                            />
+                            <TextField
+                              label="Analyte / value"
+                              value={row.analyte || ""}
+                              onChange={(e) => updLab(i, { analyte: e.target.value })}
+                              testid={`wb-lab-analyte-${i}`}
+                              placeholder="Optional note"
+                            />
+                            <SelectField
+                              label="Location"
+                              options={facilityHasLab ? ["Bedside", "Lab"] : ["Bedside"]}
+                              value={row.location || "Bedside"}
+                              onChange={(v) => updLab(i, { location: v, sentToLab: v === "Lab" ? row.sentToLab : false })}
+                              testid={`wb-lab-location-${i}`}
+                            />
+                            <TextField
+                              label="Date"
+                              type="date"
+                              value={row.date}
+                              onChange={(e) => updLab(i, { date: e.target.value })}
+                              testid={`wb-lab-date-${i}`}
+                            />
+                          </div>
+                          {isLabOrder && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <Button
+                                variant="outline"
+                                className="h-9"
+                                data-testid={`wb-lab-send-${i}`}
+                                onClick={() => { updLab(i, { sentToLab: true }); toast.success("Order sent to Lab"); }}
+                                disabled={row.sentToLab}
+                              >
+                                {row.sentToLab ? "Order sent to Lab ✓" : "Send order to Lab"}
+                              </Button>
+                              {row.sentToLab && !row.result && (
+                                <p className="text-xs text-muted-foreground">Add results when the test is completed.</p>
+                              )}
+                            </div>
+                          )}
+                          {localIdx === entries.length - 1 && (
+                            <p className="mt-2 text-xs text-muted-foreground">Add another result to repeat this test</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ); })}
+              );
+            })}
           </div>
         </div>
       ),
     },
   ];
 
+  const focusSection = params.get("section");
+
   return (
     <ConditionEntryShell
       patient={p} patientEncs={patientEncs} sidebarDiseases={[{ id: WELLBABY_ID, name: WELLBABY_NAME }]}
       title={`${WELLBABY_NAME} visit`} context={`${facility} · ${visitType} · ${ageMonthsToLabel(ageMonths)}`}
-      sections={sections} onSave={persist} savedAt={savedAt} backTo={() => navigate(`/patients/${p.id}?tab=wellbaby`)}
+      sections={sections} onSave={persist} savedAt={savedAt} focusSection={focusSection}
+      backTo={() => navigate(`/patients/${p.id}?tab=wellbaby`)}
     />
   );
 }

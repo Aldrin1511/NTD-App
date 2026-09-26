@@ -158,6 +158,7 @@ export const normalizeVisitType = (data = {}, force) => {
 
 /** Rows for progress matrix (field label → extractor). */
 export const PROGRESS_MATRIX_ROWS = [
+  { section: "Alert", k: "alert", label: "Alert", get: (d) => d?.alert?.level || "" },
   { section: "Anthropometry", k: "weight", label: "Weight (kg)", get: (d) => d?.weight ?? "" },
   { section: "Anthropometry", k: "height", label: "Height / length (cm)", get: (d) => d?.height ?? "" },
   { section: "Anthropometry", k: "muac", label: "MUAC (cm)", get: (d) => d?.muac ?? "" },
@@ -189,7 +190,6 @@ export const PROGRESS_MATRIX_ROWS = [
   })),
   { section: "Medication", k: "rutf", label: "RUTF packets", get: (d) => d?.rutf ?? "" },
   { section: "Medication", k: "medOther", label: "Other medicine", get: (d) => d?.medOther ?? "" },
-  { section: "Alert", k: "alert", label: "Alert", get: (d) => d?.alert?.level || "" },
 ];
 
 /** Display label + color class for monitoring alert levels. */

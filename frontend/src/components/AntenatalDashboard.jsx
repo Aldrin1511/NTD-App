@@ -9,9 +9,9 @@ import {
   FETAL_VITALS, FETAL_VITAL_CHOICES, vitalStatus, ANC_IMMUNIZATION, immunizationDueDate, isImmunizationOverdue,
   isAncEpisodeClosed, babyName, ancStatusColor, ancRiskLevel, PHYSICAL_EXAM_FIELDS,
 } from "@/mock/antenatal";
-import { groupVaccinesByFamily } from "@/mock/wellbaby";
+import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { ancMedicationRows } from "@/components/AntenatalMedications";
-import { ChevronDown, Pencil, Plus, Baby, Check, Activity } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Baby, Activity } from "lucide-react";
 
 const chip = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-foreground" };
 
@@ -126,14 +126,43 @@ const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpen = tru
   );
 };
 
-const VisitHead = ({ v, onEdit, canEdit }) => (
+const VisitHead = ({ v, onEdit, canEdit, section, testid }) => (
   <div className="mb-2 flex items-start justify-between gap-2">
     <p className="text-xs font-semibold text-primary">{fmtDateTime(v.date)} · {v.worker} · {v.type}</p>
     {canEdit && onEdit && (
-      <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => onEdit(v)} data-testid={`anc-edit-${v.id}`} aria-label="Edit visit"><Pencil className="h-4 w-4" /></Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-primary"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit(v, section);
+        }}
+        data-testid={testid || `anc-edit-${v.id}`}
+        aria-label="Edit visit"
+      >
+        <Pencil className="h-4 w-4" />
+      </Button>
     )}
   </div>
 );
+
+/** 1-based section indexes in AntenatalEncounter. */
+export const ANC_SECTIONS = {
+  case: 1,
+  history: 2,
+  risk: 3,
+  motherVitals: 4,
+  fetalVitals: 5,
+  lab: 6,
+  radiology: 7,
+  drugs: 8,
+  immunization: 9,
+  notes: 10,
+  delivery: 11,
+  newborn: 12,
+  outcome: 13,
+};
 
 const statusBadgeCls = {
   green: "border-green-300 bg-green-50 text-green-700",
@@ -199,7 +228,11 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
   const radVisits = withData("radiology");
   const drugVisits = withData("drugs");
   const deliveryVisits = visits.filter((v) => v.data?.delivery?.date || v.data?.delivery?.type || (v.data?.delivery?.babies || []).length);
-  const examVisits = visits.filter((v) => v.data?.physicalExam && Object.keys(v.data.physicalExam).some((k) => v.data.physicalExam[k]));
+  // Legacy visit-level exam OR any baby with physicalExam
+  const examVisits = visits.filter((v) => {
+    if (v.data?.physicalExam && Object.keys(v.data.physicalExam).some((k) => v.data.physicalExam[k])) return true;
+    return (v.data?.delivery?.babies || []).some((b) => b.physicalExam && Object.keys(b.physicalExam).some((k) => b.physicalExam[k]));
+  });
   const noteVisits = visits.filter((v) => (v.data?.notes || []).some((n) => String(n).trim()));
   const outcomeVisits = visits.filter((v) => v.data?.outcome?.status);
 
@@ -296,7 +329,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
 
       {caseVisits[0] && (
         <FeatureCard title="Case details" count={caseVisits.length} lastAt={fmtDateTime(caseVisits[0].date)} testid="anc-feat-case">
-          <VisitHead v={caseVisits[0]} onEdit={onEdit} canEdit={canEdit} />
+          <VisitHead v={caseVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.case} testid={`anc-case-edit-${caseVisits[0].id}`} />
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm" data-testid="anc-gpla-summary">
             {[
               ["Gravida (G)", cd.g ?? cd.gravida],
@@ -320,7 +353,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
 
       {(medicalAll.length > 0 || Object.keys(menstrual).length > 0 || histVisits[0]) && (
         <FeatureCard title="History" count={histVisits.length || undefined} lastAt={histVisits[0] ? fmtDateTime(histVisits[0].date) : undefined} testid="anc-feat-history">
-          {histVisits[0] && <VisitHead v={histVisits[0]} onEdit={onEdit} canEdit={canEdit} />}
+          {histVisits[0] && <VisitHead v={histVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.history} testid={`anc-hist-edit-${histVisits[0].id}`} />}
           {medicalAll.length > 0 && (
             <div className="mb-3" data-testid="anc-medical-list">
               <p className="mb-1.5 text-sm font-semibold">Medical history</p>
@@ -350,7 +383,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
 
       {motherVitalsVisits.length > 0 && (
         <FeatureCard title="Mother vitals" count={motherVitalsVisits.length} lastAt={fmtDateTime(motherVitalsVisits[0].date)} testid="anc-feat-mother-vitals">
-          <VisitHead v={motherVitalsVisits[0]} onEdit={onEdit} canEdit={canEdit} />
+          <VisitHead v={motherVitalsVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.motherVitals} testid={`anc-mv-edit-${motherVitalsVisits[0].id}`} />
           {weightGraph.length > 0 && (
             <div className="mb-4 h-64 w-full rounded-lg border border-border bg-white p-2" data-testid="anc-weight-graph">
               <p className="mb-1 px-1 text-xs font-semibold text-muted-foreground">Weight (kg)</p>
@@ -386,7 +419,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
 
       {fetalVitalsVisits.length > 0 && (
         <FeatureCard title="Fetal vitals" count={fetalVitalsVisits.length} lastAt={fmtDateTime(fetalVitalsVisits[0].date)} testid="anc-feat-fetal-vitals">
-          <VisitHead v={fetalVitalsVisits[0]} onEdit={onEdit} canEdit={canEdit} />
+          <VisitHead v={fetalVitalsVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.fetalVitals} testid={`anc-fv-edit-${fetalVitalsVisits[0].id}`} />
           <VitalsParamTable
             testid="anc-fetal-vitals-table"
             visits={fetalVitalsVisits}
@@ -404,7 +437,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
           <div className="space-y-4">
             {labVisits.map((v) => (
               <div key={v.id} data-testid={`anc-lab-visit-${v.id}`}>
-                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} />
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.lab} testid={`anc-lab-edit-${v.id}`} />
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[560px] text-left text-sm">
                     <thead>
@@ -443,7 +476,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
           <div className="space-y-3">
             {radVisits.map((v) => (
               <div key={v.id}>
-                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} />
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.radiology} testid={`anc-rad-edit-${v.id}`} />
                 {v.data.radiology.map((row, i) => (
                   <div key={i} className="mt-1 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
                     <p className="font-semibold">{row.scan || "Scan"} · <span className="font-normal text-muted-foreground">{row.date ? fmtDate(row.date) : ""}{row.edd ? ` · EDD ${fmtDate(row.edd)}` : ""}</span></p>
@@ -463,7 +496,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
               const rows = ancMedicationRows(v);
               return (
                 <div key={v.id} data-testid={`anc-meds-visit-${v.id}`}>
-                  <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} />
+                  <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.drugs} testid={`anc-meds-edit-${v.id}`} />
                   <div className="overflow-x-auto" data-testid={`anc-meds-table-${v.id}`}>
                     <table className="w-full min-w-[720px] text-left text-sm">
                       <thead>
@@ -505,34 +538,15 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       <FeatureCard title="Immunization" count={Object.keys(mergedImmun).length} testid="anc-feat-immunization">
-        {immunEditVisit && <VisitHead v={immunEditVisit} onEdit={onEdit} canEdit={canEdit} />}
-        <div className="space-y-2" data-testid="anc-dash-immunization">
-          {groupVaccinesByFamily(ANC_IMMUNIZATION).map((group) => (
-            <div key={group.family} className="flex flex-wrap gap-2" data-testid={`anc-dash-vac-group-${group.family}`}>
-              {group.doses.map((item) => {
-                const rec = mergedImmun[item.id];
-                const overdue = isImmunizationOverdue(item, rec, firstContact, lmp);
-                const due = immunizationDueDate(item, firstContact, lmp);
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex w-[calc((100%-1rem)/3)] items-start gap-1.5 rounded-md border p-2 ${rec?.given ? "border-green-500 bg-green-50" : overdue ? "border-red-500 bg-red-50" : "border-border bg-white"}`}
-                    data-testid={`anc-dash-vac-${item.id}`}
-                  >
-                    <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center">
-                      {rec?.given && <Check className="h-3.5 w-3.5 text-green-600" strokeWidth={3} />}
-                    </span>
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <p className="text-sm font-semibold leading-tight">{item.name}</p>
-                      <p className={`text-[10px] leading-snug ${rec?.given ? "font-semibold text-green-700" : overdue ? "font-semibold text-red-700" : "text-muted-foreground"}`}>
-                        {rec?.given ? `Given ${rec.date ? fmtDate(rec.date) : ""}` : overdue ? `Overdue · due ${due ? fmtDate(due) : "—"}` : `Due ${due ? fmtDate(due) : "—"}`}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+        {immunEditVisit && <VisitHead v={immunEditVisit} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.immunization} testid={`anc-immun-edit-${immunEditVisit.id}`} />}
+        <div data-testid="anc-dash-immunization">
+          <ImmunizationDashCards
+            vaccines={ANC_IMMUNIZATION}
+            records={mergedImmun}
+            getDue={(item) => immunizationDueDate(item, firstContact, lmp)}
+            getOverdue={(item, rec) => isImmunizationOverdue(item, rec, firstContact, lmp)}
+            testidPrefix="anc-dash-vac"
+          />
         </div>
       </FeatureCard>
 
@@ -542,29 +556,43 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
             const del = v.data.delivery || {};
             return (
               <div key={v.id} className="space-y-2 border-b border-border/60 py-2 last:border-0">
-                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} />
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.delivery} testid={`anc-del-edit-${v.id}`} />
                 <p className="text-sm"><b>Delivery:</b> {del.date ? fmtDate(del.date) : "—"} · {del.type || del.mode || "—"} · {del.outcome || "—"} · Fetuses {del.fetuses || (del.babies || []).length || "—"}</p>
                 {del.complication && <p className="text-sm text-muted-foreground">Complication: {del.complication}</p>}
                 {(del.postpartum || []).length > 0 && <p className="text-sm text-muted-foreground">Postpartum: {del.postpartum.join(" · ")}</p>}
-                {(del.babies || []).map((b, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-                    <Baby className="h-4 w-4 text-primary" />
-                    <span className="font-semibold">{babyName(patient.name, i, del.babies.length)}</span>
-                    <span className="text-muted-foreground">{b.sex || "—"} · {b.weightKg ? `${b.weightKg} kg` : "—"} · HC {b.headCm || "—"} · APGAR {b.apgar1 || "—"}/{b.apgar5 || "—"}/{b.apgar10 || "—"} · {b.outcome || "—"}</span>
-                    {b.registered && <Badge variant="outline" className="rounded">Registered · {b.patientId}</Badge>}
-                  </div>
-                ))}
+                {(del.babies || []).map((b, i) => {
+                  const exam = b.physicalExam || {};
+                  const examChips = PHYSICAL_EXAM_FIELDS.filter((f) => exam[f.k]);
+                  return (
+                    <div key={i} className="space-y-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Baby className="h-4 w-4 text-primary" />
+                        <span className="font-semibold">{babyName(patient.name, i, del.babies.length)}</span>
+                        <span className="text-muted-foreground">{b.sex || "—"} · {b.weightKg ? `${b.weightKg} kg` : "—"} · HC {b.headCm || "—"} · APGAR {b.apgar1 || "—"}/{b.apgar5 || "—"}/{b.apgar10 || "—"} · {b.outcome || "—"}</span>
+                        {b.registered && <Badge variant="outline" className="rounded">Registered · {b.patientId}</Badge>}
+                      </div>
+                      {examChips.length > 0 && (
+                        <div className="flex flex-wrap gap-2" data-testid={`anc-dash-baby-exam-${v.id}-${i}`}>
+                          <span className="text-xs font-semibold text-muted-foreground">Exam:</span>
+                          {examChips.map((f) => (
+                            <span key={f.k} className="rounded-full border border-border bg-white px-2.5 py-1 text-xs font-semibold">{f.label}: {exam[f.k]}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
         </FeatureCard>
       )}
 
-      {examVisits.length > 0 && (
+      {examVisits.length > 0 && !deliveryVisits.some((v) => (v.data?.delivery?.babies || []).some((b) => b.physicalExam && Object.keys(b.physicalExam).some((k) => b.physicalExam[k]))) && (
         <FeatureCard title="Physical examination" count={examVisits.length} lastAt={fmtDateTime(examVisits[0].date)} testid="anc-feat-exam">
           {examVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0">
-              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} />
+              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.newborn} testid={`anc-exam-edit-${v.id}`} />
               <div className="mt-1 flex flex-wrap gap-2">
                 {PHYSICAL_EXAM_FIELDS.filter((f) => v.data.physicalExam?.[f.k]).map((f) => (
                   <span key={f.k} className="rounded-full border border-border bg-white px-2.5 py-1 text-xs font-semibold">{f.label}: {v.data.physicalExam[f.k]}</span>
@@ -580,7 +608,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
           <div className="space-y-2">
             {noteVisits.map((v) => (
               <div key={v.id}>
-                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} />
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.notes} testid={`anc-note-edit-${v.id}`} />
                 {(v.data.notes || []).filter((n) => String(n).trim()).map((n, i) => <p key={i} className="mt-1 whitespace-pre-line text-sm font-medium">{n}</p>)}
               </div>
             ))}
@@ -611,8 +639,11 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 shrink-0 text-primary"
-                    onClick={() => onEdit(v)}
-                    data-testid={`anc-edit-${v.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(v, ANC_SECTIONS.outcome);
+                    }}
+                    data-testid={`anc-outcome-edit-${v.id}`}
                     aria-label="Edit visit"
                   >
                     <Pencil className="h-4 w-4" />

@@ -183,13 +183,35 @@ export const ChoiceRow = ({ label, options, value, onChange, testid, hint }) => 
   </Field>
 );
 
-export const CheckGrid = ({ label, options, value = [], onChange, testid, cols = "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" }) => {
+export const CheckGrid = ({
+  label,
+  options,
+  value = [],
+  onChange,
+  testid,
+  cols = "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+  alertWhenSelected = false,
+  autoOptions = [],
+}) => {
+  const autoSet = new Set(autoOptions || []);
   const toggle = (o) => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
   return (
     <Field label={label}>
+      {autoSet.size > 0 && (
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          <span className="mr-3 inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-500" /> Auto from case/vitals
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm bg-primary" /> Manual select
+          </span>
+        </p>
+      )}
       <div className={`grid gap-2 ${cols}`} data-testid={testid ? `${testid}-grid` : undefined}>
         {options.map((o) => {
           const active = value.includes(o);
+          const isAuto = active && autoSet.has(o);
+          const alert = active && alertWhenSelected;
           return (
             <button
               key={o}
@@ -197,17 +219,27 @@ export const CheckGrid = ({ label, options, value = [], onChange, testid, cols =
               data-testid={`${testid}-${slug(o)}`}
               onClick={() => toggle(o)}
               className={`flex min-h-11 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm font-medium transition-colors ${
-                active
-                  ? "border-primary/40 bg-secondary text-foreground"
-                  : "border-border bg-white text-foreground hover:bg-muted/60"
+                alert
+                  ? "border-red-500 bg-red-50 text-red-800"
+                  : isAuto
+                    ? "border-amber-500 bg-amber-50 text-amber-950"
+                    : active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-white text-foreground hover:bg-muted/60"
               }`}
             >
               <span
                 className={`grid h-[1.125rem] w-[1.125rem] shrink-0 place-items-center rounded border ${
-                  active ? "border-primary bg-primary text-white" : "border-input bg-white"
+                  alert
+                    ? "border-red-600 bg-red-600 text-white"
+                    : isAuto
+                      ? "border-amber-600 bg-amber-600 text-white"
+                      : active
+                        ? "border-white/80 bg-white text-primary"
+                        : "border-input bg-white"
                 }`}
               >
-                {active && <Check className="h-3 w-3" strokeWidth={3} />}
+                {active && <Check className={`h-3 w-3 ${active && !alert && !isAuto ? "text-primary" : ""}`} strokeWidth={3} />}
               </span>
               <span className="min-w-0 leading-snug">{o}</span>
             </button>

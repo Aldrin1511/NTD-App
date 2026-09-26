@@ -1385,7 +1385,11 @@ export default function PatientRecord() {
               patient={p}
               encounters={encs}
               canEdit={canEdit}
-              onEdit={(v) => navigate(`/patients/${p.id}/antenatal?enc=${encodeURIComponent(v.id)}`)}
+              onEdit={(v, section) => {
+                const q = new URLSearchParams({ enc: v.id });
+                if (section) q.set("section", String(section));
+                navigate(`/patients/${p.id}/antenatal?${q.toString()}`);
+              }}
               onAddVisit={() => setEnc({ ...enc, show: true, disease: ANTENATAL_ID })}
             />
           )}
@@ -1395,7 +1399,11 @@ export default function PatientRecord() {
               encounters={encs}
               settings={settings}
               canEdit={canEdit}
-              onEdit={(v) => navigate(`/patients/${p.id}/wellbaby?enc=${encodeURIComponent(v.id)}`)}
+              onEdit={(v, section) => {
+                const q = new URLSearchParams({ enc: v.id });
+                if (section) q.set("section", String(section));
+                navigate(`/patients/${p.id}/wellbaby?${q.toString()}`);
+              }}
               onAddVisit={() => setEnc({ ...enc, show: true, disease: WELLBABY_ID })}
             />
           )}

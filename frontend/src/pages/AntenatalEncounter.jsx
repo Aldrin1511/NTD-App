@@ -7,18 +7,18 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import PatientSidebar from "@/components/PatientSidebar";
 import { Field, TextField, AreaField, SelectField, ChoiceRow, CheckGrid, AlertPanel, ItemActions } from "@/components/Fields";
-import { localISODate, fmtDate } from "@/mock/specs";
+import { localISODate } from "@/mock/specs";
 import {
   ANTENATAL_ID, ANTENATAL_NAME, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
   FETAL_VITALS, FETAL_VITAL_CHOICES, vitalStatus, ANC_LAB_TESTS, RADIOLOGY_SCANS,
   ANC_IMMUNIZATION, immunizationDueDate, isImmunizationOverdue,
-  BABY_OUTCOMES, BABY_SEX, BABY_COMPLICATIONS, ANC_OUTCOMES, resolveDating, trimesterLabel, newAncEpisodeId,
+  BABY_OUTCOMES, BABY_SEX, BABY_COMPLICATIONS, BABY_OUTCOME_ALERTS, ANC_OUTCOMES, resolveDating, trimesterLabel, newAncEpisodeId,
   isAncEpisodeClosed, babyName, MEDICAL_HISTORY_OPTIONS, RISK_FACTOR_OPTIONS, autoRiskFactors,
   YES_NO, PRESENT_ABSENT, DYSMENORRHEA, MENSTRUAL_FLOW, CYCLE_REGULARITY,
   DELIVERY_TYPES, DELIVERY_COMPLICATIONS, FETUS_COUNTS, FAMILY_PLANNING, POSTPARTUM_COMPLICATIONS,
   DELIVERY_OUTCOMES, PHYSICAL_EXAM_FIELDS, COUNT_0_10, obstetricCountValue,
 } from "@/mock/antenatal";
-import { groupVaccinesByFamily } from "@/mock/wellbaby";
+import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
 import AntenatalMedications from "@/components/AntenatalMedications";
 import { GEO } from "@/mock/data";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, Plus, Trash2 } from "
 const emptyBaby = (deliveryType = "") => ({
   sex: "", weightKg: "", lengthCm: "", headCm: "", apgar1: "", apgar5: "", apgar10: "",
   resuscitation: "", complications: [], outcome: "", deliveryType, registered: false,
+  physicalExam: {},
 });
 
 const syncBabiesToFetuses = (babies, count, deliveryType = "") => {
@@ -99,7 +100,13 @@ const SliderStat = ({ field, value, onChange, testid }) => {
             className={`h-8 w-20 rounded border border-input bg-white px-2 text-right text-sm font-bold tabular-nums ${statusText[st]}`}
             value={editing ? draft : (has ? value : "")}
             placeholder="—"
-            onFocus={() => { setEditing(true); setDraft(has ? String(value) : ""); }}
+            onFocus={(e) => {
+              setEditing(true);
+              setDraft(has ? String(value) : "");
+              requestAnimationFrame(() => {
+                try { e.target.select(); } catch { /* ignore */ }
+              });
+            }}
             onChange={(e) => { setEditing(true); setDraft(e.target.value); }}
             onBlur={(e) => commit(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
@@ -132,11 +139,12 @@ const SliderStat = ({ field, value, onChange, testid }) => {
   );
 };
 
-const ChoiceChips = ({ label, options, value, onChange, testid }) => (
+const ChoiceChips = ({ label, options, value, onChange, testid, alertOptions = [] }) => (
   <Field label={label}>
     <div className="flex flex-wrap gap-2.5">
       {options.map((o) => {
         const on = value === o;
+        const alert = on && alertOptions.includes(o);
         return (
           <button
             key={o}
@@ -144,9 +152,11 @@ const ChoiceChips = ({ label, options, value, onChange, testid }) => (
             data-testid={`${testid}-${String(o).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
             onClick={() => onChange(on ? "" : o)}
             className={`min-h-12 min-w-[4.5rem] rounded-lg border px-5 text-sm font-bold transition-colors ${
-              on
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-white text-foreground hover:bg-muted"
+              alert
+                ? "border-red-600 bg-red-600 text-white"
+                : on
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-white text-foreground hover:bg-muted"
             }`}
           >
             {o}
@@ -157,10 +167,21 @@ const ChoiceChips = ({ label, options, value, onChange, testid }) => (
   </Field>
 );
 
-const MultiChips = ({ label, options, value = [], onChange, testid }) => {
+const MultiChips = ({ label, options, value = [], onChange, testid, alertWhenSelected = false, autoOptions = [] }) => {
   const items = [...options];
   value.forEach((v) => { if (v && !items.includes(v)) items.push(v); });
-  return <CheckGrid label={label} options={items} value={value} onChange={onChange} testid={testid} cols="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" />;
+  return (
+    <CheckGrid
+      label={label}
+      options={items}
+      value={value}
+      onChange={onChange}
+      testid={testid}
+      cols="sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      alertWhenSelected={alertWhenSelected}
+      autoOptions={autoOptions}
+    />
+  );
 };
 
 export default function AntenatalEncounter() {
@@ -214,7 +235,22 @@ export default function AntenatalEncounter() {
         base.delivery.type || base.delivery.mode || "",
       );
     }
-    base.physicalExam = { ...(base.physicalExam || {}) };
+    // Migrate legacy visit-level physicalExam onto baby 1 when babies lack their own exam.
+    const legacyExam = { ...(base.physicalExam || {}) };
+    if (Object.keys(legacyExam).some((k) => legacyExam[k]) && (base.delivery.babies || []).length) {
+      base.delivery.babies = base.delivery.babies.map((b, i) => {
+        const hasOwn = b.physicalExam && Object.keys(b.physicalExam).some((k) => b.physicalExam[k]);
+        if (hasOwn) return { ...b, physicalExam: b.physicalExam || {} };
+        if (i === 0) return { ...b, physicalExam: { ...legacyExam } };
+        return { ...b, physicalExam: b.physicalExam || {} };
+      });
+    } else {
+      base.delivery.babies = (base.delivery.babies || []).map((b) => ({
+        ...b,
+        physicalExam: b.physicalExam || {},
+      }));
+    }
+    base.physicalExam = {};
     base.outcome = { status: "Active", ...(base.outcome || {}) };
     if (!Array.isArray(base.notes) || !base.notes.length) base.notes = [""];
     return base;
@@ -224,15 +260,42 @@ export default function AntenatalEncounter() {
   const [labOther, setLabOther] = useState("");
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "ANC visit";
+  const focusSection = params.get("section");
+
+  useEffect(() => {
+    const n = focusSection != null && focusSection !== "" ? Number(focusSection) : null;
+    if (n == null || Number.isNaN(n) || n < 1) return undefined;
+    setOpen((o) => ({ ...o, [n]: true }));
+    const timer = window.setTimeout(() => {
+      document.querySelector(`[data-testid="anc-section-${n}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [focusSection]);
 
   const dating = useMemo(() => resolveDating(d.caseDetails), [d.caseDetails]);
   const facilityHasLab = useMemo(() => facilities.some((f) => f.name === facility && f.hasLab), [facilities, facility]);
   const vaccineDrugs = useMemo(() => (settings.drugs || []).filter((x) => x.type === "Vaccine" || x.form === "Vaccine"), [settings.drugs]);
   const firstContact = existing?.date || d.caseDetails?.firstContact || localISODate();
 
+  const autoSuggestedRisks = useMemo(
+    () => autoRiskFactors(d, p),
+    // Intentionally narrow deps — same triggers as auto-add effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      d.caseDetails.neonatalDeath,
+      d.caseDetails.stillBirth,
+      d.vitals.mother.systolic,
+      d.vitals.mother.diastolic,
+      d.vitals.mother.weight,
+      d.delivery.fetuses,
+      p?.age,
+      p?.ageYears,
+    ]
+  );
+
   // Auto-add clinical risk suggestions; never re-add items the user cleared
   useEffect(() => {
-    const suggested = autoRiskFactors(d, p);
+    const suggested = autoSuggestedRisks;
     setD((s) => {
       const cur = s.history?.riskFactors || [];
       const dismissed = s.history?.riskFactorsDismissed || [];
@@ -240,8 +303,7 @@ export default function AntenatalEncounter() {
       if (!toAdd.length) return s;
       return { ...s, history: { ...s.history, riskFactors: [...cur, ...toAdd] } };
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d.caseDetails.neonatalDeath, d.caseDetails.stillBirth, d.vitals.mother.systolic, d.vitals.mother.diastolic, d.vitals.mother.weight, d.delivery.fetuses, p?.age, p?.ageYears]);
+  }, [autoSuggestedRisks]);
 
   // Autofill menstrual LMP from case details
   useEffect(() => {
@@ -288,7 +350,16 @@ export default function AntenatalEncounter() {
   const setMenstrual = (patch) => setD((s) => ({ ...s, history: { ...s.history, menstrual: { ...s.history.menstrual, ...patch } } }));
   const setMotherV = (k, v) => setD((s) => ({ ...s, vitals: { ...s.vitals, mother: { ...s.vitals.mother, [k]: v } } }));
   const setFetalV = (k, v) => setD((s) => ({ ...s, vitals: { ...s.vitals, fetal: { ...s.vitals.fetal, [k]: v } } }));
-  const setExam = (k, v) => setD((s) => ({ ...s, physicalExam: { ...s.physicalExam, [k]: v } }));
+  const updBabyExam = (i, k, v) =>
+    setD((s) => ({
+      ...s,
+      delivery: {
+        ...s.delivery,
+        babies: s.delivery.babies.map((b, j) =>
+          j === i ? { ...b, physicalExam: { ...(b.physicalExam || {}), [k]: v } } : b
+        ),
+      },
+    }));
 
   const labTestNames = ANC_LAB_TESTS.map((t) => t.name);
   const otherLabNames = [...new Set((d.lab || []).map((r) => r.test).filter((n) => n && !labTestNames.includes(n)))];
@@ -432,8 +503,6 @@ export default function AntenatalEncounter() {
     toast.success(online ? (close ? "ANC visit saved" : "Saved to device") : "Saved · queued until online");
   };
 
-  const primaryBabySex = babies[0]?.sex || "";
-
   const sections = [
     {
       n: 1, title: "Case details",
@@ -470,6 +539,14 @@ export default function AntenatalEncounter() {
               <SelectField label="Term birth" options={COUNT_0_10} value={obstetricCountValue(d.caseDetails.termBirth)} onChange={(v) => setCase({ termBirth: v })} testid="anc-term-birth" />
               <TextField label="Living children" type="number" testid="anc-living-children" value={d.caseDetails.livingChildren || ""} onChange={(e) => setCase({ livingChildren: e.target.value })} />
               <TextField label="Age of last child" testid="anc-age-last-child" value={d.caseDetails.ageLastChild || ""} onChange={(e) => setCase({ ageLastChild: e.target.value })} placeholder="e.g. 2y" />
+              <TextField
+                label="Final EDD (clinician)"
+                type="date"
+                testid="anc-final-edd"
+                value={d.caseDetails.finalEdd || ""}
+                onChange={(e) => setCase({ finalEdd: e.target.value, finalSource: "Manual" })}
+                hint={dating.finalGa ? `GA ${dating.finalGa.text} · ${trimesterLabel(dating.trimester)}` : "Clinician dating"}
+              />
             </div>
           </div>
 
@@ -488,45 +565,6 @@ export default function AntenatalEncounter() {
           </div>
 
           <ChoiceChips label="Was couple counselling done" options={YES_NO} value={d.caseDetails.coupleCounselling || ""} onChange={(v) => setCase({ coupleCounselling: v })} testid="anc-couple-counselling" />
-
-          <div className="rounded-lg border border-primary/25 bg-secondary p-3" data-testid="anc-dating-panel">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">Gestational age & EDD</p>
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-md border border-border bg-white p-2.5" data-testid="anc-dating-lmp">
-                <p className="text-[11px] font-semibold text-muted-foreground">From LMP (auto)</p>
-                <p className="mt-0.5 text-base font-bold">GA {dating.lmpGa?.text || "—"}</p>
-                <p className="text-xs text-muted-foreground">EDD {dating.lmpEdd ? fmtDate(dating.lmpEdd) : "—"}</p>
-              </div>
-              <div className={`rounded-md border bg-white p-2.5 ${dating.scanEdd ? "border-border" : "border-dashed border-border/60 opacity-60"}`} data-testid="anc-dating-scan">
-                <p className="text-[11px] font-semibold text-muted-foreground">From Scan</p>
-                <p className="mt-0.5 text-base font-bold">GA {dating.scanGa?.text || "—"}</p>
-                <p className="text-xs text-muted-foreground">EDD {dating.scanEdd ? fmtDate(dating.scanEdd) : "—"}</p>
-                {!dating.scanEdd && <p className="mt-0.5 text-[10px] text-muted-foreground">Appears when scan EDD is added in Radiology</p>}
-              </div>
-              <div className="rounded-md border-2 border-primary bg-white p-2.5" data-testid="anc-dating-final">
-                <p className="text-[11px] font-semibold text-primary">Final (clinician)</p>
-                <p className="mt-0.5 text-base font-bold">GA {dating.finalGa?.text || "—"}</p>
-                <p className="text-xs text-muted-foreground">EDD {dating.finalEdd ? fmtDate(dating.finalEdd) : "—"} · {trimesterLabel(dating.trimester)}</p>
-              </div>
-            </div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <Field label="Final dating source">
-                <div
-                  className="flex h-12 items-center rounded-md border border-input bg-white px-3 text-base font-semibold"
-                  data-testid="anc-final-source"
-                >
-                  Manual
-                </div>
-              </Field>
-              <TextField
-                label="Final EDD"
-                type="date"
-                testid="anc-final-edd"
-                value={d.caseDetails.finalEdd || ""}
-                onChange={(e) => setCase({ finalEdd: e.target.value, finalSource: "Manual" })}
-              />
-            </div>
-          </div>
         </div>
       ),
     },
@@ -557,7 +595,14 @@ export default function AntenatalEncounter() {
       n: 3, title: "Risk factors",
       done: (d.history.riskFactors || []).length > 0,
       body: (
-        <MultiChips label="Risk factors (auto from case/vitals + multi-select)" options={RISK_FACTOR_OPTIONS} value={d.history.riskFactors || []} onChange={setRiskFactors} testid="anc-risk" />
+        <MultiChips
+          label="Risk factors (auto from case/vitals + multi-select)"
+          options={RISK_FACTOR_OPTIONS}
+          value={d.history.riskFactors || []}
+          onChange={setRiskFactors}
+          autoOptions={autoSuggestedRisks}
+          testid="anc-risk"
+        />
       ),
     },
     {
@@ -737,6 +782,11 @@ export default function AntenatalEncounter() {
           medCourses={d.medCourses || {}}
           catalogue={catalogueDrugs}
           onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+          banner={
+            <AlertPanel level="info" title="Regimen by GA" testid="anc-drug-ga-note">
+              GA-based regimen suggestions will be added later. Select standard drugs for now.
+            </AlertPanel>
+          }
         />
       ),
     },
@@ -745,39 +795,15 @@ export default function AntenatalEncounter() {
       done: Object.values(d.immunization).some((x) => x?.given),
       body: (
         <div className="space-y-2" data-testid="anc-immunization">
-          {groupVaccinesByFamily(ANC_IMMUNIZATION).map((group) => (
-            <div key={group.family} className="flex flex-wrap gap-2" data-testid={`anc-vac-group-${group.family}`}>
-              {group.doses.map((item) => {
-                const rec = d.immunization[item.id];
-                const overdue = isImmunizationOverdue(item, rec, firstContact, d.caseDetails.lmp);
-                const due = immunizationDueDate(item, firstContact, d.caseDetails.lmp);
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex w-[calc((100%-1rem)/3)] items-start gap-1.5 rounded-md border p-2 ${rec?.given ? "border-green-500 bg-green-50" : overdue ? "border-red-500 bg-red-50" : "border-border bg-white"}`}
-                    data-testid={`anc-vac-${item.id}`}
-                  >
-                    <button type="button" onClick={() => toggleVaccine(item)} data-testid={`anc-vac-toggle-${item.id}`} className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center" aria-label={rec?.given ? "Mark not given" : "Mark given"}>
-                      <Check className={`h-3.5 w-3.5 ${rec?.given ? "text-green-600" : "text-muted-foreground/40"}`} strokeWidth={rec?.given ? 3 : 2} />
-                    </button>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="text-sm font-semibold leading-tight">{item.name}</p>
-                      <p className="text-[10px] leading-snug text-muted-foreground">{item.note} · due {due ? fmtDate(due) : "—"}{overdue ? " · OVERDUE" : ""}</p>
-                      {rec?.given && (
-                        <input
-                          type="date"
-                          className="h-7 w-[7.5rem] max-w-full rounded border border-input bg-white px-1.5 text-[11px]"
-                          value={rec.date || ""}
-                          onChange={(e) => setVaccineDate(item.id, e.target.value)}
-                          data-testid={`anc-vac-date-${item.id}`}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+          <ImmunizationEntryCards
+            vaccines={ANC_IMMUNIZATION}
+            records={d.immunization}
+            getDue={(item) => immunizationDueDate(item, firstContact, d.caseDetails.lmp)}
+            getOverdue={(item, rec) => isImmunizationOverdue(item, rec, firstContact, d.caseDetails.lmp)}
+            onToggle={toggleVaccine}
+            onSetDate={setVaccineDate}
+            testidPrefix="anc-vac"
+          />
           {vaccineDrugs.length > 0 && (
             <Field label="Add additional vaccine from drug list">
               <SelectField label="" options={vaccineDrugs.map((v) => v.name).filter((n) => !d.immunization[n])} value="" onChange={(n) => n && setVaccineDate(n, localISODate())} testid="anc-vac-add" placeholder="Choose a vaccine…" />
@@ -829,7 +855,7 @@ export default function AntenatalEncounter() {
     },
     {
       n: 12, title: "New born details",
-      done: babies.length > 0 && babies.some((b) => b.sex || b.weightKg || b.outcome),
+      done: babies.length > 0 && babies.some((b) => b.sex || b.weightKg || b.outcome || Object.values(b.physicalExam || {}).some(Boolean)),
       body: (
         <div className="space-y-4">
           <p className="font-head text-sm font-semibold text-primary">
@@ -853,9 +879,37 @@ export default function AntenatalEncounter() {
                 <TextField label="APGAR 5 min" type="number" value={b.apgar5} onChange={(e) => updBaby(i, { apgar5: e.target.value })} testid={`anc-baby-apgar5-${i}`} />
                 <TextField label="APGAR 10 min" type="number" value={b.apgar10 || ""} onChange={(e) => updBaby(i, { apgar10: e.target.value })} testid={`anc-baby-apgar10-${i}`} />
               </div>
-              <ChoiceChips label="Resuscitation" options={YES_NO} value={b.resuscitation || ""} onChange={(v) => updBaby(i, { resuscitation: v })} testid={`anc-baby-resusc-${i}`} />
-              <MultiChips label="Baby complications" options={BABY_COMPLICATIONS} value={b.complications || []} onChange={(v) => updBaby(i, { complications: v })} testid={`anc-baby-comp-${i}`} />
-              <ChoiceChips label="Baby Outcome" options={BABY_OUTCOMES} value={b.outcome || ""} onChange={(v) => updBaby(i, { outcome: v })} testid={`anc-baby-outcome-${i}`} />
+              <ChoiceChips label="Resuscitation" options={YES_NO} value={b.resuscitation || ""} onChange={(v) => updBaby(i, { resuscitation: v })} alertOptions={["Yes"]} testid={`anc-baby-resusc-${i}`} />
+              <MultiChips label="Baby complications" options={BABY_COMPLICATIONS} value={b.complications || []} onChange={(v) => updBaby(i, { complications: v })} alertWhenSelected testid={`anc-baby-comp-${i}`} />
+              <ChoiceChips label="Baby Outcome" options={BABY_OUTCOMES} value={b.outcome || ""} onChange={(v) => updBaby(i, { outcome: v })} alertOptions={BABY_OUTCOME_ALERTS} testid={`anc-baby-outcome-${i}`} />
+
+              <div className="border-t border-border/60 pt-3" data-testid={`anc-baby-exam-${i}`}>
+                <p className="mb-3 font-head text-sm font-semibold text-primary">Physical examination</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {PHYSICAL_EXAM_FIELDS.filter((f) => !f.sex || f.sex === b.sex).map((f) => (
+                    <ChoiceChips
+                      key={f.k}
+                      label={f.label}
+                      options={f.options}
+                      value={(b.physicalExam || {})[f.k] || ""}
+                      onChange={(v) => updBabyExam(i, f.k, v)}
+                      alertOptions={f.alert || []}
+                      testid={`anc-baby-${i}-pe-${f.k}`}
+                    />
+                  ))}
+                  {!b.sex && (
+                    <p className="sm:col-span-2 text-xs text-muted-foreground">
+                      Select sex above to show male/female-specific exam fields.
+                    </p>
+                  )}
+                </div>
+                {PHYSICAL_EXAM_FIELDS.some((f) => (!f.sex || f.sex === b.sex) && (f.alert || []).includes((b.physicalExam || {})[f.k])) && (
+                  <AlertPanel level="urgent" title="Concerning findings" testid={`anc-baby-exam-alert-${i}`}>
+                    Negative / abnormal answers are highlighted in red. Review and manage as needed.
+                  </AlertPanel>
+                )}
+              </div>
+
               <Button className="h-10" disabled={b.registered} onClick={() => doRegisterBaby(i)} data-testid={`anc-baby-register-${i}`}>
                 {b.registered ? `Registered · ${b.patientId}` : "Register baby"}
               </Button>
@@ -865,19 +919,7 @@ export default function AntenatalEncounter() {
       ),
     },
     {
-      n: 13, title: "Physical examination",
-      done: Object.keys(d.physicalExam || {}).some((k) => d.physicalExam[k]),
-      body: (
-        <div className="grid gap-4 sm:grid-cols-2" data-testid="anc-physical-exam">
-          {PHYSICAL_EXAM_FIELDS.filter((f) => !f.sex || f.sex === primaryBabySex).map((f) => (
-            <ChoiceChips key={f.k} label={f.label} options={f.options} value={d.physicalExam[f.k] || ""} onChange={(v) => setExam(f.k, v)} testid={`anc-pe-${f.k}`} />
-          ))}
-          {!primaryBabySex && <p className="sm:col-span-2 text-xs text-muted-foreground">Add newborn sex to show male/female-specific exam fields.</p>}
-        </div>
-      ),
-    },
-    {
-      n: 14, title: "Case outcome",
+      n: 13, title: "Case outcome",
       done: !!d.outcome.status,
       body: (
         <div className="space-y-4">

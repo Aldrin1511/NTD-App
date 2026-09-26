@@ -3,6 +3,7 @@ import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU }
 import { SUSPECT_SYMPTOMS } from "@/mock/specs";
 import { USERS, PATIENTS, ENCOUNTERS, HOUSEHOLDS } from "@/mock/data";
 import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
+import { DEFAULT_SCHOOLS, DEFAULT_DONORS } from "@/mock/schoolhealth";
 
 const KEY = "trias.state.v3";
 const Ctx = createContext(null);
@@ -14,6 +15,9 @@ const initial = () => ({
   households: HOUSEHOLDS,
   suspects: SUSPECTS,
   facilities: FACILITIES_LIST,
+  schools: DEFAULT_SCHOOLS,
+  donors: DEFAULT_DONORS,
+  schoolHealth: [],
   settings: { symptoms: SUSPECT_SYMPTOMS, drugs: DRUGS, visitTypes: VISIT_TYPES, ltfuByDisease: DEFAULT_LTFU, lostToFollowUpDays: 30, immunizationSchedules: DEFAULT_IMMUNIZATION_SCHEDULES, labMaster: DEFAULT_LAB_MASTER, featureConfig: DEFAULT_FEATURE_CONFIG, regimens: [
     { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
     { id: "R-001b", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Suspected Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
@@ -40,6 +44,9 @@ const load = () => {
       const saved = JSON.parse(raw);
       const merged = { ...initial(), ...saved };
       merged.settings = { ...initial().settings, ...(saved.settings || {}) };
+      if (!Array.isArray(merged.schools) || !merged.schools.length) merged.schools = DEFAULT_SCHOOLS;
+      if (!Array.isArray(merged.donors) || !merged.donors.length) merged.donors = DEFAULT_DONORS;
+      if (!Array.isArray(merged.schoolHealth)) merged.schoolHealth = [];
       const have = new Set((merged.encounters || []).map((e) => e.id));
       const extra = ENCOUNTERS.filter((e) => !have.has(e.id));
       if (extra.length) merged.encounters = [...(merged.encounters || []), ...extra];
@@ -87,8 +94,9 @@ const load = () => {
 };
 
 const queuedCount = (s) => {
-  const enc = (s.encounters || []).filter((e) => !e.synced).length;
-  return Math.max(Number(s.pendingSync) || 0, enc);
+  const enc = (s.encounters || []).filter((e) => e.synced === false).length;
+  const sh = (s.schoolHealth || []).filter((v) => v.synced === false).length;
+  return Math.max(Number(s.pendingSync) || 0, enc + sh);
 };
 
 export function StoreProvider({ children }) {
@@ -101,8 +109,21 @@ export function StoreProvider({ children }) {
   }, [state]);
 
   useEffect(() => {
-    const on = () => setOnline(true);
+    let wasOffline = !navigator.onLine;
+    const on = () => {
+      const reconnect = wasOffline;
+      wasOffline = false;
+      setOnline(true);
+      if (reconnect) {
+        setState((s) => {
+          const n = queuedCount(s);
+          if (n > 0) queueMicrotask(() => setSyncPrompt({ count: n, reason: "reconnect" }));
+          return s;
+        });
+      }
+    };
     const off = () => {
+      wasOffline = true;
       setOnline(false);
       setSyncPrompt(null);
     };
@@ -116,7 +137,7 @@ export function StoreProvider({ children }) {
 
   const patch = (fn) => setState((s) => ({ ...s, ...fn(s) }));
   const offerSyncAfterSave = (_count) => {
-    // Temporarily hide the "Sync pending items?" popup after Save / Save & close.
+    // Encounter saves do not auto-prompt; reconnect prompt handles offline queue.
   };
 
   const api = useMemo(() => {
@@ -188,6 +209,87 @@ export function StoreProvider({ children }) {
           return { facilities: [...s.facilities, { id: `F-${String(next).padStart(3, "0")}`, ...f }] };
         }),
       removeFacility: (id) => patch((s) => ({ facilities: s.facilities.filter((f) => f.id !== id) })),
+      addSchool: (school) =>
+        patch((s) => {
+          const next = (s.schools || []).reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, "")) || 0), 0) + 1;
+          return { schools: [...(s.schools || []), { id: `SCHL-${String(next).padStart(3, "0")}`, ...school }] };
+        }),
+      removeSchool: (id) => patch((s) => ({ schools: (s.schools || []).filter((x) => x.id !== id) })),
+      addDonor: (donor) =>
+        patch((s) => {
+          const next = (s.donors || []).reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, "")) || 0), 0) + 1;
+          return { donors: [...(s.donors || []), { id: `DON-${String(next).padStart(3, "0")}`, ...donor }] };
+        }),
+      removeDonor: (id) => patch((s) => ({ donors: (s.donors || []).filter((x) => x.id !== id) })),
+      // ---- School Health (top-level visits) ----
+      addSchoolVisit: (v) => {
+        const rec = {
+          id: `SCH-${String(Math.floor(Math.random() * 900000) + 100000)}`,
+          createdBy: state.currentUserId,
+          worker: state.users.find((u) => u.id === state.currentUserId)?.name,
+          children: [],
+          report: { summary: "", conductedBy: [], photos: [], completed: false },
+          status: "New",
+          formType: v.formType || "School entry",
+          synced: false,
+          ...v,
+          status: "New",
+        };
+        const nextPending = queuedCount({ ...state, schoolHealth: [rec, ...(state.schoolHealth || [])], pendingSync: (state.pendingSync || 0) + 1 });
+        patch((s) => ({ schoolHealth: [rec, ...(s.schoolHealth || [])], pendingSync: nextPending }));
+        return rec;
+      },
+      updateSchoolVisit: (id, changes) =>
+        patch((s) => {
+          const schoolHealth = (s.schoolHealth || []).map((v) =>
+            v.id === id ? { ...v, ...changes, synced: false } : v
+          );
+          return { schoolHealth, pendingSync: queuedCount({ ...s, schoolHealth, pendingSync: (s.pendingSync || 0) + 1 }) };
+        }),
+      removeSchoolVisit: (id) => patch((s) => ({ schoolHealth: (s.schoolHealth || []).filter((v) => v.id !== id) })),
+      saveSchoolChild: (visitId, child) =>
+        patch((s) => {
+          const offline = typeof navigator !== "undefined" && !navigator.onLine;
+          const schoolHealth = (s.schoolHealth || []).map((v) => {
+            if (v.id !== visitId) return v;
+            const children = v.children || [];
+            const payload = {
+              ...child,
+              offlineEntered: offline || child.offlineEntered || false,
+              offlineAt: offline ? new Date().toISOString() : child.offlineAt || "",
+            };
+            let nextChildren;
+            if (child.id) nextChildren = children.map((c) => (c.id === child.id ? { ...c, ...payload } : c));
+            else nextChildren = [...children, { ...payload, id: `CH-${Date.now()}` }];
+            const status = nextChildren.length ? (v.report?.completed ? "Completed" : "In Progress") : "New";
+            return { ...v, children: nextChildren, status, synced: false };
+          });
+          return { schoolHealth, pendingSync: queuedCount({ ...s, schoolHealth, pendingSync: (s.pendingSync || 0) + 1 }) };
+        }),
+      removeSchoolChild: (visitId, childId) =>
+        patch((s) => {
+          const schoolHealth = (s.schoolHealth || []).map((v) => {
+            if (v.id !== visitId) return v;
+            const children = (v.children || []).filter((c) => c.id !== childId);
+            const status = v.report?.completed ? "Completed" : children.length ? "In Progress" : "New";
+            return { ...v, children, status, synced: false };
+          });
+          return { schoolHealth, pendingSync: queuedCount({ ...s, schoolHealth, pendingSync: (s.pendingSync || 0) + 1 }) };
+        }),
+      saveSchoolReport: (visitId, report) =>
+        patch((s) => {
+          const schoolHealth = (s.schoolHealth || []).map((v) => {
+            if (v.id !== visitId) return v;
+            const nextReport = { ...(v.report || {}), ...report };
+            return {
+              ...v,
+              report: nextReport,
+              status: nextReport.completed ? "Completed" : (v.children || []).length ? "In Progress" : "New",
+              synced: false,
+            };
+          });
+          return { schoolHealth, pendingSync: queuedCount({ ...s, schoolHealth, pendingSync: (s.pendingSync || 0) + 1 }) };
+        }),
       addDrug: (drug) => patch((s) => ({ settings: { ...s.settings, drugs: [...s.settings.drugs, drug] } })),
       removeDrug: (name) =>
         patch((s) => ({ settings: { ...s.settings, drugs: s.settings.drugs.filter((d) => d.name !== name) } })),
@@ -367,6 +469,7 @@ export function StoreProvider({ children }) {
         patch((s) => ({
           pendingSync: 0,
           encounters: s.encounters.map((e) => ({ ...e, synced: true })),
+          schoolHealth: (s.schoolHealth || []).map((v) => ({ ...v, synced: true })),
         }));
         setSyncPrompt(null);
         return n;
