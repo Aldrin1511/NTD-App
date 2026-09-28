@@ -10,14 +10,27 @@ export default function Login() {
   const { login, branding } = useStore();
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
+  const [busy, setBusy] = useState(false);
   const set = (k) => (v) => setForm({ ...form, [k]: v });
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const u = login(form.email, form.password);
-    if (!u) return toast.error("Invalid email or password");
-    toast.success(`Welcome back, ${u.name}`);
-    navigate("/patients");
+    if (busy) return;
+    setBusy(true);
+    try {
+      const u = await login(form.email, form.password);
+      if (!u) {
+        toast.error("Invalid email or password");
+        return;
+      }
+      toast.success(`Welcome back, ${u.name}`, { duration: 2000 });
+      navigate("/patients");
+ 
+    } catch (err) {
+      toast.error(err?.message || "Invalid email or password");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -70,7 +83,7 @@ export default function Login() {
 
           <h2 className="font-head text-3xl font-bold tracking-tight">Sign in</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Use your programme credentials to open your caseload. Accounts are created by your programme administrator.
+            Use your programme credentials (same as Apex) to open your caseload and register patients in HMIS.
           </p>
 
           <form onSubmit={submit} className="mt-6 space-y-5">
@@ -90,24 +103,14 @@ export default function Login() {
               value={form.password}
               onChange={(e) => set("password")(e.target.value)}
             />
-            <Button type="submit" className="h-12 w-full text-base" data-testid="login-submit">
-              Sign in
+            <Button type="submit" className="h-12 w-full text-base" data-testid="login-submit" disabled={busy}>
+              {busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>
 
           <div className="mt-6">
-            <AlertPanel level="info" title="Prototype demo accounts" testid="demo-accounts">
-              <ul className="space-y-1">
-                <li>
-                  <b>Admin (all data):</b> admin@trias.health / Admin@123
-                </li>
-                <li>
-                  <b>Health worker (own data):</b> joseph@trias.health / Health@123
-                </li>
-                <li>
-                  <b>Supervisor (facility, view only):</b> mary@trias.health / Health@123
-                </li>
-              </ul>
+            <AlertPanel level="info" title="Sign in" testid="demo-accounts">
+              Use your NTD Web App programme credentials.
             </AlertPanel>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Field, TextField, AreaField, SelectField, AlertPanel, ItemActions } from "@/components/Fields";
+import { AddDrugSelect } from "@/components/MedicationShared";
 import { ConditionEntryShell, ChipMultiWithOther, ChoiceChips } from "@/components/EntryKit";
 import { GrowthEntry } from "@/components/GrowthChart";
 import { dobFromAge } from "@/components/Capture";
@@ -21,7 +22,7 @@ export default function WellBabyEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, user, settings, online } = useStore();
+  const { patients, encounters, saveEncounter, user, settings, online, ensureCatalogueDrug } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.id === params.get("enc") && e.disease === WELLBABY_ID);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
@@ -58,11 +59,11 @@ export default function WellBabyEncounter() {
   const addNote = () => setD((s) => ({ ...s, notes: ["", ...s.notes] }));
   const rmNote = (i) => setD((s) => ({ ...s, notes: s.notes.length <= 1 ? [""] : s.notes.filter((_, j) => j !== i) }));
   const toggleDrug = (name) => setD((s) => ({ ...s, drugs: s.drugs.includes(name) ? s.drugs.filter((x) => x !== name) : [...s.drugs, name] }));
-  const catalogueDrugs = (settings.drugs || []).filter((x) => x.type !== "Vaccine" && x.form !== "Vaccine").map((x) => x.name);
+  const catalogueDrugs = (settings.drugs || []).filter((x) => x.type !== "Vaccine" && x.form !== "Vaccine");
 
-  const persist = (close) => {
+  const persist = async (close) => {
     const episodeId = existing?.episodeId || patientEncs.filter((e) => e.disease === WELLBABY_ID)[0]?.episodeId || newWbEpisodeId();
-    saveEncounter({
+    await saveEncounter({
       id: existing?.id, patientId: p.id, episodeId, disease: WELLBABY_ID, facility, worker: user?.name, type: visitType,
       diagnosis: ageMonths != null ? `Age ${ageMonthsToLabel(ageMonths)}` : "",
       outcome: "", data: { ...d, delivery: preFill, ageMonths, growthAge: ageMonths },
@@ -148,7 +149,16 @@ export default function WellBabyEncounter() {
       body: (
         <div className="space-y-4">
           <ChoiceChips multi label="Age-relevant drugs" options={WELLBABY_DRUGS} value={d.drugs} onChange={(v) => set("drugs", v)} testid="wb-drug" />
-          <Field label="Add from drug list"><SelectField label="" options={catalogueDrugs.filter((n) => !d.drugs.includes(n))} value="" onChange={(v) => v && toggleDrug(v)} testid="wb-drug-add" placeholder="Choose a drug…" /></Field>
+          <AddDrugSelect
+            catalogue={catalogueDrugs}
+            selected={d.drugs}
+            online={online}
+            testid="wb-drug-add"
+            onAdd={(name, drugMeta) => {
+              if (drugMeta) ensureCatalogueDrug(drugMeta);
+              toggleDrug(name);
+            }}
+          />
         </div>
       ),
     },

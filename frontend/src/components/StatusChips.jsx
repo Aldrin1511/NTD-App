@@ -7,6 +7,22 @@ import { isLostToFollowUp } from "@/components/Capture";
 const chipCls = "shrink-0 rounded px-2 py-0.5 text-[11px] font-bold";
 const EPISODE_PREFIX = { SCAB: "scabies", YAWS: "yaws", LF: "lf", BURU: "buruli", LEP: "leprosy" };
 
+/** Distinct filled chip colours per condition (Patients + Appointments lists). */
+export const DISEASE_CHIP_CLASS = {
+  scabies: "border-transparent bg-amber-600 text-white",
+  yaws: "border-transparent bg-teal-600 text-white",
+  buruli: "border-transparent bg-rose-600 text-white",
+  lf: "border-transparent bg-sky-700 text-white",
+  leprosy: "border-transparent bg-emerald-700 text-white",
+  antenatal: "border-transparent bg-fuchsia-700 text-white",
+  malnutrition: "border-transparent bg-orange-700 text-white",
+  wellbaby: "border-transparent bg-cyan-700 text-white",
+};
+
+export function diseaseChipClass(diseaseId) {
+  return DISEASE_CHIP_CLASS[diseaseId] || "border-transparent bg-primary text-white";
+}
+
 const real = (v) => {
   const s = String(v || "").trim();
   return s && s !== "—" ? s : "";
@@ -35,6 +51,8 @@ export function patientStatusRecords(p, encounters, settings) {
     const diagnosis = real(last?.diagnosis) || real(last?.data?.diagnosis);
     let outcome = real(last?.outcome) || real(last?.data?.outcome);
     if (diseaseId === patientDisease && real(p.outcome)) outcome = real(p.outcome);
+    // Disease known from patient.diseases (list API) but encounters not loaded yet — show Open.
+    if (!outcome && (p.diseases || []).includes(diseaseId) && !last) outcome = "Open";
     if ((!outcome || /^(open|active)$/i.test(outcome)) && ltfu && lastOverall?.disease === diseaseId) {
       outcome = "Lost to follow-up";
     }
@@ -56,6 +74,59 @@ export function PendingSyncChip({ pending, testid }) {
   );
 }
 
+const hasMeaningfulData = (data) => {
+  if (!data || typeof data !== "object") return false;
+  return Object.keys(data).some((k) => {
+    const v = data[k];
+    if (v == null || v === "") return false;
+    if (typeof v === "object") {
+      if (Array.isArray(v)) return v.length > 0;
+      return Object.keys(v).length > 0;
+    }
+    return true;
+  });
+};
+
+/** Appointment encounter workflow status: New → In progress → Completed */
+export function appointmentEncounterStatus(e) {
+  if (!e) return "New";
+  const completed =
+    e.complete === true ||
+    e.pendingStart === false ||
+    String(e.status || "").toLowerCase() === "complete" ||
+    String(e.status || "").toLowerCase() === "completed";
+  if (completed) return "Completed";
+
+  const inProgressHint = /in\s*progress/i.test(String(e.status || ""));
+  const hasDraft =
+    inProgressHint ||
+    e.revised === true ||
+    (Array.isArray(e.editedSections) && e.editedSections.length > 0) ||
+    hasMeaningfulData(e.data);
+
+  if (hasDraft) return "In progress";
+  return "New";
+}
+
+const ENCOUNTER_STATUS_CHIP_CLASS = {
+  New: "border-sky-300 bg-sky-50 text-sky-900",
+  "In progress": "border-amber-300 bg-amber-50 text-amber-900",
+  Completed: "border-emerald-300 bg-emerald-50 text-emerald-900",
+};
+
+export function EncounterStatusChip({ encounter, status: statusProp, testid }) {
+  const status = statusProp || appointmentEncounterStatus(encounter);
+  return (
+    <Badge
+      variant="outline"
+      className={`${chipCls} ${ENCOUNTER_STATUS_CHIP_CLASS[status] || ENCOUNTER_STATUS_CHIP_CLASS.New}`}
+      data-testid={testid}
+    >
+      {status}
+    </Badge>
+  );
+}
+
 function ChipGroup({ diseaseId, diagnosis, outcome }) {
   const disease = DISEASE_SPECS[diseaseId]?.name || diseaseId;
   const dx = real(diagnosis);
@@ -63,7 +134,11 @@ function ChipGroup({ diseaseId, diagnosis, outcome }) {
   if (!disease && !dx && !out) return null;
   return (
     <>
-      {disease && <Badge className={`${chipCls} bg-primary text-white`}>{disease}</Badge>}
+      {disease && (
+        <Badge className={`${chipCls} ${diseaseChipClass(diseaseId)}`}>
+          {disease}
+        </Badge>
+      )}
       {dx && (
         <Badge variant="outline" className={chipCls}>
           {dx}

@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Slider } from "@/components/ui/slider";
 import PatientSidebar from "@/components/PatientSidebar";
 import { Field, TextField, AreaField, SelectField, ChoiceRow, CheckGrid, AlertPanel, ItemActions } from "@/components/Fields";
+import { AddDrugSelect } from "@/components/MedicationShared";
 import { localISODate, fmtDate } from "@/mock/specs";
 import {
   ANTENATAL_ID, ANTENATAL_NAME, ANC_HISTORY_FIELDS, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
@@ -115,7 +116,7 @@ export default function AntenatalEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, user, settings, facilities, registerBaby, online } = useStore();
+  const { patients, encounters, saveEncounter, user, settings, facilities, registerBaby, online, ensureCatalogueDrug } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.id === params.get("enc") && e.disease === ANTENATAL_ID);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
@@ -168,7 +169,7 @@ export default function AntenatalEncounter() {
 
   // ---- Drugs ----
   const toggleDrug = (name) => setD((s) => ({ ...s, drugs: s.drugs.includes(name) ? s.drugs.filter((x) => x !== name) : [...s.drugs, name] }));
-  const catalogueDrugs = (settings.drugs || []).filter((x) => (x.type !== "Vaccine" && x.form !== "Vaccine")).map((x) => x.name);
+  const catalogueDrugs = (settings.drugs || []).filter((x) => (x.type !== "Vaccine" && x.form !== "Vaccine"));
 
   // ---- Delivery / babies ----
   const babies = d.delivery.babies || [];
@@ -190,11 +191,11 @@ export default function AntenatalEncounter() {
       height: b.lengthCm ? Number(b.lengthCm) : "",
       deliveryDetails: { ...b, motherId: p.id, motherName: p.name, deliveryDate: d.delivery.date, mode: d.delivery.mode, place: d.delivery.place },
     });
-    updBaby(i, { registered: true, patientId: rec.id });
-    toast.success(`${name} registered · ${rec.id}`);
+    updBaby(i, { registered: true, patientId: rec.id, patientCode: rec.patientCode || "" });
+    toast.success(`${name} registered · ${rec.patientCode ? `PID ${rec.patientCode}` : "patient"}`);
   };
 
-  const persist = (close) => {
+  const persist = async (close) => {
     const episodeId =
       existing?.episodeId ||
       (() => {
@@ -205,7 +206,7 @@ export default function AntenatalEncounter() {
         return newAncEpisodeId();
       })();
     const outcome = d.outcome?.status || "";
-    saveEncounter({
+    await saveEncounter({
       id: existing?.id,
       patientId: p.id,
       episodeId,
@@ -373,16 +374,16 @@ export default function AntenatalEncounter() {
       body: (
         <div className="space-y-4">
           <CheckGrid label="Standard antenatal drugs" options={ANC_DRUGS} value={d.drugs} onChange={(v) => setD((s) => ({ ...s, drugs: v }))} testid="anc-drug" />
-          <Field label="Add from drug list">
-            <SelectField
-              label=""
-              options={catalogueDrugs.filter((n) => !d.drugs.includes(n))}
-              value=""
-              onChange={(v) => v && toggleDrug(v)}
-              testid="anc-drug-add"
-              placeholder="Choose a drug to add…"
-            />
-          </Field>
+          <AddDrugSelect
+            catalogue={catalogueDrugs}
+            selected={d.drugs}
+            online={online}
+            testid="anc-drug-add"
+            onAdd={(name, drugMeta) => {
+              if (drugMeta) ensureCatalogueDrug(drugMeta);
+              toggleDrug(name);
+            }}
+          />
           {d.drugs.filter((n) => !ANC_DRUGS.includes(n)).length > 0 && (
             <div className="flex flex-wrap gap-2">
               {d.drugs.filter((n) => !ANC_DRUGS.includes(n)).map((n) => (
@@ -476,7 +477,7 @@ export default function AntenatalEncounter() {
                 <SelectField label="Outcome" options={BABY_OUTCOMES} value={b.outcome} onChange={(v) => updBaby(i, { outcome: v })} testid={`anc-baby-outcome-${i}`} />
               </div>
               <Button className="mt-3 h-10" disabled={b.registered} onClick={() => doRegisterBaby(i)} data-testid={`anc-baby-register-${i}`}>
-                {b.registered ? `Registered · ${b.patientId}` : "Register baby"}
+                {b.registered ? `Registered · ${b.patientCode ? `PID ${b.patientCode}` : "patient"}` : "Register baby"}
               </Button>
             </div>
           ))}

@@ -1,18 +1,157 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { SYMPTOMS, SUSPECTS, FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
-import { SUSPECT_SYMPTOMS } from "@/mock/specs";
-import { USERS, PATIENTS, ENCOUNTERS, HOUSEHOLDS } from "@/mock/data";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import { FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
+import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs } from "@/lib/hmisApi";
+import { applyNtdFormConfigs } from "@/lib/ntdFormConfig";
+import {
+  SUSPECT_SYMPTOMS,
+  SUSPECT_OPTIONS,
+  MODE_OF_DETECTION,
+  REFERRED_BY,
+  CASE_TYPES,
+  CONSENT,
+  AGE_SEX_GROUPS,
+  CONTACT_STATUS,
+  RELATIONSHIPS,
+  TEST_RESULT,
+  DETECT_RESULT,
+  VISIT_TYPES_DEFAULT,
+  DISEASE_SPECS,
+} from "@/mock/specs";
+import { featureCodeForDisease, rehydrateFormFromPhi } from "@/lib/phiMap";
+import { resolveDob } from "@/lib/hmisPatient";
+import { formatInternational } from "@/lib/phone";
+import { dobFromAgeYmd } from "@/components/Capture";
+import {
+  OP,
+  newLocalId,
+  isLocalId,
+  enqueueOp,
+  countPendingOps,
+  listPendingOps,
+  putLocalPatient,
+  putLocalEncounter,
+  putLocalSuspect,
+  getLocalPatients,
+  getLocalEncounters,
+  getLocalSuspects,
+  findRegisterOpForPatient,
+  findOpForLocalVisit,
+  cloneFormDataForSync,
+  updateOp,
+  deleteOps,
+} from "@/lib/offlineOutbox";
+import { syncOutbox } from "@/lib/offlineSync";
 
-const KEY = "trias.state.v3";
 const Ctx = createContext(null);
 
+const ALLOWED_DISEASES_KEY = "ntd.allowedDiseases";
+const LEGACY_AUTH_PERSIST_KEY = "ntd.authPersist";
+
+function readCachedAllowedDiseases(userId) {
+  if (!userId) return null;
+  try {
+    const raw = localStorage.getItem(`${ALLOWED_DISEASES_KEY}.${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedAllowedDiseases(userId, diseaseIds) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(
+      `${ALLOWED_DISEASES_KEY}.${userId}`,
+      JSON.stringify(Array.isArray(diseaseIds) ? diseaseIds.map(String) : [])
+    );
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/** Drop old localStorage session blob (replaced by cookie + /auth/session). */
+function clearLegacyAuthPersist() {
+  try {
+    localStorage.removeItem(LEGACY_AUTH_PERSIST_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function applySessionUser(session, emailHint) {
+  const email = String(session.email || emailHint || "").trim();
+  const allowedDiseases = Array.isArray(session.allowedDiseases)
+    ? session.allowedDiseases.map(String)
+    : [];
+  writeCachedAllowedDiseases(session.userId, allowedDiseases);
+  return {
+    id: session.userId || `u-${Date.now()}`,
+    name: (email.split("@")[0] || "user").trim() || "user",
+    email: email || session.userId,
+    role: "Health Worker",
+    scope: "all",
+    canEdit: true,
+    active: true,
+    facilityId: session.facilityId,
+    allowedDiseases,
+  };
+}
+
+/** Normalize portal-be / TriasNtd patient docs for NTD UI. */
+function normalizeApiPatient(row) {
+  if (!row || typeof row !== "object") return null;
+  const id = String(row.id || row.patientId || "");
+  if (!id) return null;
+  let firstName = String(row.firstName || "").trim();
+  const middleName = String(row.middleName || "").trim();
+  const lastName = String(row.lastName || "").trim();
+  // Repair corrupted firstName that already embeds middle+last
+  if (firstName && (middleName || lastName) && /\s/.test(firstName)) {
+    const suffix = [middleName, lastName].filter(Boolean).join(" ");
+    if (suffix && firstName.endsWith(` ${suffix}`)) {
+      firstName = firstName.slice(0, -(suffix.length + 1)).trim();
+    } else {
+      firstName = firstName.split(/\s+/)[0];
+    }
+  }
+  const name =
+    [firstName || row.firstName, middleName || row.middleName, lastName || row.lastName]
+      .filter(Boolean)
+      .join(" ") ||
+    String(row.name || "").trim() ||
+    "";
+  return {
+    ...row,
+    id,
+    patientId: row.patientId || id,
+    patientCode: row.patientCode || "",
+    firstName: firstName || (name ? name.split(/\s+/)[0] : ""),
+    middleName,
+    lastName,
+    name,
+    episodeId: row.episodeId || "",
+    sex: row.sex || row.gender || "",
+    gender: row.gender || row.sex || "",
+    diseases: Array.isArray(row.diseases) ? row.diseases : [],
+    status: row.status || "",
+    phone: row.phone || "",
+    village: row.village || "",
+    district: row.district || "",
+    province: row.province || "",
+    createdAt: row.createdAt || "",
+    createdBy: row.createdBy || "",
+  };
+}
+
 const initial = () => ({
-  users: USERS,
-  patients: PATIENTS,
-  encounters: ENCOUNTERS,
-  households: HOUSEHOLDS,
-  suspects: SUSPECTS,
+  users: [],
+  patients: [],
+  encounters: [],
+  households: [],
+  suspects: [],
   facilities: FACILITIES_LIST,
   settings: { symptoms: SUSPECT_SYMPTOMS, drugs: DRUGS, visitTypes: VISIT_TYPES, ltfuByDisease: DEFAULT_LTFU, lostToFollowUpDays: 30, immunizationSchedules: DEFAULT_IMMUNIZATION_SCHEDULES, labMaster: DEFAULT_LAB_MASTER, featureConfig: DEFAULT_FEATURE_CONFIG, regimens: [
     { id: "R-001", name: "Scabies — topical first line", disease: "scabies", diagnosis: "Confirmed Scabies", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "Every night at bedtime", duration: 1, durationUnit: "Week(s)", drugs: ["Permethrin 5% Cream/Lotion"] },
@@ -30,77 +169,83 @@ const initial = () => ({
     programme: "Skin NTD Control — Momase Region",
     logo: "",
     primary: "#0F52BA",
+    phone: "",
+    email: "",
+    address: "",
   },
-  pendingSync: 3,
+  pendingSync: 0,
+  outboxOps: [],
+  /** In-memory create draft — updated on leave, not every keystroke */
+  patientRegisterDraft: null,
 });
 
-const load = () => {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const saved = JSON.parse(raw);
-      const merged = { ...initial(), ...saved };
-      merged.settings = { ...initial().settings, ...(saved.settings || {}) };
-      if (!Array.isArray(merged.schoolHealth)) merged.schoolHealth = [];
-      const have = new Set((merged.encounters || []).map((e) => e.id));
-      const extra = ENCOUNTERS.filter((e) => !have.has(e.id));
-      if (extra.length) merged.encounters = [...(merged.encounters || []), ...extra];
-      const seedRegimens = initial().settings.regimens || [];
-      const savedRegimens = merged.settings?.regimens;
-      if (Array.isArray(savedRegimens) && seedRegimens.length) {
-        const byId = Object.fromEntries(seedRegimens.map((r) => [r.id, r]));
-        merged.settings = {
-          ...merged.settings,
-          regimens: savedRegimens.map((r) => {
-            const seed = byId[r.id];
-            if (!seed) return r;
-            return {
-              ...r,
-              frequency: r.frequency || seed.frequency || "",
-              duration: r.duration || seed.duration || "",
-              durationUnit: r.durationUnit || seed.durationUnit || "",
-            };
-          }),
-        };
-      }
-      const seedDrugs = initial().settings.drugs || [];
-      const savedDrugs = merged.settings?.drugs;
-      if (Array.isArray(savedDrugs) && seedDrugs.length) {
-        const byName = Object.fromEntries(seedDrugs.map((d) => [d.name, d]));
-        merged.settings = {
-          ...merged.settings,
-          drugs: savedDrugs.map((d) => {
-            const seed = byName[d.name];
-            if (!seed) return d;
-            return {
-              ...d,
-              dosage: d.dosage || seed.dosage || "",
-              frequency: d.frequency || seed.frequency || "",
-              duration: d.duration || seed.duration || "",
-              durationUnit: d.durationUnit || seed.durationUnit || "",
-            };
-          }),
-        };
-      }
-      return merged;
-    }
-  } catch (e) {}
-  return initial();
-};
+const queuedCount = (s) => Math.max(0, Number(s.pendingSync) || 0);
 
-const queuedCount = (s) => {
-  const enc = (s.encounters || []).filter((e) => !e.synced).length;
-  return Math.max(Number(s.pendingSync) || 0, enc);
-};
+/** Deduplicate concurrent / StrictMode-double patient list fetches. */
+let patientsInflight = null;
+let patientsLoadedKey = null;
+
+function patientsCacheKey(facilityId, q) {
+  return `${facilityId || ""}::${q || ""}`;
+}
+
+function clearPatientsLoadCache() {
+  patientsInflight = null;
+  patientsLoadedKey = null;
+}
+
+/** Deduplicate locations + episode sync (StrictMode / remount). */
+let locationsInflight = null;
+let locationsLoadedKey = null;
+let episodesInflight = null;
+let episodesLoadedKey = null;
+let appointmentsInflight = null;
+let appointmentsLoadedKey = null;
+let suspectsInflight = null;
+let suspectsLoadedKey = null;
+let phiInflight = null;
+
+function clearRecordLoadCaches() {
+  locationsInflight = null;
+  locationsLoadedKey = null;
+  episodesInflight = null;
+  episodesLoadedKey = null;
+  appointmentsInflight = null;
+  appointmentsLoadedKey = null;
+  suspectsInflight = null;
+  suspectsLoadedKey = null;
+  phiInflight = null;
+}
 
 export function StoreProvider({ children }) {
-  const [state, setState] = useState(load);
+  const [state, setState] = useState(initial);
   const [online, setOnline] = useState(navigator.onLine);
   const [syncPrompt, setSyncPrompt] = useState(null);
+  const [authSession, setAuthSession] = useState(null);
+  /** false until cookie session bootstrap finishes (Angular APP_INITIALIZER equivalent). */
+  const [authReady, setAuthReady] = useState(false);
 
-  useEffect(() => {
-    localStorage.setItem(KEY, JSON.stringify(state));
-  }, [state]);
+  const patch = (fn) => setState((s) => ({ ...s, ...fn(s) }));
+
+  const refreshOutboxState = useCallback(async () => {
+    try {
+      const [pending, ops] = await Promise.all([countPendingOps(), listPendingOps()]);
+      patch(() => ({ pendingSync: pending, outboxOps: ops }));
+      return pending;
+    } catch (err) {
+      console.warn("refreshOutboxState failed", err);
+      return 0;
+    }
+  }, []);
+
+  const offerSyncAfterSave = useCallback(async () => {
+    if (!navigator.onLine) return 0;
+    const n = await refreshOutboxState();
+    if (n > 0) {
+      setSyncPrompt({ count: n, at: Date.now() });
+    }
+    return n;
+  }, [refreshOutboxState]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -116,16 +261,128 @@ export function StoreProvider({ children }) {
     };
   }, []);
 
-  const patch = (fn) => setState((s) => ({ ...s, ...fn(s) }));
-  const offerSyncAfterSave = (_count) => {
-    // Temporarily hide the "Sync pending items?" popup after Save / Save & close.
-  };
+  /** Cookie session bootstrap — same idea as Angular APP_INITIALIZER + CanActivate. */
+  useEffect(() => {
+    let cancelled = false;
+    clearLegacyAuthPersist();
+    (async () => {
+      try {
+        const session = await fetchAuthSession();
+        if (cancelled) return;
+        if (session?.userId) {
+          setAuthSession(session);
+          const localUser = applySessionUser(session);
+          try {
+            const formConfigs = await fetchNtdFormConfigs();
+            applyNtdFormConfigs(formConfigs, {
+              DISEASE_SPECS,
+              SUSPECT_SYMPTOMS,
+              SUSPECT_OPTIONS,
+              sharedTargets: {
+                MODE_OF_DETECTION,
+                REFERRED_BY,
+                CASE_TYPES,
+                CONSENT,
+                AGE_SEX_GROUPS,
+                CONTACT_STATUS,
+                RELATIONSHIPS,
+                TEST_RESULT,
+                DETECT_RESULT,
+                VISIT_TYPES_DEFAULT,
+              },
+            });
+          } catch (err) {
+            console.warn("session bootstrap form configs failed", err);
+          }
+          let patients = [];
+          try {
+            const rows = await fetchPatients({ facilityId: session.facilityId, limit: 200 });
+            patients = rows.map(normalizeApiPatient).filter(Boolean);
+            patientsLoadedKey = patientsCacheKey(session.facilityId, "");
+          } catch (err) {
+            console.warn("session bootstrap patients failed", err);
+          }
+          patch((s) => {
+            const exists = s.users.some((u) => u.id === localUser.id);
+            return {
+              users: exists
+                ? s.users.map((u) => (u.id === localUser.id ? { ...u, ...localUser } : u))
+                : [...s.users, localUser],
+              currentUserId: localUser.id,
+              patients: patients.length ? patients : s.patients,
+            };
+          });
+        }
+      } catch (err) {
+        console.warn("session bootstrap failed", err);
+      } finally {
+        if (!cancelled) setAuthReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Hydrate IndexedDB local entities + outbox count into React state. */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [localPatients, localEncounters, localSuspects, pending, ops] = await Promise.all([
+          getLocalPatients(),
+          getLocalEncounters(),
+          getLocalSuspects(),
+          countPendingOps(),
+          listPendingOps(),
+        ]);
+        if (cancelled) return;
+        patch((s) => {
+          const pById = new Map(s.patients.map((p) => [p.id, p]));
+          localPatients.forEach((p) => pById.set(p.id, p));
+          const eById = new Map(s.encounters.map((e) => [e.id, e]));
+          localEncounters.forEach((e) => eById.set(e.id, e));
+          const susById = new Map(s.suspects.map((x) => [x.id, x]));
+          localSuspects.forEach((x) => susById.set(x.id, x));
+          return {
+            patients: [...pById.values()],
+            encounters: [...eById.values()],
+            suspects: [...susById.values()],
+            pendingSync: pending,
+            outboxOps: ops,
+          };
+        });
+      } catch (err) {
+        console.warn("offline hydrate failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const api = useMemo(() => {
     const user = state.users.find((u) => u.id === state.currentUserId) || null;
 
+    /** Disease ids the logged-in user may start/suspect. null = unrestricted (demo / mock login). */
+    const resolvedAllowedDiseases = (() => {
+      if (!authSession) return null; // demo accounts see all diseases
+      if (Array.isArray(user?.allowedDiseases)) return user.allowedDiseases.map(String);
+      if (Array.isArray(authSession.allowedDiseases)) return authSession.allowedDiseases.map(String);
+      const cached = readCachedAllowedDiseases(authSession.userId || user?.id);
+      return cached || [];
+    })();
+
+    const canAccessDisease = (diseaseId) => {
+      if (!diseaseId) return true;
+      if (resolvedAllowedDiseases == null) return true;
+      return resolvedAllowedDiseases.includes(String(diseaseId));
+    };
+
     const visiblePatients = () => {
       if (!user) return [];
+      // Facility list from portal-be is already scoped by facilityId
+      if (authSession) return state.patients;
       if (user.scope === "all") return state.patients;
       if (user.scope === "province") return state.patients.filter((p) => p.province === user.province);
       return state.patients.filter((p) => p.createdBy === user.id);
@@ -137,14 +394,128 @@ export function StoreProvider({ children }) {
       pendingSync: queuedCount(state),
       syncPrompt,
       user,
+      authSession,
+      authReady,
+      allowedDiseases: resolvedAllowedDiseases,
+      canAccessDisease,
       visiblePatients,
-      login: (email, password) => {
-        const u = state.users.find(
-          (x) => x.email.toLowerCase() === String(email).toLowerCase() && x.password === password && x.active
-        );
-        if (!u) return null;
-        patch(() => ({ currentUserId: u.id }));
-        return u;
+      loadPatients: async (opts = {}) => {
+        const session = opts.session || authSession;
+        if (!session?.facilityId) return state.patients;
+        const key = patientsCacheKey(session.facilityId, opts.q);
+        if (!opts.force && patientsLoadedKey === key && !patientsInflight) {
+          return state.patients;
+        }
+        if (!opts.force && patientsInflight?.key === key) {
+          return patientsInflight.promise;
+        }
+        const promise = fetchPatients({
+          facilityId: session.facilityId,
+          q: opts.q,
+          limit: opts.limit || 200,
+        })
+          .then((rows) => {
+            const patients = rows.map(normalizeApiPatient).filter(Boolean);
+            patch(() => ({ patients }));
+            patientsLoadedKey = key;
+            return patients;
+          })
+          .catch((err) => {
+            console.warn("loadPatients failed", err);
+            return state.patients;
+          })
+          .finally(() => {
+            if (patientsInflight?.promise === promise) patientsInflight = null;
+          });
+        patientsInflight = { key, promise };
+        return promise;
+      },
+      login: async (email, password) => {
+        try {
+          const session = await loginWithTriAuth(email, password);
+          setAuthSession(session);
+          clearPatientsLoadCache();
+          clearRecordLoadCaches();
+
+          // Replace bundled disease/suspect form defs with ApplicationConfig (NTD_*).
+          try {
+            const formConfigs = await fetchNtdFormConfigs();
+            applyNtdFormConfigs(formConfigs, {
+              DISEASE_SPECS,
+              SUSPECT_SYMPTOMS,
+              SUSPECT_OPTIONS,
+              sharedTargets: {
+                MODE_OF_DETECTION,
+                REFERRED_BY,
+                CASE_TYPES,
+                CONSENT,
+                AGE_SEX_GROUPS,
+                CONTACT_STATUS,
+                RELATIONSHIPS,
+                TEST_RESULT,
+                DETECT_RESULT,
+                VISIT_TYPES_DEFAULT,
+              },
+            });
+          } catch (err) {
+            console.warn("load NTD form configs failed — using bundled specs", err);
+          }
+
+          let localUser = state.users.find(
+            (x) => x.email.toLowerCase() === String(email).toLowerCase() && x.active
+          );
+          const allowedDiseases = Array.isArray(session.allowedDiseases)
+            ? session.allowedDiseases.map(String)
+            : [];
+          writeCachedAllowedDiseases(session.userId, allowedDiseases);
+
+          if (!localUser) {
+            localUser = {
+              id: session.userId || `u-${Date.now()}`,
+              name: email.split("@")[0],
+              email,
+              role: "Health Worker",
+              scope: "all",
+              canEdit: true,
+              active: true,
+              facilityId: session.facilityId,
+              allowedDiseases,
+            };
+          } else {
+            localUser = { ...localUser, allowedDiseases, facilityId: session.facilityId || localUser.facilityId };
+          }
+
+          // Fetch registered NTD patients for this facility (portal-be Mongo mirror).
+          let patients = [];
+          try {
+            const rows = await fetchPatients({
+              facilityId: session.facilityId,
+              limit: 200,
+            });
+            patients = rows.map(normalizeApiPatient).filter(Boolean);
+            patientsLoadedKey = patientsCacheKey(session.facilityId, "");
+          } catch (err) {
+            console.warn("loadPatients after login failed", err);
+          }
+
+          if (!state.users.find((x) => x.id === localUser.id)) {
+            patch((s) => ({
+              users: [...s.users, localUser],
+              currentUserId: localUser.id,
+              patients,
+            }));
+          } else {
+            patch((s) => ({
+              users: s.users.map((u) => (u.id === localUser.id ? { ...u, ...localUser } : u)),
+              currentUserId: localUser.id,
+              patients,
+            }));
+          }
+          return { ...localUser, authSession: session };
+        } catch (err) {
+          // No local demo accounts — programme credentials required
+          throw err;
+        }
       },
       register: (data) => {
         const u = {
@@ -252,41 +623,134 @@ export function StoreProvider({ children }) {
         offerSyncAfterSave(nextPending);
         return out;
       },
-      logout: () => patch(() => ({ currentUserId: null })),
+      logout: async () => {
+        await logoutTriAuth();
+        setAuthSession(null);
+        clearLegacyAuthPersist();
+        clearPatientsLoadCache();
+        clearRecordLoadCaches();
+        patch(() => ({
+          currentUserId: null,
+          users: [],
+          patients: [],
+          encounters: [],
+          households: [],
+          suspects: [],
+          patientRegisterDraft: null,
+        }));
+      },
       addUser: (u) =>
         patch((s) => ({ users: [...s.users, { id: `u${Date.now()}`, active: true, ...u }] })),
       updateUser: (id, changes) =>
         patch((s) => ({ users: s.users.map((u) => (u.id === id ? { ...u, ...changes } : u)) })),
       setBranding: (b) => patch((s) => ({ branding: { ...s.branding, ...b } })),
-      addPatient: (data) => {
-        const nextNum =
-          state.patients.reduce((max, p) => {
-            const m = String(p.id).match(/^PNG(\d+)$/i);
-            return m ? Math.max(max, Number(m[1])) : max;
-          }, 0) + 1;
-        const rec = {
-          id: `PNG${String(nextNum).padStart(7, "0")}`,
-          episodeId: `SCAB-2026-${String(1240 + nextNum).padStart(8, "0")}`,
-          createdBy: state.currentUserId,
-          createdAt: new Date().toISOString().slice(0, 10),
-          status: "",
-          diseases: [],
-          ...data,
-          sex: data.sex || data.gender || "",
-          gender: data.gender || data.sex || "",
+      setPatientRegisterDraft: (draft) =>
+        patch(() => ({ patientRegisterDraft: draft ? { ...draft } : null })),
+      clearPatientRegisterDraft: () => patch(() => ({ patientRegisterDraft: null })),
+      addPatient: async (formState) => {
+        const buildRec = (patientId, patientCode, { localOnly = false } = {}) => {
+          const primary = (formState.addresses && formState.addresses[0]) || {};
+          const ageY = formState.ageY !== "" && formState.ageY != null ? formState.ageY : formState.age;
+          const dob =
+            formState.dob ||
+            resolveDob(formState) ||
+            dobFromAgeYmd({ y: ageY, m: formState.ageM, d: formState.ageD });
+          return {
+            ...formState,
+            firstName: formState.name,
+            name: [formState.name, formState.middleName, formState.lastName].filter(Boolean).join(" "),
+            dob,
+            age: Number(ageY) || 0,
+            phone: formatInternational(formState.phoneCountry, formState.phone),
+            countryCode: formState.phoneCountry,
+            country: primary.country,
+            province: primary.province,
+            district: primary.district,
+            village: primary.village,
+            addressType: primary.type,
+            id: patientId,
+            patientId,
+            patientCode: patientCode || "",
+            episodeId: "",
+            createdBy: state.currentUserId,
+            createdAt: new Date().toISOString().slice(0, 10),
+            status: formState.status || "",
+            diseases: formState.diseases || [],
+            sex: formState.sex || formState.gender || "",
+            gender: formState.gender || formState.sex || "",
+            facilityId: authSession?.facilityId,
+            localOnly: Boolean(localOnly),
+            synced: !localOnly,
+          };
         };
-        const nextPending = queuedCount(state) + 1;
-        patch((s) => ({ patients: [rec, ...s.patients], pendingSync: nextPending }));
-        offerSyncAfterSave(nextPending);
+
+        // Offline (or no session): queue register for Sync
+        if (!online || !authSession?.facilityId) {
+          if (!authSession?.facilityId) {
+            throw new Error("Sign in with programme credentials before registering a patient");
+          }
+          const localPatientId = newLocalId("local-patient");
+          const rec = buildRec(localPatientId, "", { localOnly: true });
+          const op = await enqueueOp({
+            type: OP.REGISTER_PATIENT,
+            localEntityId: localPatientId,
+            label: `Register ${rec.name || "patient"}`,
+            payload: { localPatientId, formState: { ...formState } },
+          });
+          await putLocalPatient(rec);
+          patch((s) => ({
+            patients: [rec, ...s.patients],
+            patientRegisterDraft: null,
+          }));
+          await offerSyncAfterSave();
+          return { ...rec, outboxOpId: op.id };
+        }
+
+        const { patientId, patientCode } = await createHmisPatient(formState);
+        const rec = buildRec(patientId, patientCode, { localOnly: false });
+        patch((s) => ({ patients: [rec, ...s.patients], patientRegisterDraft: null }));
         return rec;
       },
-      updatePatient: (id, data) => {
+      updatePatient: async (id, data) => {
         const rec = state.patients.find((p) => p.id === id);
         if (!rec) return null;
+
+        // Edit patient is online-only and always writes to HMIS (real DB).
+        if (!online) {
+          throw new Error("Go online to edit patient details — offline edits are not allowed");
+        }
+        if (!authSession?.facilityId) {
+          throw new Error("Sign in with programme credentials before editing a patient");
+        }
+        if (rec.localOnly || isLocalId(rec.id)) {
+          throw new Error(
+            "This patient is still queued offline. Tap Sync first, then edit — changes save to HMIS"
+          );
+        }
+
+        const primary = (data.addresses && data.addresses[0]) || {};
+        const ageY = data.ageY !== "" && data.ageY != null ? data.ageY : data.age;
+        const dob =
+          data.dob ||
+          resolveDob(data) ||
+          dobFromAgeYmd({ y: ageY, m: data.ageM, d: data.ageD }) ||
+          rec.dob;
+
+        await updateHmisPatient(rec.id, data);
+
+        const firstName = String(data.firstName || data.name || "").trim();
+        const middleName = String(data.middleName || "").trim();
+        const lastName = String(data.lastName || "").trim();
+        const displayName =
+          String(data.displayName || "").trim() ||
+          [firstName, middleName, lastName].filter(Boolean).join(" ");
+
         const next = {
           ...rec,
           ...data,
           id: rec.id,
+          patientId: rec.patientId || rec.id,
+          patientCode: rec.patientCode || "",
           episodeId: rec.episodeId,
           createdBy: rec.createdBy,
           createdAt: rec.createdAt,
@@ -294,19 +758,35 @@ export function StoreProvider({ children }) {
           status: rec.status,
           outcome: rec.outcome,
           treatmentEnd: rec.treatmentEnd,
+          firstName,
+          middleName,
+          lastName,
+          name: displayName,
+          dob,
+          age: Number(ageY) || rec.age || 0,
+          phone: data.phoneCountry
+            ? formatInternational(data.phoneCountry, data.phone)
+            : data.phone || rec.phone,
+          countryCode: data.phoneCountry || rec.countryCode,
+          country: primary.country || data.country || rec.country,
+          province: primary.province || data.province || rec.province,
+          district: primary.district || data.district || rec.district,
+          village: primary.village || data.village || rec.village,
+          addressType: primary.type || data.addressType || rec.addressType,
           sex: data.sex || data.gender || rec.sex,
           gender: data.gender || data.sex || rec.gender,
+          facilityId: rec.facilityId || authSession?.facilityId,
+          localOnly: false,
+          synced: true,
           editedAt: new Date().toISOString(),
         };
-        const nextPending = queuedCount(state) + 1;
         patch((s) => ({
           patients: s.patients.map((p) => (p.id === id ? next : p)),
-          pendingSync: nextPending,
         }));
-        offerSyncAfterSave(nextPending);
         return next;
       },
-      registerBaby: (motherId, baby) => {        const mother = state.patients.find((p) => p.id === motherId);
+      registerBaby: (motherId, baby) => {
+        const mother = state.patients.find((p) => p.id === motherId);
         if (!mother) return null;
         const nextNum =
           state.patients.reduce((max, p) => {
@@ -334,6 +814,7 @@ export function StoreProvider({ children }) {
         };
         const nextPending = queuedCount(state) + 1;
         patch((s) => ({ patients: [rec, ...s.patients], pendingSync: nextPending }));
+        offerSyncAfterSave(nextPending);
         return rec;
       },
       addDisease: (patientId, diseaseId) =>
@@ -344,64 +825,1258 @@ export function StoreProvider({ children }) {
               : p
           ),
         })),
-      saveEncounter: (enc) => {
-        let saved = null;
-        let nextPending = 0;
-        patch((s) => {
-          const existing = enc.id && s.encounters.find((e) => e.id === enc.id);
-          if (existing) {
-            const merged = {
-              ...existing,
-              ...enc,
-              id: existing.id,
-              date: existing.date,
-              synced: false,
-              editedAt: new Date().toISOString(),
-              editedSections: [...new Set([...(existing.editedSections || []), ...(enc.editedSections || [])])],
-            };
-            saved = merged;
-            const nextEncounters = s.encounters.map((e) => (e.id === merged.id ? merged : e));
-            nextPending = queuedCount({ ...s, encounters: nextEncounters, pendingSync: s.pendingSync + 1 });
-            return { encounters: nextEncounters, pendingSync: nextPending };
-          }
-          const { id: _dropId, ...rest } = enc;
-          const rec = {
-            id: `ENC-${String(Math.floor(Math.random() * 900000) + 100000)}`,
-            date: new Date().toISOString(),
-            disease: "scabies",
-            synced: false,
-            complete: true,
-            ...rest,
-          };
-          saved = rec;
-          const nextEncounters = [...s.encounters, rec];
-          nextPending = queuedCount({ ...s, encounters: nextEncounters, pendingSync: s.pendingSync + 1 });
-          return { encounters: nextEncounters, pendingSync: nextPending };
+      /**
+       * Start episode for Scabies/Yaws/LF/Buruli/Leprosy:
+       * portal-be creates RecordsT + VisitsT + VisitMetaT, then we keep a local pending visit.
+       */
+      startEpisode: async ({
+        patientId,
+        disease,
+        visitType,
+        locationId,
+        locationName,
+        visitDate,
+        referral,
+        clinicianName,
+      }) => {
+        const makeDraft = (ids, { synced }) => ({
+          id: ids.visitId,
+          visitId: ids.visitId,
+          recordId: ids.recordId,
+          encounterId: ids.encounterId || "",
+          featureCode: ids.featureCode || featureCodeForDisease(disease),
+          patientId,
+          episodeId: ids.recordId,
+          disease,
+          facility: locationName || "",
+          locationId: locationId || "",
+          worker: clinicianName || "",
+          type: visitType,
+          referral: referral || "No",
+          date: visitDate ? `${String(visitDate).slice(0, 10)}T12:00:00` : new Date().toISOString(),
+          status: "Pending",
+          diagnosis: "",
+          outcome: "Open",
+          treatment: "",
+          pendingStart: true,
+          complete: false,
+          synced,
+          localOnly: !synced,
+          data: {},
         });
-        offerSyncAfterSave(nextPending);
+
+        if (!online) {
+          const localVisitId = newLocalId("local-visit");
+          const localRecordId = newLocalId("local-record");
+          const localEncounterId = newLocalId("local-encounter");
+          const deps = [];
+          const regOp = await findRegisterOpForPatient(patientId);
+          if (regOp) deps.push(regOp.id);
+          const op = await enqueueOp({
+            type: OP.START_EPISODE,
+            localEntityId: localVisitId,
+            dependsOn: deps,
+            label: `Start ${disease} episode`,
+            payload: {
+              patientId,
+              localVisitId,
+              localRecordId,
+              disease,
+              visitType,
+              locationId,
+              locationName,
+              visitDate,
+              referral: referral || "No",
+              clinicianName,
+              facilityId: authSession?.facilityId,
+              clinicianId: authSession?.userId,
+            },
+          });
+          const draft = makeDraft(
+            {
+              visitId: localVisitId,
+              recordId: localRecordId,
+              encounterId: localEncounterId,
+              featureCode: featureCodeForDisease(disease),
+            },
+            { synced: false }
+          );
+          draft.outboxOpId = op.id;
+          await putLocalEncounter(draft);
+          patch((s) => {
+            const withoutDup = s.encounters.filter((e) => e.id !== localVisitId && e.visitId !== localVisitId);
+            const patients = s.patients.map((p) =>
+              p.id === patientId && !(p.diseases || []).includes(disease)
+                ? { ...p, diseases: [...(p.diseases || []), disease] }
+                : p
+            );
+            return { encounters: [draft, ...withoutDup], patients };
+          });
+          await offerSyncAfterSave();
+          return {
+            visitId: localVisitId,
+            recordId: localRecordId,
+            encounterId: localEncounterId,
+            featureCode: draft.featureCode,
+            encounter: draft,
+            localOnly: true,
+          };
+        }
+
+        const data = await startEpisode(patientId, {
+          disease,
+          visitType,
+          locationId,
+          locationName,
+          visitDate,
+          referral: referral || "No",
+          clinicianName,
+          facilityId: authSession?.facilityId,
+          clinicianId: authSession?.userId,
+        });
+        const visitId = data.visitId;
+        const recordId = data.recordId;
+        if (!visitId || !recordId) {
+          throw new Error("Episode create did not return visitId/recordId");
+        }
+        const encounterId = data.encounterId || "";
+        const featureCode = data.featureCode || featureCodeForDisease(disease);
+        const draft = makeDraft({ visitId, recordId, encounterId, featureCode }, { synced: true });
+        patch((s) => {
+          const withoutDup = s.encounters.filter((e) => e.id !== visitId && e.visitId !== visitId);
+          const patients = s.patients.map((p) =>
+            p.id === patientId && !(p.diseases || []).includes(disease)
+              ? { ...p, diseases: [...(p.diseases || []), disease] }
+              : p
+          );
+          return { encounters: [draft, ...withoutDup], patients };
+        });
+        appointmentsLoadedKey = null;
+        return { ...data, encounter: draft };
+      },
+      /** Add a visit to an existing episode (recordId). */
+      addEncounter: async ({
+        patientId,
+        recordId,
+        disease,
+        visitType,
+        locationId,
+        locationName,
+        visitDate,
+        referral,
+        clinicianName,
+      }) => {
+        if (!online) {
+          const localVisitId = newLocalId("local-visit");
+          const localEncounterId = newLocalId("local-encounter");
+          const deps = [];
+          const regOp = await findRegisterOpForPatient(patientId);
+          if (regOp) deps.push(regOp.id);
+          // If recordId is local, depend on the episode op that created it
+          if (isLocalId(recordId)) {
+            const ops = await listPendingOps();
+            const epOp = ops.find(
+              (o) =>
+                (o.type === OP.START_EPISODE || o.type === OP.START_SUSPECT) &&
+                o.payload?.localRecordId === recordId
+            );
+            if (epOp) deps.push(epOp.id);
+          }
+          const op = await enqueueOp({
+            type: OP.ADD_VISIT,
+            localEntityId: localVisitId,
+            dependsOn: deps,
+            label: `Add ${disease} visit`,
+            payload: {
+              patientId,
+              recordId,
+              localVisitId,
+              disease,
+              visitType,
+              locationId,
+              locationName,
+              visitDate,
+              referral: referral || "No",
+              clinicianName,
+              facilityId: authSession?.facilityId,
+              clinicianId: authSession?.userId,
+            },
+          });
+          const draft = {
+            id: localVisitId,
+            visitId: localVisitId,
+            recordId,
+            encounterId: localEncounterId,
+            featureCode: featureCodeForDisease(disease),
+            patientId,
+            episodeId: recordId,
+            disease,
+            facility: locationName || "",
+            locationId: locationId || "",
+            worker: clinicianName || "",
+            type: visitType,
+            referral: referral || "No",
+            date: visitDate ? `${String(visitDate).slice(0, 10)}T12:00:00` : new Date().toISOString(),
+            status: "Pending",
+            diagnosis: "",
+            outcome: "Open",
+            treatment: "",
+            pendingStart: true,
+            complete: false,
+            synced: false,
+            localOnly: true,
+            outboxOpId: op.id,
+            data: {},
+          };
+          await putLocalEncounter(draft);
+          patch((s) => {
+            const withoutDup = s.encounters.filter((e) => e.id !== localVisitId && e.visitId !== localVisitId);
+            return { encounters: [draft, ...withoutDup] };
+          });
+          await offerSyncAfterSave();
+          return {
+            visitId: localVisitId,
+            recordId,
+            encounterId: localEncounterId,
+            featureCode: draft.featureCode,
+            encounter: draft,
+            localOnly: true,
+          };
+        }
+
+        const data = await addEpisodeVisit(patientId, recordId, {
+          disease,
+          visitType,
+          locationId,
+          locationName,
+          visitDate,
+          referral: referral || "No",
+          clinicianName,
+          facilityId: authSession?.facilityId,
+          clinicianId: authSession?.userId,
+        });
+        const visitId = data.visitId;
+        if (!visitId) throw new Error("Encounter create did not return visitId");
+        const encounterId = data.encounterId || "";
+        const featureCode = data.featureCode || featureCodeForDisease(disease);
+        const draft = {
+          id: visitId,
+          visitId,
+          recordId: recordId || data.recordId,
+          encounterId,
+          featureCode,
+          patientId,
+          episodeId: recordId || data.recordId,
+          disease,
+          facility: locationName || "",
+          locationId: locationId || "",
+          worker: clinicianName || "",
+          type: visitType,
+          referral: referral || "No",
+          date: visitDate ? `${String(visitDate).slice(0, 10)}T12:00:00` : new Date().toISOString(),
+          status: "Pending",
+          diagnosis: "",
+          outcome: "Open",
+          treatment: "",
+          pendingStart: true,
+          complete: false,
+          synced: true,
+          data: {},
+        };
+        patch((s) => {
+          const withoutDup = s.encounters.filter((e) => e.id !== visitId && e.visitId !== visitId);
+          return { encounters: [draft, ...withoutDup] };
+        });
+        appointmentsLoadedKey = null;
+        return { ...data, encounter: draft };
+      },
+      /**
+       * Suspect screening → VisitMetaT (symptoms) + optional disease episode.
+       * Used when Add Episode Go to = Suspect screening.
+       */
+      startSuspectEpisode: async ({
+        patientId,
+        disease,
+        suspect,
+        symptoms,
+        notes,
+        photos,
+        visitType,
+        locationId,
+        locationName,
+        visitDate,
+        referral,
+        clinicianName,
+      }) => {
+        if (!online) {
+          const localSuspectId = newLocalId("local-suspect");
+          const localVisitId = disease ? newLocalId("local-visit") : "";
+          const localRecordId = disease ? newLocalId("local-record") : "";
+          const localEncounterId = disease ? newLocalId("local-encounter") : "";
+          const deps = [];
+          const regOp = await findRegisterOpForPatient(patientId);
+          if (regOp) deps.push(regOp.id);
+          const op = await enqueueOp({
+            type: OP.START_SUSPECT,
+            localEntityId: localVisitId || localSuspectId,
+            dependsOn: deps,
+            label: disease ? `Suspect → ${disease}` : "Suspect screening",
+            payload: {
+              patientId,
+              localSuspectId,
+              localVisitId: localVisitId || undefined,
+              localRecordId: localRecordId || undefined,
+              disease: disease || undefined,
+              suspect,
+              symptoms: symptoms || [],
+              notes: notes || "",
+              photos: Array.isArray(photos) ? photos : [],
+              visitType,
+              locationId,
+              locationName,
+              visitDate,
+              referral: referral || "No",
+              clinicianName,
+              facilityId: authSession?.facilityId,
+              clinicianId: authSession?.userId,
+            },
+          });
+          const suspectRec = {
+            id: localSuspectId,
+            visitId: localVisitId || "",
+            patientId,
+            date: new Date().toISOString(),
+            worker: clinicianName || "",
+            symptoms: symptoms || [],
+            photos: photos || [],
+            suspect,
+            notes: notes || "",
+            recordId: localRecordId || "",
+            disease: disease || null,
+            synced: false,
+            localOnly: true,
+            outboxOpId: op.id,
+          };
+          await putLocalSuspect(suspectRec);
+          let encounterDraft = null;
+          if (disease && localVisitId) {
+            encounterDraft = {
+              id: localVisitId,
+              visitId: localVisitId,
+              recordId: localRecordId,
+              encounterId: localEncounterId,
+              featureCode: featureCodeForDisease(disease),
+              patientId,
+              episodeId: localRecordId,
+              disease,
+              facility: locationName || "",
+              locationId: locationId || "",
+              worker: clinicianName || "",
+              type: visitType,
+              referral: referral || "No",
+              date: visitDate ? `${String(visitDate).slice(0, 10)}T12:00:00` : new Date().toISOString(),
+              status: "Pending",
+              diagnosis: "",
+              outcome: "Open",
+              treatment: "",
+              pendingStart: true,
+              complete: false,
+              synced: false,
+              localOnly: true,
+              fromSuspect: true,
+              outboxOpId: op.id,
+              data: {},
+            };
+            await putLocalEncounter(encounterDraft);
+          }
+          patch((s) => {
+            let encounters = s.encounters;
+            let patients = s.patients.map((p) =>
+              p.id === patientId ? { ...p, status: p.status || "Suspected" } : p
+            );
+            if (encounterDraft) {
+              encounters = [
+                encounterDraft,
+                ...s.encounters.filter((e) => e.id !== localVisitId && e.visitId !== localVisitId),
+              ];
+              patients = patients.map((p) =>
+                p.id === patientId && !(p.diseases || []).includes(disease)
+                  ? { ...p, diseases: [...(p.diseases || []), disease] }
+                  : p
+              );
+            }
+            return {
+              suspects: [...s.suspects.filter((x) => x.id !== localSuspectId), suspectRec],
+              encounters,
+              patients,
+            };
+          });
+          await offerSyncAfterSave();
+          return {
+            suspect: suspectRec,
+            visitId: localVisitId || null,
+            recordId: localRecordId || null,
+            encounterId: localEncounterId || null,
+            encounter: encounterDraft,
+            localOnly: true,
+          };
+        }
+
+        const data = await startSuspectEpisode(patientId, {
+          disease,
+          suspect,
+          symptoms,
+          notes,
+          photos,
+          visitType,
+          locationId,
+          locationName,
+          visitDate,
+          referral: referral || "No",
+          clinicianName,
+          facilityId: authSession?.facilityId,
+          clinicianId: authSession?.userId,
+        });
+        const visitId = data.visitId;
+        const recordId = data.recordId || "";
+        const suspectId = data.visitMetaId || visitId;
+        const suspectRec = {
+          id: String(suspectId),
+          visitId,
+          visitMetaId: data.visitMetaId || "",
+          patientId,
+          date: data.visitDate
+            ? `${String(data.visitDate).slice(0, 10)}T12:00:00`
+            : new Date().toISOString(),
+          worker: clinicianName || "",
+          symptoms: data.symptoms || symptoms || [],
+          photos: data.photos || photos || [],
+          suspect: data.suspect || suspect,
+          notes: data.notes || notes || "",
+          recordId,
+          disease: data.disease || disease || null,
+          synced: true,
+        };
+        const diseaseId = data.disease || disease || "";
+        let encounterDraft = null;
+        if (visitId && diseaseId) {
+          encounterDraft = {
+            id: visitId,
+            visitId,
+            recordId,
+            encounterId: data.encounterId || "",
+            featureCode: data.featureCode || featureCodeForDisease(diseaseId),
+            patientId,
+            episodeId: recordId || visitId,
+            disease: diseaseId,
+            facility: locationName || "",
+            locationId: locationId || "",
+            worker: clinicianName || "",
+            type: visitType,
+            referral: referral || "No",
+            date: visitDate ? `${String(visitDate).slice(0, 10)}T12:00:00` : new Date().toISOString(),
+            status: "Pending",
+            diagnosis: "",
+            outcome: "Open",
+            treatment: "",
+            pendingStart: true,
+            complete: false,
+            synced: true,
+            data: {},
+            fromSuspect: true,
+          };
+        }
+        patch((s) => {
+          const withoutSuspectDup = s.suspects.filter(
+            (x) => x.id !== suspectRec.id && x.visitId !== visitId
+          );
+          let encounters = s.encounters;
+          let patients = s.patients;
+          if (encounterDraft) {
+            encounters = [
+              encounterDraft,
+              ...s.encounters.filter((e) => e.id !== visitId && e.visitId !== visitId),
+            ];
+            patients = s.patients.map((p) =>
+              p.id === patientId && !(p.diseases || []).includes(diseaseId)
+                ? { ...p, diseases: [...(p.diseases || []), diseaseId], status: p.status || "Suspected" }
+                : p.id === patientId
+                  ? { ...p, status: p.status || "Suspected" }
+                  : p
+            );
+          } else {
+            patients = s.patients.map((p) =>
+              p.id === patientId ? { ...p, status: p.status || "Suspected" } : p
+            );
+          }
+          return {
+            suspects: [suspectRec, ...withoutSuspectDup],
+            encounters,
+            patients,
+          };
+        });
+        appointmentsLoadedKey = null;
+        suspectsLoadedKey = null;
+        episodesLoadedKey = null;
+        return { ...data, suspect: suspectRec, encounter: encounterDraft };
+      },
+      /** Merge open HMIS episodes into local encounters (pendingStart cards). */
+      syncPatientEpisodes: async (patientId, opts = {}) => {
+        if (!patientId || !authSession?.facilityId) return [];
+        const key = `${authSession.facilityId}::${patientId}`;
+        if (!opts.force && episodesLoadedKey === key && !episodesInflight) {
+          return [];
+        }
+        if (!opts.force && episodesInflight?.key === key) {
+          return episodesInflight.promise;
+        }
+        const promise = fetchPatientEpisodes(patientId)
+          .then((rows) => {
+            if (!rows.length) {
+              episodesLoadedKey = key;
+              return [];
+            }
+            patch((s) => {
+              const byId = new Map(s.encounters.map((e) => [e.id, e]));
+              let patients = s.patients;
+              for (const row of rows) {
+                const visitId = row.visitId;
+                if (!visitId) continue;
+                const existing = byId.get(visitId);
+                if (existing && !existing.pendingStart) continue;
+                const disease = row.disease;
+                const draft = {
+                  id: visitId,
+                  visitId,
+                  recordId: row.recordId || "",
+                  encounterId: row.encounterId || existing?.encounterId || "",
+                  featureCode: row.featureCode || existing?.featureCode || featureCodeForDisease(disease),
+                  patientId,
+                  episodeId: row.recordId || visitId,
+                  disease,
+                  facility: row.locationName || existing?.facility || "",
+                  locationId: row.locationId || "",
+                  worker: existing?.worker || "",
+                  type: row.visitType || existing?.type || "",
+                  referral: row.referral || "No",
+                  date: row.createdOn
+                    ? new Date(row.createdOn).toISOString()
+                    : existing?.date || new Date().toISOString(),
+                  status: existing?.pendingStart === false ? existing.status : "Pending",
+                  diagnosis: existing?.diagnosis || "",
+                  outcome: existing?.outcome || "Open",
+                  treatment: existing?.treatment || "",
+                  pendingStart: existing?.pendingStart === false ? false : Boolean(row.pendingStart),
+                  complete: existing?.complete === true,
+                  synced: true,
+                  data: existing?.data || {},
+                };
+                byId.set(visitId, draft);
+                if (disease) {
+                  patients = patients.map((p) =>
+                    p.id === patientId && !(p.diseases || []).includes(disease)
+                      ? { ...p, diseases: [...(p.diseases || []), disease] }
+                      : p
+                  );
+                }
+              }
+              return { encounters: [...byId.values()], patients };
+            });
+            episodesLoadedKey = key;
+            return rows;
+          })
+          .catch((err) => {
+            console.warn("syncPatientEpisodes failed", err);
+            return [];
+          })
+          .finally(() => {
+            if (episodesInflight?.promise === promise) episodesInflight = null;
+          });
+        episodesInflight = { key, promise };
+        return promise;
+      },
+      /** Merge VisitMetaT ntd-suspect rows into local suspects list. */
+      syncPatientSuspects: async (patientId, opts = {}) => {
+        if (!patientId || !authSession?.facilityId) return [];
+        const key = `${authSession.facilityId}::${patientId}`;
+        if (!opts.force && suspectsLoadedKey === key && !suspectsInflight) {
+          return state.suspects.filter((s) => s.patientId === patientId);
+        }
+        if (!opts.force && suspectsInflight?.key === key) {
+          return suspectsInflight.promise;
+        }
+        const promise = fetchPatientSuspects(patientId)
+          .then((rows) => {
+            const mapped = (rows || []).map((row) => ({
+              id: String(row.id || row.visitMetaId || row.visitId),
+              visitId: row.visitId || "",
+              visitMetaId: row.visitMetaId || "",
+              patientId,
+              date: row.date
+                ? new Date(row.date).toISOString()
+                : new Date().toISOString(),
+              worker: row.worker || "",
+              symptoms: Array.isArray(row.symptoms) ? row.symptoms : [],
+              photos: Array.isArray(row.photos) ? row.photos : [],
+              suspect: String(row.suspect || "").toLowerCase(),
+              notes: row.notes || "",
+              recordId: row.recordId || "",
+              disease: row.disease || null,
+              synced: true,
+            }));
+            patch((s) => {
+              const others = s.suspects.filter((x) => x.patientId !== patientId);
+              const byId = new Map(others.map((x) => [x.id, x]));
+              for (const row of mapped) {
+                const existing = byId.get(row.id) || s.suspects.find((x) => x.visitId && x.visitId === row.visitId);
+                byId.set(row.id, existing ? { ...existing, ...row, photos: row.photos?.length ? row.photos : existing.photos || [] } : row);
+              }
+              // Keep local-only suspects for this patient that aren't in HMIS yet
+              for (const local of s.suspects.filter((x) => x.patientId === patientId && !x.synced)) {
+                if (![...byId.values()].some((x) => x.id === local.id || (local.visitId && x.visitId === local.visitId))) {
+                  byId.set(local.id, local);
+                }
+              }
+              return { suspects: [...byId.values()] };
+            });
+            suspectsLoadedKey = key;
+            return mapped;
+          })
+          .catch((err) => {
+            console.warn("syncPatientSuspects failed", err);
+            return [];
+          })
+          .finally(() => {
+            if (suspectsInflight?.promise === promise) suspectsInflight = null;
+          });
+        suspectsInflight = { key, promise };
+        return promise;
+      },
+      loadLocations: async (opts = {}) => {
+        const facilityId = authSession?.facilityId || "";
+        const key = facilityId || "all";
+        if (!opts.force && locationsLoadedKey === key && !locationsInflight) {
+          return state.facilities;
+        }
+        if (!opts.force && locationsInflight?.key === key) {
+          return locationsInflight.promise;
+        }
+        const promise = fetchLocations({ facilityId: authSession?.facilityId })
+          .then((rows) => {
+            if (rows?.length) {
+              patch(() => ({
+                facilities: rows.map((r) => ({
+                  id: r.id,
+                  name: r.name,
+                  facilityId: r.facilityId || authSession?.facilityId,
+                })),
+              }));
+            }
+            locationsLoadedKey = key;
+            return rows || [];
+          })
+          .catch((err) => {
+            console.warn("loadLocations failed", err);
+            return [];
+          })
+          .finally(() => {
+            if (locationsInflight?.promise === promise) locationsInflight = null;
+          });
+        locationsInflight = { key, promise };
+        return promise;
+      },
+      /**
+       * Register an inventory-picked drug into the local catalogue (form / posology helpers).
+       */
+      ensureCatalogueDrug: (drug) => {
+        if (!drug?.name) return;
+        patch((s) => {
+          const exists = (s.settings.drugs || []).some(
+            (d) => String(d.name).toLowerCase() === String(drug.name).toLowerCase()
+          );
+          if (exists) return {};
+          return {
+            settings: {
+              ...s.settings,
+              drugs: [
+                ...s.settings.drugs,
+                {
+                  name: drug.name,
+                  form: drug.form || "Oral",
+                  strength: drug.strength || "—",
+                  type: drug.type || "Drug",
+                  diseases: [],
+                  tradeId: drug.tradeId || drug.id,
+                  itemCode: drug.itemCode || "",
+                  source: drug.source || "inventory",
+                },
+              ],
+            },
+          };
+        });
+      },
+      /** Load facility NTD visits into local encounters for Appointments. */
+      loadAppointments: async ({ from, to, force } = {}) => {
+        if (!authSession?.facilityId) return [];
+        const key = `${authSession.facilityId}::${from || ""}::${to || ""}`;
+        if (!force && appointmentsLoadedKey === key && !appointmentsInflight) {
+          return state.encounters;
+        }
+        if (!force && appointmentsInflight?.key === key) {
+          return appointmentsInflight.promise;
+        }
+        const promise = fetchAppointments({
+          facilityId: authSession.facilityId,
+          from,
+          to,
+          limit: 200,
+        })
+          .then((rows) => {
+            const mapped = (rows || [])
+              .map((row) => {
+                const visitId = String(row.visitId || "");
+                if (!visitId || !row.patientId) return null;
+                const visitDate = String(row.visitDate || "").slice(0, 10);
+                const visitTime = String(row.visitTime || "12:00:00").slice(0, 8);
+                const date = visitDate
+                  ? `${visitDate}T${visitTime}`
+                  : row.createdOn
+                    ? new Date(row.createdOn).toISOString()
+                    : new Date().toISOString();
+                return {
+                  id: visitId,
+                  visitId,
+                  recordId: row.recordId || "",
+                  patientId: String(row.patientId),
+                  episodeId: row.recordId || visitId,
+                  disease: String(row.disease || "").toLowerCase(),
+                  facility: row.locationName || "",
+                  locationId: row.locationId || "",
+                  worker: row.clinicianName || "",
+                  type: row.visitType || "",
+                  referral: row.referral || "No",
+                  date,
+                  status: row.pendingStart ? "Pending" : "Complete",
+                  diagnosis: "",
+                  outcome: "Open",
+                  treatment: "",
+                  pendingStart: row.pendingStart !== false,
+                  complete: row.pendingStart === false,
+                  synced: true,
+                  data: {},
+                };
+              })
+              .filter(Boolean);
+
+            patch((s) => {
+              const byId = new Map(s.encounters.map((e) => [e.id, e]));
+              for (const row of mapped) {
+                const existing = byId.get(row.id);
+                if (existing && !existing.pendingStart && existing.complete) {
+                  // Keep locally completed clinical data; refresh schedule fields only.
+                  byId.set(row.id, {
+                    ...existing,
+                    facility: row.facility || existing.facility,
+                    locationId: row.locationId || existing.locationId,
+                    type: row.type || existing.type,
+                    worker: row.worker || existing.worker,
+                    date: existing.date || row.date,
+                    synced: true,
+                  });
+                } else if (existing) {
+                  byId.set(row.id, {
+                    ...existing,
+                    ...row,
+                    data: existing.data || {},
+                    diagnosis: existing.diagnosis || "",
+                    outcome: existing.outcome || row.outcome,
+                    treatment: existing.treatment || "",
+                    editedSections: existing.editedSections || [],
+                    revised: existing.revised === true,
+                  });
+                } else {
+                  byId.set(row.id, row);
+                }
+              }
+              return { encounters: [...byId.values()] };
+            });
+            appointmentsLoadedKey = key;
+            return mapped;
+          })
+          .catch((err) => {
+            console.warn("loadAppointments failed", err);
+            return [];
+          })
+          .finally(() => {
+            if (appointmentsInflight?.promise === promise) appointmentsInflight = null;
+          });
+        appointmentsInflight = { key, promise };
+        return promise;
+      },
+      saveEncounter: async (enc) => {
+        const existing = enc.id ? state.encounters.find((e) => e.id === enc.id) : null;
+        const needsQueue = Boolean(
+          !online ||
+            existing?.localOnly ||
+            enc.localOnly ||
+            isLocalId(existing?.visitId || existing?.id || "") ||
+            isLocalId(enc.visitId || enc.id || "")
+        );
+
+        let saved;
+        if (existing) {
+          const editedSections = Array.isArray(enc.editedSections) ? enc.editedSections : [];
+          const revised = enc.revised === true && editedSections.length > 0;
+          const priorSections = existing.editedSections || [];
+          const sectionsGrew = editedSections.some((k) => !priorSections.includes(k));
+          const bumpEditedAt = revised && (!existing.revised || sectionsGrew);
+          saved = {
+            ...existing,
+            ...enc,
+            id: existing.id,
+            visitId: existing.visitId || enc.visitId,
+            recordId: existing.recordId || enc.recordId,
+            encounterId: existing.encounterId || enc.encounterId || "",
+            featureCode:
+              existing.featureCode ||
+              enc.featureCode ||
+              featureCodeForDisease(enc.disease || existing.disease),
+            disease: enc.disease || existing.disease,
+            pendingStart: false,
+            complete: true,
+            revised,
+            editedAt: bumpEditedAt
+              ? new Date().toISOString()
+              : revised
+                ? existing.editedAt
+                : undefined,
+            editedSections: revised ? editedSections : [],
+            synced: needsQueue ? false : true,
+            localOnly: needsQueue ? true : existing.localOnly,
+          };
+        } else {
+          const { id: providedId, ...rest } = enc;
+          saved = {
+            date: new Date().toISOString(),
+            disease: enc.disease || "scabies",
+            synced: !needsQueue,
+            complete: true,
+            pendingStart: false,
+            revised: false,
+            editedSections: [],
+            localOnly: needsQueue,
+            featureCode: featureCodeForDisease(enc.disease || "scabies"),
+            ...rest,
+            id: providedId || `ENC-${String(Math.floor(Math.random() * 900000) + 100000)}`,
+          };
+        }
+
+        patch((s) => {
+          const idx = s.encounters.findIndex((e) => e.id === saved.id);
+          if (idx >= 0) {
+            const next = s.encounters.slice();
+            next[idx] = saved;
+            return { encounters: next };
+          }
+          return { encounters: [...s.encounters, saved] };
+        });
+
+        if (needsQueue) {
+          await putLocalEncounter(saved);
+          const deps = [];
+          const visitKey = saved.visitId || saved.id;
+          const visitOp = await findOpForLocalVisit(visitKey);
+          if (visitOp) deps.push(visitOp.id);
+          const regOp = await findRegisterOpForPatient(saved.patientId);
+          if (regOp) deps.push(regOp.id);
+          const pending = await listPendingOps();
+          const prior = pending.filter(
+            (o) =>
+              o.type === OP.SAVE_ENCOUNTER_FORM &&
+              (o.payload?.localVisitId === visitKey || o.localEntityId === visitKey)
+          );
+          if (prior.length) {
+            await deleteOps(prior.map((o) => o.id));
+          }
+          await enqueueOp({
+            type: OP.SAVE_ENCOUNTER_FORM,
+            localEntityId: visitKey,
+            dependsOn: deps,
+            label: `Form ${saved.disease || "visit"}`,
+            payload: {
+              patientId: saved.patientId,
+              localVisitId: isLocalId(visitKey) ? visitKey : undefined,
+              visitId: saved.visitId,
+              encounterId: saved.encounterId,
+              recordId: saved.recordId,
+              featureCode: saved.featureCode || featureCodeForDisease(saved.disease),
+              disease: saved.disease,
+              data: cloneFormDataForSync(saved.data || {}),
+              diagnosis: saved.diagnosis || saved.data?.diagnosis || "",
+              outcome: saved.outcome || saved.data?.outcome || "",
+            },
+          });
+        }
+
+        // Online + forgotten offline queue → prompt to sync before continuing elsewhere.
+        if (online) {
+          await offerSyncAfterSave();
+        }
         return saved;
       },
-      dismissSyncPrompt: () => setSyncPrompt(null),
-      syncNow: () => {
-        if (!online) return 0;
-        const n = queuedCount(state);
-        if (!n) {
-          setSyncPrompt(null);
-          return 0;
+      /**
+       * Load form answers from HMIS PHI via portal-be and merge into local encounter.data.
+       * Returns rehydrated form object (or null if nothing to load).
+       * Dedupes concurrent / StrictMode double mounts so the network call runs once.
+       */
+      loadEncounterPhi: async (encounter) => {
+        if (!encounter?.patientId || !encounter?.encounterId) return null;
+        if (!online) return null;
+        const featureCode = encounter.featureCode || featureCodeForDisease(encounter.disease);
+        if (!featureCode) return null;
+        const key = `${encounter.patientId}::${encounter.encounterId}::${featureCode}`;
+        if (phiInflight?.key === key) return phiInflight.promise;
+
+        const promise = fetchEncounterPhi(encounter.patientId, {
+          featureCode,
+          encounterId: encounter.encounterId,
+        })
+          .then((rows) => {
+            if (!rows.length) return null;
+            const form = rehydrateFormFromPhi(rows);
+            patch((s) => {
+              const next = s.encounters.map((e) => {
+                if (e.id !== encounter.id && e.visitId !== encounter.visitId) return e;
+                return {
+                  ...e,
+                  encounterId: encounter.encounterId,
+                  featureCode,
+                  data: { ...(e.data || {}), ...form },
+                  diagnosis: form.diagnosis || e.diagnosis || "",
+                  outcome: form.outcome || e.outcome || "",
+                };
+              });
+              return { encounters: next };
+            });
+            return form;
+          })
+          .finally(() => {
+            if (phiInflight?.promise === promise) phiInflight = null;
+          });
+
+        phiInflight = { key, promise };
+        return promise;
+      },
+      /**
+       * Autosave one question immediately via HMIS (ProgressEdited create / update).
+       */
+      upsertEncounterPhiField: async (encounter, itemPayload) => {
+        if (!encounter?.patientId || !encounter?.encounterId || !encounter?.visitId) return null;
+        if (!online) return null;
+        const featureCode = encounter.featureCode || featureCodeForDisease(encounter.disease);
+        if (!featureCode || !itemPayload?.item || !itemPayload?.subFeatureCode) return null;
+        return upsertEncounterPhiItem(encounter.patientId, {
+          featureCode,
+          encounterId: encounter.encounterId,
+          visitId: encounter.visitId,
+          disease: encounter.disease,
+          recordId: encounter.recordId || undefined,
+          item: itemPayload.item,
+          subFeatureCode: itemPayload.subFeatureCode,
+          value: itemPayload.value,
+          fieldKey: itemPayload.fieldKey,
+        });
+      },
+      /**
+       * Save / Save & close — flip ProgressEdited → action null for this visit.
+       */
+      finalizeEncounterPhi: async (encounter) => {
+        if (!encounter?.patientId || !encounter?.encounterId || !encounter?.visitId) return null;
+        if (!online) return null;
+        return finalizeEncounterPhi(encounter.patientId, {
+          encounterId: encounter.encounterId,
+          visitId: encounter.visitId,
+        });
+      },
+      /**
+       * Cancel → Discard and leave — delete ProgressEdited drafts and restore prior committed PHI.
+       * Also resets local encounter outcome/data to the provided baseline so the dashboard
+       * does not keep an autosaved outcome (e.g. Cured) after discard.
+       */
+      discardEncounterPhi: async (encounter, baseline = null) => {
+        if (!encounter?.patientId || !encounter?.encounterId) return null;
+        let result = null;
+        if (online && !String(encounter.encounterId).startsWith("local-")) {
+          try {
+            result = await discardEncounterPhiApi(encounter.patientId, {
+              encounterId: encounter.encounterId,
+            });
+          } catch (err) {
+            console.warn("discardEncounterPhi failed", err);
+          }
         }
-        patch((s) => ({
-          pendingSync: 0,
-          encounters: s.encounters.map((e) => ({ ...e, synced: true })),
-        }));
+        if (baseline && (encounter.id || encounter.visitId)) {
+          const visitKey = encounter.id || encounter.visitId;
+          patch((s) => ({
+            encounters: s.encounters.map((e) => {
+              if (e.id !== visitKey && e.visitId !== visitKey && e.encounterId !== encounter.encounterId) {
+                return e;
+              }
+              const data = baseline.data != null ? { ...(e.data || {}), ...baseline.data } : e.data;
+              return {
+                ...e,
+                data,
+                outcome: baseline.outcome != null ? baseline.outcome : e.outcome,
+                diagnosis: baseline.diagnosis != null ? baseline.diagnosis : e.diagnosis,
+              };
+            }),
+          }));
+        }
+        return result;
+      },
+      /**
+       * Dashboard: load PHI for visits and merge into local encounter.data.
+       * Uses episode API rows (not stale React state) so it always runs after reload.
+       * When committed PHI exists, clears pendingStart so the dashboard shows the form summary.
+       */
+      syncPatientVisitPhi: async (patientId, opts = {}) => {
+        if (!patientId || !authSession?.facilityId) return [];
+
+        let visits = Array.isArray(opts.visits) ? opts.visits : null;
+        if (!visits?.length) {
+          try {
+            visits = await fetchPatientEpisodes(patientId);
+          } catch (err) {
+            console.warn("syncPatientVisitPhi episodes failed", err);
+            visits = [];
+          }
+        }
+        // Fallback to whatever is already in local state
+        if (!visits?.length) {
+          visits = state.encounters
+            .filter((e) => e.patientId === patientId && e.visitId)
+            .map((e) => ({
+              visitId: e.visitId,
+              recordId: e.recordId,
+              featureCode: e.featureCode || featureCodeForDisease(e.disease),
+              disease: e.disease,
+              encounterId: e.encounterId,
+            }));
+        }
+        if (!visits.length) return [];
+
+        const results = await Promise.all(
+          visits.map(async (row) => {
+            const visitId = row.visitId || row.id;
+            if (!visitId) return null;
+            try {
+              const featureCode =
+                row.featureCode || featureCodeForDisease(row.disease) || undefined;
+              const phi = await fetchPhiByVisit(patientId, {
+                visitId,
+                recordId: row.recordId || undefined,
+                featureCode,
+              });
+              if (!phi.hasAny && !phi.items?.length) return null;
+              const form = rehydrateFormFromPhi(phi.items || []);
+              const completed = phi.hasCommitted || Object.keys(form).length > 0;
+              return {
+                visitId,
+                form,
+                completed,
+                encounterId: row.encounterId || "",
+                featureCode: featureCode || "",
+                recordId: row.recordId || "",
+                disease: row.disease || "",
+              };
+            } catch (err) {
+              console.warn("syncPatientVisitPhi visit failed", visitId, err);
+              return null;
+            }
+          })
+        );
+        const loaded = results.filter(Boolean);
+        if (!loaded.length) return [];
+
+        patch((s) => {
+          const byVisit = new Map(loaded.map((r) => [r.visitId, r]));
+          const byId = new Map(s.encounters.map((e) => [e.id, e]));
+          for (const row of loaded) {
+            const existing = byId.get(row.visitId);
+            const merged = {
+              ...(existing || {}),
+              id: row.visitId,
+              visitId: row.visitId,
+              patientId,
+              recordId: row.recordId || existing?.recordId || "",
+              encounterId: row.encounterId || existing?.encounterId || "",
+              featureCode: row.featureCode || existing?.featureCode || featureCodeForDisease(row.disease || existing?.disease),
+              episodeId: row.recordId || existing?.episodeId || row.visitId,
+              disease: row.disease || existing?.disease || "",
+              facility: existing?.facility || "",
+              locationId: existing?.locationId || "",
+              type: existing?.type || "",
+              referral: existing?.referral || "No",
+              date: existing?.date || new Date().toISOString(),
+              worker: existing?.worker || "",
+              treatment: existing?.treatment || "",
+              synced: true,
+              data: { ...(existing?.data || {}), ...row.form },
+              diagnosis: row.form.diagnosis || existing?.diagnosis || "",
+              outcome: row.form.outcome || existing?.outcome || (row.completed ? "Active" : "Open"),
+              pendingStart: row.completed ? false : existing?.pendingStart !== false,
+              complete: row.completed ? true : existing?.complete === true,
+              status: row.completed ? "Complete" : existing?.status || "Pending",
+            };
+            byId.set(row.visitId, merged);
+          }
+          return { encounters: [...byId.values()] };
+        });
+        return loaded;
+      },
+      /**
+       * Persist one-PHI-per-question answers to HMIS via portal-be.
+       * Local draft is still saved separately via saveEncounter.
+       * @deprecated prefer upsertEncounterPhiField + finalizeEncounterPhi
+       */
+      saveEncounterPhi: async (encounter) => {
+        if (!encounter?.patientId || !encounter?.encounterId || !encounter?.visitId) {
+          return null;
+        }
+        return finalizeEncounterPhi(encounter.patientId, {
+          encounterId: encounter.encounterId,
+          visitId: encounter.visitId,
+        });
+      },
+      dismissSyncPrompt: () => setSyncPrompt(null),
+      refreshOutboxState,
+      syncNow: async () => {
+        if (!online) return { synced: 0, failed: 0, errors: [{ message: "No internet" }] };
+        if (!authSession?.facilityId) {
+          return { synced: 0, failed: 0, errors: [{ message: "Sign in required to sync" }] };
+        }
+        const results = await syncOutbox({
+          authSession,
+          onOpDone: async ({ op, detail }) => {
+            if (op.type === OP.REGISTER_PATIENT && detail.localPatientId && detail.patientId) {
+              patch((s) => ({
+                patients: s.patients.map((p) =>
+                  p.id === detail.localPatientId
+                    ? {
+                        ...p,
+                        id: detail.patientId,
+                        patientId: detail.patientId,
+                        patientCode: detail.patientCode || "",
+                        localOnly: false,
+                        synced: true,
+                      }
+                    : p
+                ),
+                encounters: s.encounters.map((e) =>
+                  e.patientId === detail.localPatientId
+                    ? { ...e, patientId: detail.patientId }
+                    : e
+                ),
+                suspects: s.suspects.map((x) =>
+                  x.patientId === detail.localPatientId
+                    ? { ...x, patientId: detail.patientId }
+                    : x
+                ),
+              }));
+            }
+            if (
+              (op.type === OP.START_EPISODE || op.type === OP.ADD_VISIT || op.type === OP.START_SUSPECT) &&
+              detail.localVisitId &&
+              detail.visitId
+            ) {
+              patch((s) => ({
+                encounters: s.encounters.map((e) =>
+                  e.id === detail.localVisitId || e.visitId === detail.localVisitId
+                    ? {
+                        ...e,
+                        id: detail.visitId,
+                        visitId: detail.visitId,
+                        recordId: detail.recordId || e.recordId,
+                        encounterId: detail.encounterId || e.encounterId,
+                        featureCode: detail.featureCode || e.featureCode,
+                        patientId: detail.patientId || e.patientId,
+                        episodeId: detail.recordId || e.episodeId,
+                        localOnly: false,
+                        synced: op.type === OP.SAVE_ENCOUNTER_FORM ? e.synced : e.complete ? false : true,
+                      }
+                    : e
+                ),
+              }));
+            }
+            if (op.type === OP.SAVE_ENCOUNTER_FORM && detail.localVisitId) {
+              patch((s) => ({
+                encounters: s.encounters.map((e) =>
+                  e.id === detail.localVisitId ||
+                  e.visitId === detail.localVisitId ||
+                  e.visitId === detail.visitId
+                    ? {
+                        ...e,
+                        id: detail.visitId || e.id,
+                        visitId: detail.visitId || e.visitId,
+                        encounterId: detail.encounterId || e.encounterId,
+                        recordId: detail.recordId || e.recordId,
+                        patientId: detail.patientId || e.patientId,
+                        synced: true,
+                        localOnly: false,
+                      }
+                    : e
+                ),
+              }));
+            }
+            if (op.type === OP.START_SUSPECT && detail.localSuspectId) {
+              patch((s) => ({
+                suspects: s.suspects.map((x) =>
+                  x.id === detail.localSuspectId
+                    ? {
+                        ...x,
+                        id: detail.suspectId || detail.visitMetaId || detail.visitId || x.id,
+                        visitId: detail.visitId || x.visitId,
+                        synced: true,
+                        localOnly: false,
+                        patientId: detail.patientId || x.patientId,
+                      }
+                    : x
+                ),
+              }));
+            }
+          },
+        });
+        await refreshOutboxState();
         setSyncPrompt(null);
-        return n;
+        // Refresh facility patient list after successful syncs
+        if (results.synced > 0 && authSession?.facilityId) {
+          try {
+            clearPatientsLoadCache();
+            const rows = await fetchPatients({ facilityId: authSession.facilityId, limit: 200 });
+            const remote = rows.map(normalizeApiPatient).filter(Boolean);
+            patch((s) => {
+              const localOnly = s.patients.filter((p) => p.localOnly || isLocalId(p.id));
+              const byId = new Map(remote.map((p) => [p.id, p]));
+              localOnly.forEach((p) => {
+                if (!byId.has(p.id)) byId.set(p.id, p);
+              });
+              return { patients: [...byId.values()] };
+            });
+          } catch (err) {
+            console.warn("post-sync patient refresh failed", err);
+          }
+        }
+        return results;
       },
       resetDemo: () => {
-        localStorage.removeItem(KEY);
+        setAuthSession(null);
+        clearLegacyAuthPersist();
+        clearPatientsLoadCache();
+        clearRecordLoadCaches();
         setState(initial());
       },
     };
-  }, [state, online, syncPrompt]);
+  }, [state, online, syncPrompt, authSession, authReady, refreshOutboxState, offerSyncAfterSave]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

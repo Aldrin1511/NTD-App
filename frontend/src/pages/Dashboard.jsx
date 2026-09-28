@@ -2,7 +2,12 @@ import { useMemo, useState } from "react";
 import AppShell, { InstallPrompt } from "@/components/AppShell";
 import { useStore } from "@/store";
 import { SelectField, TextField, AlertPanel } from "@/components/Fields";
-import { MIS_TREND, MIS_VILLAGE, MIS_AGE, MIS_CLASS, GEO, DISEASES } from "@/mock/data";
+import { GEO, DISEASES } from "@/mock/data";
+
+const MIS_TREND = [];
+const MIS_VILLAGE = [];
+const MIS_AGE = [];
+const MIS_CLASS = [];
 import {
   ResponsiveContainer,
   AreaChart,

@@ -55,7 +55,7 @@ export default function PatientSidebar({
           <Avatar patient={p} size="h-16 w-16" testid={`${testid}-photo`} />
           <div className="min-w-0 flex-1">
             <p className="font-head text-lg font-bold leading-tight">{p.name}</p>
-            <p className="text-xs text-muted-foreground">{p.id}</p>
+            <p className="text-xs text-muted-foreground">{p.patientCode ? `PID ${p.patientCode}` : "PID —"}</p>
           </div>
           <div className="flex shrink-0 items-start gap-1">
             {onEdit && (

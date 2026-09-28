@@ -34,16 +34,24 @@ export const capitalizeName = (value) =>
   String(value ?? "").replace(/(^|[\s'-])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
 
 export const labelClass = "text-xs font-semibold text-muted-foreground";
+export const requiredLabelClass = "text-xs font-semibold text-emerald-600";
 
-export const Field = ({ label, hint, children, className = "" }) => (
-  <div className={`min-w-0 space-y-2 ${className}`}>
-    <Label className={labelClass}>{titleCaseLabel(label)}</Label>
-    {children}
-    {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-  </div>
-);
+export const Field = ({ label, hint, children, className = "", required = false }) => {
+  const raw = String(label ?? "").replace(/\s*\*\s*$/, "").trim();
+  const shown = titleCaseLabel(raw);
+  return (
+    <div className={`min-w-0 space-y-2 ${className}`}>
+      <Label className={required ? requiredLabelClass : labelClass}>
+        {shown}
+        {required ? <span aria-hidden="true"> *</span> : null}
+      </Label>
+      {children}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+};
 
-export const TextField = ({ label, hint, testid, className, placeholder, type, value, onChange, allowEmpty, ...rest }) => {
+export const TextField = ({ label, hint, testid, className, placeholder, type, value, onChange, allowEmpty, required, ...rest }) => {
   const defaultToday = type === "date" && !allowEmpty;
   const shown = defaultToday ? (value || localISODate()) : value;
   const handleChange = (e) => {
@@ -56,12 +64,14 @@ export const TextField = ({ label, hint, testid, className, placeholder, type, v
     onChange(e);
   };
   return (
-    <Field label={label} hint={hint} className={className}>
+    <Field label={label} hint={hint} className={className} required={required}>
       <Input
         data-testid={testid}
         className="h-12 w-full min-w-0 bg-white text-base"
         placeholder={placeholder ?? label}
         type={type}
+        required={required}
+        aria-required={required || undefined}
         {...rest}
         value={shown ?? ""}
         onChange={handleChange}
@@ -76,22 +86,37 @@ export const AreaField = ({ label, testid, rows = 5, placeholder, ...rest }) => 
   </Field>
 );
 
-export const SelectField = ({ label, value, onChange, options, placeholder = "Select…", testid, hint }) => (
-  <Field label={label} hint={hint}>
-    <Select key={value || "none"} value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid}>
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o} value={o} className="text-base" data-testid={`${testid}-opt-${o}`}>
-            {o}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  </Field>
-);
+/** Normalize select options: strings or `{ value, label }` / `{ value, viewValue }`. */
+const normalizeSelectOptions = (options = []) =>
+  (Array.isArray(options) ? options : []).map((o, i) => {
+    if (o != null && typeof o === "object") {
+      const value = String(o.value ?? o.id ?? "");
+      const label = String(o.label ?? o.viewValue ?? o.name ?? value);
+      return { value: value || `opt-${i}`, label: label || value || `Option ${i + 1}` };
+    }
+    const s = String(o ?? "");
+    return { value: s, label: s };
+  });
+
+export const SelectField = ({ label, value, onChange, options, placeholder = "Select…", testid, hint, required }) => {
+  const items = normalizeSelectOptions(options);
+  return (
+    <Field label={label} hint={hint} required={required}>
+      <Select key={value || "none"} value={value || undefined} onValueChange={onChange}>
+        <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid} aria-required={required || undefined}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {items.map((o) => (
+            <SelectItem key={o.value} value={o.value} className="text-base" data-testid={`${testid}-opt-${o.value}`}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+};
 
 /** Dropdown to add items; selected values show as chips with an X to remove. */
 export const MultiSelectField = ({
@@ -158,9 +183,9 @@ export const MultiSelectField = ({
   );
 };
 
-export const ChoiceRow = ({ label, options, value, onChange, testid, hint }) => (
-  <Field label={label} hint={hint}>
-    <div className="flex flex-wrap gap-2">
+export const ChoiceRow = ({ label, options, value, onChange, testid, hint, required }) => (
+  <Field label={label} hint={hint} required={required}>
+    <div className="flex flex-wrap gap-2" role="group" aria-required={required || undefined}>
       {options.map((o) => {
         const active = value === o;
         return (

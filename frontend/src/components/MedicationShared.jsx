@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Field, SelectField, TextField, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
 import { DRUG_FREQUENCIES } from "@/mock/data";
+import { searchDrugInventory } from "@/lib/hmisApi";
 import {
   catalogueForDisease,
   extraDrugNames,
@@ -55,45 +56,156 @@ export function DoseUnitSelect({ label = "Dose unit", options, value, onChange, 
   );
 }
 
+/**
+ * Angular-style drug autocomplete against Apex Drug inventory.
+ * - Focus / empty input → no dropdown
+ * - Typing a search key → inventory matches appear
+ */
 export function AddDrugSelect({
   catalogue = [],
   diseaseId,
   selected = [],
   onAdd,
   testid = "add-drug",
+  online = true,
 }) {
-  const [nonce, setNonce] = useState(0);
-  // Full catalogue so clinicians can add any listed drug on this encounter
-  const options = [...new Set(
-    (catalogue.length ? catalogue : catalogueForDisease(catalogue, diseaseId))
-      .map((d) => d.name)
-      .filter((name) => name && !selected.includes(name))
-  )].sort((a, b) => a.localeCompare(b));
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState([]);
+  const [error, setError] = useState("");
+  const wrapRef = useRef(null);
+  const reqId = useRef(0);
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults([]);
+      setOpen(false);
+      setLoading(false);
+      setError("");
+      return undefined;
+    }
+    if (!online) {
+      // Offline: filter local protocol catalogue only
+      const local = (catalogue.length ? catalogue : catalogueForDisease(catalogue, diseaseId))
+        .map((d) => (typeof d === "string" ? { name: d } : d))
+        .filter((d) => d?.name && !selected.includes(d.name))
+        .filter((d) => String(d.name).toLowerCase().includes(q.toLowerCase()))
+        .slice(0, 15);
+      setResults(local);
+      setOpen(true);
+      setLoading(false);
+      return undefined;
+    }
+
+    setLoading(true);
+    setError("");
+    const id = ++reqId.current;
+    const t = setTimeout(() => {
+      searchDrugInventory(q)
+        .then((rows) => {
+          if (id !== reqId.current) return;
+          const opts = (rows || [])
+            .filter((d) => d?.name && !selected.includes(d.name))
+            .slice(0, 15);
+          setResults(opts);
+          setOpen(true);
+        })
+        .catch((err) => {
+          if (id !== reqId.current) return;
+          setResults([]);
+          setError(err?.message || "Search failed");
+          setOpen(true);
+        })
+        .finally(() => {
+          if (id === reqId.current) setLoading(false);
+        });
+    }, 280);
+    return () => clearTimeout(t);
+  }, [query, online, catalogue, diseaseId, selected]);
+
+  const pick = (drug) => {
+    const name = typeof drug === "string" ? drug : drug?.name;
+    if (!name) return;
+    onAdd?.(name, typeof drug === "object" ? drug : undefined);
+    setQuery("");
+    setResults([]);
+    setOpen(false);
+    setError("");
+  };
+
   return (
-    <div className="rounded-lg border border-dashed border-border bg-white p-4" data-testid={`${testid}-wrap`}>
+    <div className="rounded-lg border border-dashed border-border bg-white p-4" data-testid={`${testid}-wrap`} ref={wrapRef}>
       <Field label="Add drug">
-        <Select
-          key={nonce}
-          disabled={!options.length}
-          onValueChange={(v) => {
-            if (!v) return;
-            onAdd(v);
-            setNonce((n) => n + 1);
-          }}
-        >
-          <SelectTrigger className="h-12 w-full min-w-0 bg-white text-base" data-testid={testid}>
-            <SelectValue placeholder={options.length ? "Select…" : "All catalogue drugs selected"} />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((o) => (
-              <SelectItem key={o} value={o} className="text-base" data-testid={`${testid}-opt-${slugDrug(o)}`}>
-                {o}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="relative">
+          <Input
+            type="search"
+            autoComplete="off"
+            className="h-12 w-full bg-white text-base"
+            placeholder="Type to search inventory…"
+            value={query}
+            data-testid={testid}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => {
+              if (query.trim() && results.length) setOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setOpen(false);
+                e.currentTarget.blur();
+              }
+              if (e.key === "Enter" && results[0]) {
+                e.preventDefault();
+                pick(results[0]);
+              }
+            }}
+          />
+          {open && query.trim() ? (
+            <div
+              className="absolute left-0 right-0 z-40 mt-1 max-h-60 overflow-auto rounded-md border border-border bg-white shadow-md"
+              data-testid={`${testid}-menu`}
+              role="listbox"
+            >
+              {loading ? (
+                <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+              ) : error ? (
+                <p className="px-3 py-2 text-sm text-destructive">{error}</p>
+              ) : results.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-muted-foreground">No stocked drugs match “{query.trim()}”.</p>
+              ) : (
+                results.map((d) => (
+                  <button
+                    key={d.tradeId || d.id || d.name}
+                    type="button"
+                    role="option"
+                    className="flex w-full items-start justify-between gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted/60"
+                    data-testid={`${testid}-opt-${slugDrug(d.name)}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pick(d)}
+                  >
+                    <span className="min-w-0 flex-1 font-medium">{d.name}</span>
+                    {d.stockLabel ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">Qty {d.stockLabel}</span>
+                    ) : null}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+        </div>
       </Field>
-      <p className="mt-2 text-xs text-muted-foreground">Choose from the drug catalogue. Added drugs appear below with editable posology for this visit.</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Search Apex drug inventory (stocked items only). Type a name to see matches — the list stays empty until you search.
+      </p>
     </div>
   );
 }

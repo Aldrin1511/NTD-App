@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams, useLocation } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import WhatsAppIcon from "@/components/WhatsAppIcon";
 import PatientSidebar from "@/components/PatientSidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SCABIES_DRUGS, ageInMonths } from "@/components/ScabiesMedications";
+import { patientAgeLabel } from "@/components/Capture";
+import { buildVisitSummaryPrintHtml, printHtmlDocument } from "@/lib/visitSummaryPrint";
 import { YAWS_DRUGS, azithromycinDose, benzathineDose } from "@/components/YawsMedications";
 import { LF_DRUGS, ivermectinDose, albendazoleDose, decDose } from "@/components/LfMedications";
 import { BURULI_DRUGS, rifampicinDose, clarithromycinDose } from "@/components/BuruliMedications";
@@ -54,7 +56,7 @@ const featureSectionNumber = (key, diseaseId) => {
 };
 
 const isEditedSection = (visit, featureKey) =>
-  !!visit && (visit.editedSections || []).includes(featureKey);
+  !!visit?.revised && (visit.editedSections || []).includes(featureKey);
 
 const EditedBadge = () => (
   <Badge variant="outline" className="rounded border-amber-300 bg-amber-50 text-amber-800" data-testid="edited-badge">
@@ -95,12 +97,14 @@ const rowsForChangedSection = (visits, key, spec, patient) => {
 };
 
 const examChipFingerprint = (exam) => JSON.stringify(compactValue({
-        roundIndex: exam.roundIndex,
-        occasion: exam.occasion,
-        findings: exam.findings,
+  encounterId: exam.encounterId,
+  roundIndex: exam.roundIndex,
+  occasion: exam.occasion,
+  findings: exam.findings,
   secondaryInfection: exam.secondaryInfection,
   extras: exam.extras,
   leprosy: exam.leprosy,
+  photoCount: Array.isArray(exam.photos) ? exam.photos.length : 0,
 }));
 
 const uniqueExamChips = (rows) => {
@@ -394,12 +398,13 @@ const examChipLabel = (exam) =>
 
 const summariseExam = (e, spec) => {
   const x = e.data || {};
+  const photos = Array.isArray(x.photos) ? x.photos.filter(Boolean) : [];
   const raw = Array.isArray(x.examRounds) && x.examRounds.length
     ? x.examRounds
     : [{ marks: x.marks || {}, secondaryInfection: x.assessment?.secondaryInfection, assessment: x.assessment || {} }];
   const rounds = newestFirst(raw);
 
-  const exams = rounds
+  let exams = rounds
     .map((round, i) => {
       const marks = round.marks || {};
       const assessment = { ...(x.assessment || {}), ...(round.assessment || {}) };
@@ -444,15 +449,66 @@ const summariseExam = (e, spec) => {
         secondaryInfection: hasValue(si) ? si : "",
         extras,
         leprosy,
+        photos: [],
       };
     })
     .filter(Boolean);
+
+  // Visit-level assessment photographs — attach to newest exam entry (or a photo-only row)
+  if (photos.length) {
+    if (exams.length) {
+      exams = exams.map((exam, idx) => (idx === 0 ? { ...exam, photos } : exam));
+    } else {
+      exams = [{
+        id: `${e.id}-photos`,
+        encounterId: e.id,
+        editedAt: e.editedAt,
+        encounterDate: e.date,
+        date: e.date,
+        type: e.type,
+        worker: e.worker,
+        roundIndex: 0,
+        roundCount: 1,
+        occasion: "",
+        findings: [],
+        secondaryInfection: "",
+        extras: [],
+        leprosy: null,
+        photos,
+      }];
+    }
+  }
 
   if (!exams.length) return "";
   return { kind: "exam", exams };
 };
 
-const ExamSummary = ({ exam }) => {
+const PhotoThumbs = ({ photos = [], onOpen, testid = "dashboard-photos" }) => {
+  const list = (Array.isArray(photos) ? photos : []).filter(Boolean);
+  if (!list.length) return null;
+  return (
+    <div className="mt-3" data-testid={testid}>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Photographs · {list.length}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {list.map((src, i) => (
+          <button
+            key={`${testid}-${i}`}
+            type="button"
+            data-testid={`${testid}-thumb-${i}`}
+            onClick={() => onOpen?.(list, i)}
+            className="h-20 w-20 overflow-hidden rounded-md border border-border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <img src={src} alt={`Photograph ${i + 1}`} className="h-full w-full object-cover" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const ExamSummary = ({ exam, onOpenPhotos }) => {
   if (!exam) return null;
   const lep = exam.leprosy;
   const showAssessment = exam.roundCount > 1;
@@ -470,7 +526,7 @@ const ExamSummary = ({ exam }) => {
           )}
         </div>
       )}
-      {exam.findings.length > 0 && (
+      {exam.findings?.length > 0 && (
         <div className="space-y-1" data-testid="exam-findings">
           {exam.findings.map((finding, i) => (
             <p key={`${finding}-${i}`} className="text-sm font-medium">{finding}</p>
@@ -482,7 +538,7 @@ const ExamSummary = ({ exam }) => {
           Secondary infection - {exam.secondaryInfection}
         </p>
       )}
-      {exam.extras.map((item) => (
+      {(exam.extras || []).map((item) => (
         <p key={item.label} className="text-sm">
           <span className="text-muted-foreground">{item.label}:</span>{" "}
           <span className="font-medium">{item.value}</span>
@@ -512,6 +568,11 @@ const ExamSummary = ({ exam }) => {
           </p>
         </div>
       )}
+      <PhotoThumbs
+        photos={exam.photos}
+        testid={`exam-photos-${exam.id}`}
+        onOpen={(photos, index) => onOpenPhotos?.(photos, index)}
+      />
     </div>
   );
 };
@@ -1010,23 +1071,30 @@ const OutcomeSummary = ({ outcome, recommendations = [] }) => (
   </div>
 );
 
+const escapeHtml = (s) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/** Lightweight print for medications table only. */
+const openHtmlPrintWindow = (title, bodyHtml) => {
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><title>${escapeHtml(title)}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 24px; color: #111; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #d4d4d4; padding: 8px; text-align: left; vertical-align: top; font-size: 12px; }
+      th { color: #555; }
+    </style></head><body><h1>${escapeHtml(title)}</h1>${bodyHtml}</body></html>`;
+  return printHtmlDocument(html);
+};
+
 const MedsSummary = ({ rows }) => {
   const printMeds = () => {
     const node = document.querySelector("[data-testid='meds-print-area']");
     if (!node) return;
-    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-    if (!w) return;
-    w.document.write(`<!doctype html><html><head><title>Medications</title>
-      <style>
-        body { font-family: sans-serif; padding: 24px; color: #111; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #d4d4d4; padding: 8px; text-align: left; vertical-align: top; }
-        th { font-size: 12px; color: #555; }
-        .advice { font-size: 12px; color: #333; }
-      </style></head><body>${node.innerHTML}</body></html>`);
-    w.document.close();
-    w.focus();
-    w.print();
+    openHtmlPrintWindow("Medications", node.innerHTML);
   };
   return (
     <div className="mt-2" data-testid="meds-summary">
@@ -1125,16 +1193,40 @@ const UnfoldLessIcon = ({ className = "h-5 w-5" }) => (
 export default function PatientRecord() {
   const { id, diseaseId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { patients, encounters, user, suspects, facilities, settings } = useStore();
+  const backTo = location.state?.from || "/patients";
+  const withFrom = (opts = {}) => (location.state?.from ? { ...opts, state: { from: location.state.from } } : opts);
+  const { patients, encounters, user, suspects, facilities, settings, branding, startEpisode, addEncounter, syncPatientEpisodes, syncPatientSuspects, syncPatientVisitPhi, loadLocations, authSession, canAccessDisease, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const [tab, setTab] = useState(() => diseaseId || searchParams.get("tab") || "");
   const [lhs, setLhs] = useState(true);
   const [featureOpen, setFeatureOpen] = useState(() => Object.fromEntries(FEATURES.map(([k]) => [k, true])));
-  const [enc, setEnc] = useState({ show: false, facility: "", date: localISODate(), visitType: "", referral: "No", disease: "", province: "", district: "", prevFacility: "" });
+  const [enc, setEnc] = useState({
+    show: false,
+    mode: "episode", // "episode" | "encounter"
+    recordId: "",
+    facility: "",
+    locationId: "",
+    date: localISODate(),
+    visitType: "",
+    referral: "No",
+    disease: "",
+    province: "",
+    district: "",
+    prevFacility: "",
+    prevLocationId: "",
+  });
   const [photoView, setPhotoView] = useState(null);
   const [episodeSel, setEpisodeSel] = useState({});
+  const [starting, setStarting] = useState(false);
+  const [printPreviewHtml, setPrintPreviewHtml] = useState("");
+  const [printAfterHydrate, setPrintAfterHydrate] = useState(false);
+  const pendingOpenPrint = useRef(Boolean(location.state?.openPrint));
+  const pendingPrintEpisodeId = useRef(String(location.state?.episodeId || ""));
   const canEdit = user?.canEdit;
+  const patientSynced = Boolean(p && !p.localOnly && !String(p.id || "").startsWith("local-"));
+  const canEditPatientDetails = Boolean(canEdit && online && patientSynced);
   const photoCount = photoView?.photos?.length || 0;
   const photoIndex = photoView?.index ?? 0;
   const photoSrc = photoCount ? photoView.photos[photoIndex] : null;
@@ -1174,11 +1266,52 @@ export default function PatientRecord() {
     if (myDiseases.some((d) => d.id === diseaseId) || isExtra(diseaseId)) setTab(diseaseId);
   }, [diseaseId, hasSuspects, myDiseases, presentExtras]);
 
+  // Load LocationsT + open HMIS episodes + suspect screenings + PHI for dashboard
+  useEffect(() => {
+    if (!p?.id) return;
+    loadLocations?.({ force: true });
+    let cancelled = false;
+    const wantPrint = pendingOpenPrint.current;
+    if (authSession?.facilityId) {
+      Promise.resolve(syncPatientEpisodes?.(p.id, { force: true }))
+        .then((rows) => syncPatientVisitPhi?.(p.id, { visits: rows || [] }))
+        .then(() => {
+          if (cancelled || !wantPrint) return;
+          pendingOpenPrint.current = false;
+          navigate(`${location.pathname}${location.search}`, {
+            replace: true,
+            state: { from: location.state?.from || "/appointments" },
+          });
+          setPrintAfterHydrate(true);
+        })
+        .catch((err) => {
+          console.warn("dashboard hydrate failed", err);
+          if (!cancelled && wantPrint) {
+            pendingOpenPrint.current = false;
+            setPrintAfterHydrate(true);
+          }
+        });
+      syncPatientSuspects?.(p.id);
+    } else if (wantPrint) {
+      pendingOpenPrint.current = false;
+      setPrintAfterHydrate(true);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [p?.id, authSession?.facilityId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Also force-refresh suspects when opening the Suspect tab
+  useEffect(() => {
+    if (!p?.id || activeTab !== "suspect" || !authSession?.facilityId) return;
+    syncPatientSuspects?.(p.id, { force: true });
+  }, [activeTab, p?.id, authSession?.facilityId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectTab = (k) => {
     setTab(k);
     if (!p?.id) return;
-    if (k === "suspect") navigate(`/patients/${p.id}`, { replace: true });
-    else navigate(`/patients/${p.id}/disease/${k}`, { replace: true });
+    if (k === "suspect") navigate(`/patients/${p.id}`, { replace: true, ...withFrom() });
+    else navigate(`/patients/${p.id}/disease/${k}`, { replace: true, ...withFrom() });
   };
 
   const episodesByDisease = useMemo(() => {
@@ -1187,8 +1320,51 @@ export default function PatientRecord() {
     return map;
   }, [encs, myDiseases, p?.episodeId]);
 
+  // Prefer the episode that launched Print from Appointments
+  useEffect(() => {
+    const epId = pendingPrintEpisodeId.current;
+    if (!epId || !activeTab) return;
+    const eps = episodesByDisease[activeTab] || [];
+    if (!eps.some((ep) => ep.id === epId)) return;
+    setEpisodeSel((prev) => (prev[activeTab] === epId ? prev : { ...prev, [activeTab]: epId }));
+  }, [activeTab, episodesByDisease]);
+
   const selectedEpisode = (episodesByDisease[activeTab] || []).find((e) => e.id === episodeSel[activeTab]) || (episodesByDisease[activeTab] || [])[0];
   const selectedEpisodeId = selectedEpisode?.id || "";
+
+  /** Diseases with at least one open episode — hide from Add Episode "Go to". */
+  const activeDiseaseIds = useMemo(() => {
+    const ids = new Set();
+    for (const s of SPEC_LIST) {
+      const eps = groupDiseaseEpisodes(encs, s.id, p?.episodeId);
+      if (eps.some((ep) => ep.id !== "_none" && !isEpisodeClosed(ep.outcome))) ids.add(s.id);
+    }
+    for (const c of EXTRA_CONDITIONS) {
+      const eps = groupDiseaseEpisodes(encs, c.id, null);
+      if (eps.some((ep) => ep.id !== "_none" && !isEpisodeClosed(ep.outcome))) ids.add(c.id);
+    }
+    return ids;
+  }, [encs, p?.episodeId]);
+
+  const episodeGoToOptions = useMemo(
+    () => [
+      "Suspect screening",
+      ...SPEC_LIST.filter((s) => canAccessDisease(s.id) && !activeDiseaseIds.has(s.id)).map((s) => s.name),
+      ...EXTRA_CONDITIONS.filter((c) => !activeDiseaseIds.has(c.id)).map((c) => c.name),
+    ],
+    [activeDiseaseIds, canAccessDisease]
+  );
+
+  const pendingVisits = useMemo(
+    () =>
+      encs.filter(
+        (e) =>
+          e.disease === activeTab &&
+          e.pendingStart &&
+          (!selectedEpisodeId || e.episodeId === selectedEpisodeId || !e.episodeId)
+      ),
+    [encs, activeTab, selectedEpisodeId]
+  );
 
   useLayoutEffect(() => {
     scrollViewToTop();
@@ -1204,20 +1380,150 @@ export default function PatientRecord() {
     })).filter((f) => f.rows.length);
   }, [activeTab, selectedEpisode, myDiseases, p]);
 
-  if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate("/patients")}>Back to patients</Button></AppShell>;
+  const referralDistricts = enc.province ? Object.keys(GEO[enc.province] || {}) : [];
+  const locationFacilities = useMemo(
+    () =>
+      facilities.filter((f) => {
+        if (enc.referral !== "Yes") return true;
+        if (!enc.province) return false;
+        if (f.province && f.province !== enc.province) return false;
+        if (enc.district && f.district && f.district !== enc.district) return false;
+        return true;
+      }),
+    [facilities, enc.referral, enc.province, enc.district]
+  );
+  const locationOptions = useMemo(
+    () => [
+      ...new Set([
+        ...locationFacilities.map((f) => f.name),
+        ...(enc.facility ? [enc.facility] : []),
+      ]),
+    ],
+    [locationFacilities, enc.facility]
+  );
 
-  const start = () => {
+  // Only one accessible location → pre-select it (Add Episode / referral filter).
+  useEffect(() => {
+    if (!enc.show || enc.mode === "encounter") return;
+    if (locationFacilities.length !== 1) return;
+    const only = locationFacilities[0];
+    if (!only?.name) return;
+    if (enc.facility === only.name && String(enc.locationId || "") === String(only.id || "")) return;
+    setEnc((s) => ({
+      ...s,
+      facility: only.name,
+      locationId: only.id || "",
+      prevFacility: only.name,
+      prevLocationId: only.id || "",
+    }));
+  }, [enc.show, enc.mode, enc.facility, enc.locationId, locationFacilities]);
+
+  const printVisitSummaryRef = useRef(() => {});
+
+  // Appointments → Print: open preview once episode/PHI are ready
+  useEffect(() => {
+    if (!printAfterHydrate) return;
+    setPrintAfterHydrate(false);
+    window.setTimeout(() => printVisitSummaryRef.current?.(), 50);
+  }, [printAfterHydrate]);
+
+  if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate(backTo)}>Back</Button></AppShell>;
+
+  const start = async () => {
+    if (enc.mode !== "encounter" && enc.disease && activeDiseaseIds.has(enc.disease)) {
+      return toast.error("This disease already has an active episode — close it first or choose another");
+    }
     if (enc.referral === "Yes" && (!enc.province || !enc.district)) return toast.error("Choose province and district for the referral");
     if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
-    const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}&new=${Date.now()}`;
-    setEnc({ ...enc, show: false });
-    const path =
-      EXTRA_IDS.includes(enc.disease)
-        ? `/patients/${p.id}/${EXTRA_CONDITIONS.find((c) => c.id === enc.disease).route}?${q}`
-        : enc.disease
-          ? `/patients/${p.id}/encounter/${enc.disease}?${q}`
-          : `/patients/${p.id}/suspect?${q}`;
-    navigate(path);
+    if (!enc.disease) {
+      // Suspect screening — navigate with visit context for HMIS save
+      const locationId = enc.locationId || facilities.find((f) => f.name === enc.facility)?.id || "";
+      const q = new URLSearchParams({
+        fac: enc.facility || "",
+        vt: enc.visitType || "",
+        ref: enc.referral || "No",
+        date: enc.date || localISODate(),
+        loc: locationId,
+        new: String(Date.now()),
+      });
+      setEnc({ ...enc, show: false });
+      navigate(`/patients/${p.id}/suspect?${q.toString()}`, withFrom());
+      return;
+    }
+    if (EXTRA_IDS.includes(enc.disease)) {
+      const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}&new=${Date.now()}`;
+      setEnc({ ...enc, show: false });
+      navigate(`/patients/${p.id}/${EXTRA_CONDITIONS.find((c) => c.id === enc.disease).route}?${q}`, withFrom());
+      return;
+    }
+    if (starting) return;
+    setStarting(true);
+    try {
+      const locationId = enc.locationId || facilities.find((f) => f.name === enc.facility)?.id;
+      let result;
+      if (enc.mode === "encounter" && enc.recordId) {
+        result = await addEncounter({
+          patientId: p.id,
+          recordId: enc.recordId,
+          disease: enc.disease,
+          visitType: enc.visitType,
+          locationId,
+          locationName: enc.facility,
+          visitDate: enc.date,
+          referral: enc.referral,
+          clinicianName: user?.name,
+        });
+        toast.success("Encounter visit created");
+      } else {
+        result = await startEpisode({
+          patientId: p.id,
+          disease: enc.disease,
+          visitType: enc.visitType,
+          locationId,
+          locationName: enc.facility,
+          visitDate: enc.date,
+          referral: enc.referral,
+          clinicianName: user?.name,
+        });
+        toast.success(`${DISEASE_SPECS[enc.disease]?.name || "Episode"} started`);
+      }
+      const visitId = result.visitId || result.encounter?.id;
+      setEnc({ ...enc, show: false, mode: "episode", recordId: "" });
+      navigate(
+        `/patients/${p.id}/encounter/${enc.disease}?enc=${encodeURIComponent(visitId)}&fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}`,
+        withFrom()
+      );
+    } catch (err) {
+      toast.error(err?.message || (enc.mode === "encounter" ? "Failed to add encounter" : "Failed to start episode"));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const openAddEncounter = () => {
+    if (!canEdit || !selectedEpisode) return;
+    const seed = [...(selectedEpisode.visits || [])]
+      .slice()
+      .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))[0]
+      || selectedEpisode.visits?.[0];
+    const facility = seed?.facility || "";
+    const locationId = seed?.locationId || facilities.find((f) => f.name === facility)?.id || "";
+    setEnc({
+      ...enc,
+      show: true,
+      mode: "encounter",
+      recordId: selectedEpisode.id,
+      disease: activeTab,
+      facility,
+      locationId,
+      visitType: "",
+      referral: seed?.referral || "No",
+      date: localISODate(),
+      province: "",
+      district: "",
+      prevFacility: facility,
+      prevLocationId: locationId,
+    });
   };
 
   const openFeatureEncounter = (visit, featureKey) => {
@@ -1229,26 +1535,103 @@ export default function PatientRecord() {
     }
     const disease = target.disease || activeTab;
     const section = featureSectionNumber(featureKey, disease);
-    navigate(`/patients/${p.id}/encounter/${disease}?enc=${encodeURIComponent(target.id)}&section=${section}`);
+    navigate(`/patients/${p.id}/encounter/${disease}?enc=${encodeURIComponent(target.id)}&section=${section}`, withFrom());
   };
 
   const tabs = [...(hasSuspects ? [["suspect", "Suspect"]] : []), ...myDiseases.map((d) => [d.id, d.name]), ...presentExtras.map((c) => [c.id, c.name])];
   const allExpanded = featureRows.length > 0 && featureRows.every((f) => featureOpen[f.k] !== false);
-  const referralDistricts = enc.province ? Object.keys(GEO[enc.province] || {}) : [];
-  const locationOptions = facilities
-    .filter((f) => {
-      if (enc.referral !== "Yes") return true;
-      if (!enc.province) return false;
-      if (f.province !== enc.province) return false;
-      if (enc.district && f.district !== enc.district) return false;
-      return true;
-    })
-    .map((f) => f.name);
+
+  const printVisitSummary = () => {
+    if (!selectedEpisode && featureRows.length === 0) {
+      toast.error("No visit summary to print yet");
+      return;
+    }
+    const diseaseName = DISEASE_SPECS[activeTab]?.name || activeTab;
+    const epNo = selectedEpisode
+      ? episodeNumber(episodesByDisease[activeTab], selectedEpisode.id)
+      : "";
+    const episodeCaption = selectedEpisode
+      ? `Episode ${epNo} · ${visitLabel(selectedEpisode.visitCount)}`
+      : "";
+    const episodeDates = selectedEpisode
+      ? episodeDateParts(selectedEpisode)
+          .map((d) => `${d.label}: ${d.value}`)
+          .join(" · ")
+      : "";
+    const apptRaw = selectedEpisode?.last || selectedEpisode?.start || "";
+    const apptDate = (() => {
+      if (!apptRaw) return "";
+      const d = new Date(/T/.test(apptRaw) ? apptRaw : `${apptRaw}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return fmtDate(apptRaw);
+      const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+      return `${d.getDate()} ${m} ${d.getFullYear()}`;
+    })();
+    const clinicAddress = [
+      branding?.address,
+      [p?.village, p?.district, p?.province].filter(Boolean).join(", "),
+    ]
+      .filter(Boolean)
+      .join(branding?.address ? " · " : "") || "";
+    const html = buildVisitSummaryPrintHtml({
+      patient: {
+        ...p,
+        ageLabel: patientAgeLabel(p),
+      },
+      clinic: {
+        name: branding?.clientName || p?.facility || "Clinic",
+        phone: branding?.phone || "",
+        email: branding?.email || "",
+        address: clinicAddress,
+      },
+      clinician: {
+        name: user?.name || "",
+        specialty: user?.role || user?.specialty || "",
+        appointmentDate: apptDate,
+      },
+      diseaseName,
+      episode: selectedEpisode
+        ? {
+            diagnosis: selectedEpisode.diagnosis,
+            outcome: episodeStatus(selectedEpisode.outcome),
+          }
+        : null,
+      episodeCaption,
+      episodeDates,
+      featureRows,
+      worker: user?.name || "",
+    });
+    setPrintPreviewHtml(html);
+  };
+  printVisitSummaryRef.current = printVisitSummary;
 
   const actions = (
     <div className="flex shrink-0 flex-wrap justify-end gap-2" data-testid="record-actions">
-      <Button className="h-11" data-testid="add-encounter-btn" disabled={!canEdit} onClick={() => setEnc({ ...enc, show: true, disease: DISEASE_SPECS[activeTab] ? activeTab : EXTRA_IDS.includes(activeTab) ? activeTab : "" })}>
-        <Plus className="h-4 w-4" /> Encounter
+      {myDiseases.some((x) => x.id === activeTab) && selectedEpisode && (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11"
+          data-testid="print-visit-summary-btn"
+          onClick={printVisitSummary}
+        >
+          <Printer className="mr-2 h-4 w-4" /> Print
+        </Button>
+      )}
+      <Button
+        className="h-11"
+        data-testid="add-encounter-btn"
+        disabled={!canEdit}
+        onClick={() =>
+          setEnc({
+            ...enc,
+            show: true,
+            mode: "episode",
+            recordId: "",
+            disease: "",
+          })
+        }
+      >
+        <Plus className="h-4 w-4" /> Episode
       </Button>
       {p.phone && (
         <>
@@ -1272,7 +1655,7 @@ export default function PatientRecord() {
           </a>
         </>
       )}
-      <Button variant="outline" className="h-11" data-testid="back-btn" onClick={() => navigate("/patients")}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
+      <Button variant="outline" className="h-11" data-testid="back-btn" onClick={() => navigate(backTo)}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
     </div>
   );
 
@@ -1285,7 +1668,18 @@ export default function PatientRecord() {
             encounters={encs}
             diseases={sidebarDiseases}
             onCollapse={() => setLhs(false)}
-            onEdit={canEdit ? () => navigate(`/patients/${p.id}/edit`) : undefined}
+            onEdit={
+              canEditPatientDetails
+                ? () => navigate(`/patients/${p.id}/edit`)
+                : canEdit
+                  ? () =>
+                      toast.error(
+                        !online
+                          ? "Go online to edit patient details"
+                          : "Sync this patient first, then edit"
+                      )
+                  : undefined
+            }
             testid="lhs-panel"
           />
         )}
@@ -1299,7 +1693,9 @@ export default function PatientRecord() {
                 </Button>
                 <div className="min-w-0 shrink-0 leading-tight" data-testid="collapsed-patient-id">
                   <p className="font-head truncate text-base font-bold">{p.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{p.id}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {p.patientCode ? `PID ${p.patientCode}` : "PID —"}
+                  </p>
                 </div>
               </>
             )}
@@ -1411,21 +1807,90 @@ export default function PatientRecord() {
 
           {activeTab === "suspect" && hasSuspects && (
             <div className="space-y-3" data-testid="suspect-tab">
-              {mySuspects.map((s) => (
+              {mySuspects.map((s) => {
+                const linkedDisease =
+                  (s.disease && DISEASE_SPECS[s.disease] && s.disease) ||
+                  (s.suspect !== "none" && DISEASE_SPECS[s.suspect] ? s.suspect : null);
+                const linkedVisit =
+                  (s.visitId &&
+                    encs.find(
+                      (e) =>
+                        (e.id === s.visitId || e.visitId === s.visitId) &&
+                        (!linkedDisease || e.disease === linkedDisease)
+                    )) ||
+                  (linkedDisease &&
+                    s.recordId &&
+                    encs.find(
+                      (e) =>
+                        e.disease === linkedDisease &&
+                        (e.recordId === s.recordId || e.episodeId === s.recordId) &&
+                        e.pendingStart
+                    )) ||
+                  (linkedDisease &&
+                    encs.find((e) => e.disease === linkedDisease && e.pendingStart)) ||
+                  null;
+                const visitCompleted =
+                  linkedVisit &&
+                  linkedVisit.pendingStart !== true &&
+                  (linkedVisit.complete === true || linkedVisit.status === "Complete");
+                const canStartLinkedVisit =
+                  !!linkedDisease &&
+                  !!canEdit &&
+                  !visitCompleted &&
+                  !!(linkedVisit?.pendingStart || linkedVisit?.id || s.visitId);
+                const startEncId = linkedVisit?.id || s.visitId || "";
+                const startDisease = linkedVisit?.disease || linkedDisease;
+
+                return (
                 <div key={s.id} className="rounded-lg border border-border bg-white p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold">{fmtDate(s.date)} · {s.suspect === "none" ? "Suspect Non-NTDs Skin Condition" : `${DISEASE_SPECS[s.suspect]?.name} suspected`}</p>
+                      <p className="font-semibold">
+                        {fmtDate(s.date)} ·{" "}
+                        {s.suspect === "none"
+                          ? "Suspect Non-NTDs Skin Condition"
+                          : `${DISEASE_SPECS[s.suspect]?.name || linkedDisease} suspected`}
+                      </p>
                       {s.symptoms?.length > 0 && (
                         <div className="mt-2">
                           <p className="text-xs font-semibold text-muted-foreground">Presenting Complaints / Symptoms</p>
                           <p className="mt-1 text-sm font-medium">{s.symptoms.join(" · ")}</p>
                         </div>
                       )}
+                      {s.notes ? (
+                        <p className="mt-2 text-sm text-muted-foreground">{s.notes}</p>
+                      ) : null}
+                      {canStartLinkedVisit && (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          {DISEASE_SPECS[startDisease]?.name || startDisease} visit is ready — continue to complete the entry form.
+                        </p>
+                      )}
                     </div>
-                    {s.suspect !== "none" && DISEASE_SPECS[s.suspect] && !encs.some((e) => e.disease === s.suspect) && (
-                      <Button variant="outline" className="h-11 shrink-0" data-testid={`start-flow-${s.id}`} disabled={!canEdit} onClick={() => setEnc({ ...enc, show: true, disease: s.suspect })}>
-                        Start {DISEASE_SPECS[s.suspect].name} flow
+                    {canStartLinkedVisit && startEncId && (
+                      <Button
+                        className="h-11 shrink-0"
+                        data-testid={`start-suspect-visit-${s.id}`}
+                        onClick={() =>
+                          navigate(
+                            `/patients/${p.id}/encounter/${startDisease}?enc=${encodeURIComponent(startEncId)}&fac=${encodeURIComponent(linkedVisit?.facility || "")}&vt=${encodeURIComponent(linkedVisit?.type || "")}&ref=${linkedVisit?.referral || "No"}`,
+                            withFrom()
+                          )
+                        }
+                      >
+                        Start visit
+                      </Button>
+                    )}
+                    {canEdit &&
+                      !canStartLinkedVisit &&
+                      linkedDisease &&
+                      !encs.some((e) => e.disease === linkedDisease) && (
+                      <Button
+                        variant="outline"
+                        className="h-11 shrink-0"
+                        data-testid={`start-flow-${s.id}`}
+                        onClick={() => setEnc({ ...enc, show: true, disease: linkedDisease })}
+                      >
+                        Start {DISEASE_SPECS[linkedDisease].name} flow
                       </Button>
                     )}
                   </div>
@@ -1448,7 +1913,8 @@ export default function PatientRecord() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -1472,6 +1938,16 @@ export default function PatientRecord() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {canEdit && !isEpisodeClosed(selectedEpisode.outcome) && (
+                      <Button
+                        variant="outline"
+                        className="h-9 border-primary/30 bg-white/80 px-3 text-primary hover:bg-white"
+                        data-testid="add-visit-to-episode-btn"
+                        onClick={openAddEncounter}
+                      >
+                        <Plus className="mr-1 h-4 w-4" /> Encounter
+                      </Button>
+                    )}
                     {featureRows.length > 0 && (
                       <button
                         type="button"
@@ -1499,6 +1975,38 @@ export default function PatientRecord() {
                   </div>
                 </div>
               )}
+
+              {pendingVisits.map((v) => (
+                <div
+                  key={v.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-primary/40 bg-white px-4 py-3"
+                  data-testid={`pending-visit-${v.id}`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold">Visit ready to start</p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {fmtDate(v.date)}
+                      {v.type ? ` · ${v.type}` : ""}
+                      {v.facility ? ` · ${v.facility}` : ""}
+                      {" · "}A visit was created for this episode. Continue to complete the entry form.
+                    </p>
+                  </div>
+                  {canEdit && (
+                    <Button
+                      className="h-11 shrink-0"
+                      data-testid={`start-pending-visit-${v.id}`}
+                      onClick={() =>
+                        navigate(
+                          `/patients/${p.id}/encounter/${v.disease}?enc=${encodeURIComponent(v.id)}&fac=${encodeURIComponent(v.facility || "")}&vt=${encodeURIComponent(v.type || "")}&ref=${v.referral || "No"}`,
+                          withFrom()
+                        )
+                      }
+                    >
+                      Start visit
+                    </Button>
+                  )}
+                </div>
+              ))}
               {featureRows.map(({ k, label, rows }) => {
                 const isOpen = featureOpen[k] !== false;
                 const exams = k === "marks" ? uniqueExamChips(rows) : [];
@@ -1560,7 +2068,10 @@ export default function PatientRecord() {
                                     </Button>
                                   )}
                                 </div>
-                                <ExamSummary exam={exam} />
+                                <ExamSummary
+                                  exam={exam}
+                                  onOpenPhotos={(photos, index) => setPhotoView({ photos, index })}
+                                />
                               </div>
                             );
                           })
@@ -1643,7 +2154,7 @@ export default function PatientRecord() {
                   </section>
                 );
               })}
-              {!selectedEpisode && (
+              {!selectedEpisode && pendingVisits.length === 0 && (
                 <AlertPanel level="info" title={`No ${DISEASE_SPECS[activeTab].name} data yet`} testid="empty-condition">Add an encounter to start this condition record.</AlertPanel>
               )}
             </div>
@@ -1662,7 +2173,7 @@ export default function PatientRecord() {
         >
           <DialogHeader>
             <DialogTitle className="font-head text-xl">
-              Skin Photograph{photoCount > 1 ? ` · ${photoIndex + 1} of ${photoCount}` : ""}
+              Photograph{photoCount > 1 ? ` · ${photoIndex + 1} of ${photoCount}` : ""}
             </DialogTitle>
           </DialogHeader>
           {photoSrc && (
@@ -1705,56 +2216,66 @@ export default function PatientRecord() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={enc.show} onOpenChange={(o) => setEnc({ ...enc, show: o })}>
+      <Dialog open={enc.show} onOpenChange={(o) => setEnc({ ...enc, show: o, ...(o ? {} : { mode: "episode", recordId: "" }) })}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-md" data-testid="add-encounter-dialog">
-          <DialogHeader><DialogTitle className="font-head text-xl">Add encounter</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-head text-xl">
+              {enc.mode === "encounter" ? "Add Encounter" : "Add Episode"}
+            </DialogTitle>
+          </DialogHeader>
           <div className="space-y-5">
             <TextField label="Date" type="date" testid="encounter-date-input" value={enc.date} onChange={(e) => setEnc({ ...enc, date: e.target.value })} hint={fmtDate(enc.date)} />
             <TextField label="Clinician" testid="encounter-clinician" value={user?.name || ""} readOnly />
             <SelectField label="Visit type" options={settings.visitTypes} value={enc.visitType} onChange={(v) => setEnc({ ...enc, visitType: v })} testid="encounter-visit-type-select" />
-            <ChoiceRow
-              label="Referral"
-              options={["Yes", "No"]}
-              value={enc.referral}
-              onChange={(v) =>
-                setEnc((s) => {
-                  const referral = v || "No";
-                  if (referral === "Yes") {
+            {enc.mode !== "encounter" && (
+              <ChoiceRow
+                label="Referral"
+                options={["Yes", "No"]}
+                value={enc.referral}
+                onChange={(v) =>
+                  setEnc((s) => {
+                    const referral = v || "No";
+                    if (referral === "Yes") {
+                      return {
+                        ...s,
+                        referral,
+                        province: "",
+                        district: "",
+                        facility: "",
+                        locationId: "",
+                        prevFacility: s.facility || s.prevFacility,
+                        prevLocationId: s.locationId || s.prevLocationId,
+                      };
+                    }
                     return {
                       ...s,
                       referral,
                       province: "",
                       district: "",
-                      facility: "",
-                      prevFacility: s.facility || s.prevFacility,
+                      facility: s.prevFacility || s.facility,
+                      locationId: s.prevLocationId || s.locationId,
+                      prevFacility: "",
+                      prevLocationId: "",
                     };
-                  }
-                  return {
-                    ...s,
-                    referral,
-                    province: "",
-                    district: "",
-                    facility: s.prevFacility || s.facility,
-                    prevFacility: "",
-                  };
-                })
-              }
-              testid="encounter-referral"
-            />
-            {enc.referral === "Yes" && (
+                  })
+                }
+                testid="encounter-referral"
+              />
+            )}
+            {enc.mode !== "encounter" && enc.referral === "Yes" && (
               <>
                 <SelectField
                   label="Province"
                   options={Object.keys(GEO)}
                   value={enc.province}
-                  onChange={(v) => setEnc({ ...enc, province: v, district: "", facility: "" })}
+                  onChange={(v) => setEnc({ ...enc, province: v, district: "", facility: "", locationId: "" })}
                   testid="encounter-referral-province"
                 />
                 <SelectField
                   label="District"
                   options={referralDistricts}
                   value={enc.district}
-                  onChange={(v) => setEnc({ ...enc, district: v, facility: "" })}
+                  onChange={(v) => setEnc({ ...enc, district: v, facility: "", locationId: "" })}
                   testid="encounter-referral-district"
                 />
               </>
@@ -1763,17 +2284,111 @@ export default function PatientRecord() {
               label="Location / facility"
               options={locationOptions}
               value={enc.facility}
-              onChange={(v) => setEnc({ ...enc, facility: v })}
+              onChange={(v) => {
+                if (enc.mode === "encounter") return;
+                const loc = locationFacilities.find((f) => f.name === v);
+                setEnc({ ...enc, facility: v, locationId: loc?.id || "" });
+              }}
               testid="encounter-facility-select"
-              hint={enc.referral === "Yes" && !enc.district ? "Select province and district to see referral locations" : enc.referral === "Yes" && locationOptions.length === 0 ? "No facilities listed for this district" : undefined}
+              hint={
+                enc.mode === "encounter"
+                  ? "Using the location from this episode"
+                  : enc.referral === "Yes" && !enc.district
+                    ? "Select province and district to see referral locations"
+                    : enc.referral === "Yes" && locationOptions.length === 0
+                      ? "No facilities listed for this district"
+                      : undefined
+              }
             />
-            <SelectField label="Go to" options={["Suspect screening", ...SPEC_LIST.map((s) => s.name), ...EXTRA_CONDITIONS.map((c) => c.name)]}
-              value={EXTRA_IDS.includes(enc.disease) ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease).name : enc.disease && DISEASE_SPECS[enc.disease] ? DISEASE_SPECS[enc.disease].name : "Suspect screening"}
-              onChange={(v) => setEnc({ ...enc, disease: EXTRA_CONDITIONS.find((c) => c.name === v)?.id || SPEC_LIST.find((s) => s.name === v)?.id || "" })} testid="encounter-target-select" />
+            <SelectField
+              label="Go to"
+              options={
+                enc.mode === "encounter"
+                  ? [DISEASE_SPECS[enc.disease]?.name].filter(Boolean)
+                  : episodeGoToOptions
+              }
+              value={
+                enc.mode === "encounter"
+                  ? (EXTRA_IDS.includes(enc.disease)
+                      ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease)?.name
+                      : DISEASE_SPECS[enc.disease]?.name) || ""
+                  : enc.disease && !activeDiseaseIds.has(enc.disease)
+                    ? EXTRA_IDS.includes(enc.disease)
+                      ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease)?.name
+                      : DISEASE_SPECS[enc.disease]?.name || "Suspect screening"
+                    : "Suspect screening"
+              }
+              onChange={(v) => {
+                if (enc.mode === "encounter") return;
+                setEnc({
+                  ...enc,
+                  disease:
+                    EXTRA_CONDITIONS.find((c) => c.name === v)?.id ||
+                    SPEC_LIST.find((s) => s.name === v)?.id ||
+                    "",
+                });
+              }}
+              testid="encounter-target-select"
+              hint={
+                enc.mode === "encounter"
+                  ? `Locked to ${DISEASE_SPECS[enc.disease]?.name || "this disease"} episode`
+                  : activeDiseaseIds.size
+                    ? "Active diseases are hidden — close the episode to start a new one"
+                    : undefined
+              }
+            />
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" className="h-12" data-testid="encounter-cancel" onClick={() => setEnc({ ...enc, show: false })}>Cancel</Button>
-            <Button className="h-12" data-testid="encounter-start" onClick={start}>Start encounter</Button>
+            <Button variant="outline" className="h-12" data-testid="encounter-cancel" onClick={() => setEnc({ ...enc, show: false, mode: "episode", recordId: "" })}>Cancel</Button>
+            <Button className="h-12" data-testid="encounter-start" disabled={starting} onClick={start}>
+              {starting
+                ? "Starting…"
+                : enc.mode === "encounter"
+                  ? "Start Encounter"
+                  : "Start Episode"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(printPreviewHtml)} onOpenChange={(o) => !o && setPrintPreviewHtml("")}>
+        <DialogContent
+          className="flex max-h-[92vh] w-[min(960px,calc(100vw-1rem))] max-w-[min(960px,calc(100vw-1rem))] flex-col gap-3 overflow-hidden p-3 sm:p-4"
+          data-testid="visit-summary-preview-dialog"
+        >
+          <DialogHeader className="shrink-0 space-y-1 pr-8">
+            <DialogTitle className="font-head text-lg sm:text-xl">Visit Summary</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
+            {printPreviewHtml ? (
+              <iframe
+                title="Visit summary preview"
+                srcDoc={printPreviewHtml}
+                className="h-[min(70vh,720px)] w-full border-0 bg-white"
+                data-testid="visit-summary-preview-frame"
+              />
+            ) : null}
+          </div>
+          <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              variant="outline"
+              className="h-11 w-full sm:w-auto"
+              data-testid="visit-summary-preview-close"
+              onClick={() => setPrintPreviewHtml("")}
+            >
+              Close
+            </Button>
+            <Button
+              className="h-11 w-full sm:w-auto"
+              data-testid="visit-summary-preview-print"
+              onClick={() => {
+                if (!printHtmlDocument(printPreviewHtml)) {
+                  toast.error("Could not prepare print view");
+                }
+              }}
+            >
+              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -263,7 +263,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                     <Baby className="h-4 w-4 text-primary" />
                     <span className="font-semibold">{babyName(patient.name, i, del.babies.length)}</span>
                     <span className="text-muted-foreground">{b.sex || "—"} · {b.weightKg ? `${b.weightKg} kg` : "—"} · APGAR {b.apgar1 || "—"}/{b.apgar5 || "—"} · {b.outcome}</span>
-                    {b.registered && <Badge variant="outline" className="rounded">Registered · {b.patientId}</Badge>}
+                    {b.registered && <Badge variant="outline" className="rounded">Registered · {b.patientCode ? `PID ${b.patientCode}` : "patient"}</Badge>}
                   </div>
                 ))}
               </div>

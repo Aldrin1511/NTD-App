@@ -231,48 +231,69 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
 
   const remove = (i) => onChange(contacts.filter((_, j) => j !== i));
 
-  const ensureRegisteredPatient = (row) => {
+  const ensureRegisteredPatient = async (row) => {
     if (row.registerPatient !== "Yes") return { ...row, patientId: row.patientId || "" };
 
     const fullName = displayName(row);
     const age = contactAgeYears(row);
     const gender = row.gender === "Others" ? "Other" : (row.gender || "Male");
 
-    // Update existing linked patient if already created from this contact
     if (row.patientId && patients.some((p) => p.id === row.patientId)) {
       addDisease(row.patientId, "leprosy");
       return row;
     }
 
-    const rec = addPatient({
-      name: fullName,
+    const phoneDigits = String(row.phone || "").replace(/\D/g, "");
+    if (!phoneDigits || phoneDigits.length < 7) {
+      toast.error("Phone (7–13 digits) is required to register a contact in HMIS");
+      throw new Error("phone required");
+    }
+
+    const formState = {
+      name: row.firstName || fullName.split(/\s+/)[0] || fullName,
       middleName: row.middleName || "",
       lastName: row.lastName || "",
       dob: row.dob || "",
+      ageY: Number.isFinite(age) ? String(age) : "",
+      ageM: "",
+      ageD: "",
       age: Number.isFinite(age) ? age : 0,
       gender,
       sex: gender,
-      phone: row.phone || "",
-      province: sourcePatient?.province || "",
-      district: sourcePatient?.district || "",
-      village: sourcePatient?.village || "",
-      facility: sourcePatient?.facility || "",
-      household: sourcePatient?.household || "",
+      phone: phoneDigits,
+      phoneCountry: { Country: "Papua New Guinea", Code: "675", ISO: "pg" },
+      bloodGroup: "Unknown",
+      email: "",
+      consent: "By verbal",
+      registeredAt: "",
+      addresses: [
+        {
+          type: "By residency",
+          country: "Papua New Guinea",
+          province: sourcePatient?.province || "",
+          district: sourcePatient?.district || "",
+          village: sourcePatient?.village || "",
+        },
+      ],
+    };
+
+    const rec = await addPatient(formState);
+    if (rec?.id) addDisease(rec.id, "leprosy");
+    toast.success(`Patient ${rec.patientCode ? `PID ${rec.patientCode}` : "record"} created for ${fullName}`);
+    return {
+      ...row,
+      patientId: rec.id,
       diseases: ["leprosy"],
       status: row.outcome === "Confirmed Leprosy"
         ? "Confirmed"
-        : row.outcome === "Suspect Leprosy"
-          ? "Suspected"
-          : "Suspected",
+        : "Suspected",
       indexPatientId: sourcePatient?.id || "",
       registeredFrom: "leprosy-household-contact",
       relationshipToIndex: row.relationship || "",
-    });
-    toast.success(`Patient ${rec.id} created for ${fullName}`);
-    return { ...row, patientId: rec.id };
+    };
   };
 
-  const save = () => {
+  const save = async () => {
     if (!draft.firstName?.trim() || !draft.lastName?.trim()) return;
     if (!draft.relationship) return;
     if (draft.registerPatient === "Yes" && !Number.isFinite(contactAgeYears(draft))) {
@@ -288,7 +309,11 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
     if (healthy && row.sdrAvailable !== "Yes") {
       row = { ...row, administrationDate: "", ...emptySdrFields() };
     }
-    row = ensureRegisteredPatient(row);
+    try {
+      row = await ensureRegisteredPatient(row);
+    } catch (_) {
+      return;
+    }
 
     if (editIndex >= 0) {
       onChange(contacts.map((c, j) => (j === editIndex ? row : c)));
@@ -345,8 +370,28 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
                     <p className="mt-0.5 text-xs text-muted-foreground">{ageGenderLine(c)}</p>
                     {c.patientId && (
                       <p className="mt-0.5 text-xs font-medium text-primary" data-testid={`${id}-patient-id-${i}`}>
-                        Patient {c.patientId}
+                        {(() => {
+                          const linked = patients.find((p) => p.id === c.patientId);
+                          return linked?.patientCode ? `PID ${linked.patientCode}` : "Linked patient";
+                        })()}
                       </p>
+                    )}
+                    {Array.isArray(c.photos) && c.photos.filter(Boolean).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5" data-testid={`${id}-photos-${i}`}>
+                        {c.photos.filter(Boolean).slice(0, 4).map((src, pi) => (
+                          <img
+                            key={`${c.id || i}-ph-${pi}`}
+                            src={src}
+                            alt=""
+                            className="h-10 w-10 rounded border border-border object-cover"
+                          />
+                        ))}
+                        {c.photos.filter(Boolean).length > 4 && (
+                          <span className="grid h-10 w-10 place-items-center rounded border border-border text-[10px] font-semibold text-muted-foreground">
+                            +{c.photos.filter(Boolean).length - 4}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="p-3">{c.relationship || "—"}</td>
@@ -420,7 +465,10 @@ export default function LeprosyHouseholdMonitoring({ value = [], onChange, id = 
               {draft.registerPatient === "Yes" && (
                 <p className="rounded-md border border-primary/20 bg-secondary/40 px-3 py-2 text-sm text-muted-foreground" data-testid={`${id}-register-hint`}>
                   {draft.patientId
-                    ? `Linked to patient ${draft.patientId}. Saving will keep this patient record.`
+                    ? `Linked to ${(() => {
+                        const linked = patients.find((p) => p.id === draft.patientId);
+                        return linked?.patientCode ? `PID ${linked.patientCode}` : "an existing patient";
+                      })()}. Saving will keep this patient record.`
                     : "Saving this contact will create a new patient in the NTD app (same household / location as the index case)."}
                 </p>
               )}

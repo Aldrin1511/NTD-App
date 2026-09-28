@@ -10,7 +10,7 @@ import { localISODate } from "@/mock/specs";
 import { GEO } from "@/mock/data";
 import {
   MAL_ID, MAL_NAME, CASE_TYPES, ADMISSION_TYPES, VISIT_TYPES, APPETITE, OEDEMA, RR_BANDS, TEMP_OPTS,
-  DANGER_SIGNS, HISTORY, ROUTINE_MEDS, OUTCOMES, malIndices, monitoringAlert, newMalEpisodeId,
+  DANGER_SIGNS, HISTORY, ROUTINE_MEDS, OUTCOMES, malIndices, monitoringAlert, newMalEpisodeId, isMalEpisodeClosed,
 } from "@/mock/malnutrition";
 import { toast } from "sonner";
 
@@ -57,10 +57,10 @@ export default function MalnutritionEncounter() {
   const idx = malIndices({ weight: d.weight, height: d.height, ageMonths, sex });
   const alert = monitoringAlert(d, prevMonitoring);
 
-  const persist = (close) => {
+  const persist = async (close) => {
     const episodeId = existing?.episodeId || patientEncs.filter((e) => e.disease === MAL_ID)[0]?.episodeId || newMalEpisodeId();
     const type = d.visitType === "Monitoring" ? `Monitoring${d.week ? ` · Week ${d.week}` : ""}` : "Admission";
-    saveEncounter({
+    await saveEncounter({
       id: existing?.id, patientId: p.id, episodeId, disease: MAL_ID, facility, worker: user?.name, type,
       diagnosis: d.caseDetails.admissionType || "", outcome: d.outcome?.status || "",
       data: { ...d, caseDetails: { ...d.caseDetails, caseNo, admissionDate: d.caseDetails.admissionDate || localISODate() }, indices: idx, alert, ageMonths },
@@ -168,7 +168,11 @@ export default function MalnutritionEncounter() {
             </div>
           )}
           {(d.outcome.status === "Refused treatment" || d.outcome.status === "Other") && <AreaField label="Details" rows={2} value={d.outcome.note || ""} onChange={(e) => set("outcome", { ...d.outcome, note: e.target.value })} testid="mal-outcome-note" />}
-          {d.outcome.status && <AlertPanel level="review" title="Selecting an outcome closes this episode" testid="mal-outcome-close">Except while continuing monitoring, a recorded outcome closes the malnutrition episode.</AlertPanel>}
+          {isMalEpisodeClosed(d.outcome.status) && (
+            <AlertPanel level="review" title="This closes the malnutrition episode" testid="mal-outcome-close">
+              Saving with this outcome closes the episode. Start a new encounter to open a fresh malnutrition episode later.
+            </AlertPanel>
+          )}
         </div>
       ),
     },

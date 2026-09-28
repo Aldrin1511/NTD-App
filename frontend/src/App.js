@@ -17,9 +17,16 @@ import Admin from "@/pages/Admin";
 import Sync from "@/pages/Sync";
 
 const Guard = ({ children }) => {
-  const { user } = useStore();
+  const { user, authReady } = useStore();
   const loc = useLocation();
-  if (!user) return <Navigate to="/" replace state={{ from: loc.pathname }} />;
+  if (!authReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">
+        Restoring session…
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/" replace state={{ from: loc.pathname + loc.search }} />;
   return children;
 };
 
@@ -33,7 +40,14 @@ const EncounterRoute = () => {
 };
 
 function Shell() {
-  const { user } = useStore();
+  const { user, authReady } = useStore();
+  if (!authReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">
+        Restoring session…
+      </div>
+    );
+  }
   return (
     <Routes>
       <Route path="/" element={user ? <Navigate to="/patients" replace /> : <Login />} />

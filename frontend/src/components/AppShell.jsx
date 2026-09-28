@@ -1,4 +1,5 @@
 import { Link, NavLink, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { useStore } from "@/store";
 import {
   Activity,
@@ -36,14 +37,16 @@ export const SyncChip = () => {
   return (
     <button
       data-testid="sync-status-chip"
-      onClick={() => {
+      onClick={async () => {
         if (state === "offline") {
-          toast.error("No internet. Items stay queued until you are online — then Save again or tap Sync.");
+          toast.error("No internet. Items stay queued until you are online — then tap Sync.");
           return;
         }
         if (state === "queued") {
-          const n = syncNow();
-          if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to the cloud`);
+          const result = await syncNow();
+          const n = result?.synced || 0;
+          if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to HMIS`);
+          if (result?.failed) toast.error(`${result.failed} item(s) failed — see Sync page`);
         }
       }}
       className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${map.cls}`}
@@ -56,33 +59,57 @@ export const SyncChip = () => {
 
 const SyncPromptDialog = () => {
   const { syncPrompt, dismissSyncPrompt, syncNow, online, pendingSync } = useStore();
+  const [busy, setBusy] = useState(false);
   const count = Number(syncPrompt?.count) || pendingSync;
   const open = Boolean(syncPrompt) && online && count > 0;
   if (!open) return null;
 
+  const confirmSync = async () => {
+    setBusy(true);
+    try {
+      const result = await syncNow();
+      const n = result?.synced || 0;
+      if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to HMIS`);
+      if (result?.failed) toast.error(`${result.failed} item(s) failed — see Sync page`);
+      if (!result?.failed) dismissSyncPrompt();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) dismissSyncPrompt(); }}>
+    <Dialog
+      open
+      onOpenChange={(v) => {
+        if (!v && !busy) dismissSyncPrompt();
+      }}
+    >
       <DialogContent data-testid="sync-prompt" className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Sync pending items?</DialogTitle>
+          <DialogTitle>Unsynced items on your device</DialogTitle>
           <DialogDescription>
-            You are online. {count} item{count === 1 ? "" : "s"} in the offline queue {count === 1 ? "is" : "are"} waiting to upload.
+            You have {count} unsynced item{count === 1 ? "" : "s"} saved offline that {count === 1 ? "has" : "have"} not been uploaded to HMIS yet.
+            Confirm to sync {count === 1 ? "it" : "them"} now.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="outline" className="h-11" data-testid="sync-prompt-later" onClick={dismissSyncPrompt}>
-            Later
+          <Button
+            variant="outline"
+            className="h-11"
+            data-testid="sync-prompt-later"
+            disabled={busy}
+            onClick={dismissSyncPrompt}
+          >
+            Not now
           </Button>
           <Button
             className="h-11"
             data-testid="sync-prompt-now"
-            onClick={() => {
-              const n = syncNow();
-              if (n) toast.success(`${n} item${n === 1 ? "" : "s"} synced to the cloud`);
-            }}
+            disabled={busy}
+            onClick={confirmSync}
           >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Sync now
+            <RefreshCw className={`mr-2 h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+            {busy ? "Syncing…" : "Confirm & sync"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -145,9 +172,12 @@ export default function AppShell({ children, title, subtitle, action }) {
               size="icon"
               className="h-10 w-10"
               data-testid="logout-btn"
-              onClick={() => {
-                logout();
-                navigate("/");
+              onClick={async () => {
+                try {
+                  await logout();
+                } finally {
+                  navigate("/", { replace: true });
+                }
               }}
             >
               <LogOut className="h-4 w-4" />

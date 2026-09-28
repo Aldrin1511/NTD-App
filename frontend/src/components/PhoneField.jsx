@@ -21,6 +21,7 @@ export default function PhoneField({
   testid = "patient-phone",
   placeholder = "Phone number",
   hint,
+  required = false,
 }) {
   const [open, setOpen] = useState(false);
   const selected = country?.ISO ? country : DEFAULT_COUNTRY;
@@ -28,7 +29,7 @@ export default function PhoneField({
   const countries = useMemo(() => COUNTRY_CODES, []);
 
   return (
-    <Field label={label} hint={hint}>
+    <Field label={label} hint={hint} required={required}>
       <div className="flex h-12 min-w-0 overflow-hidden rounded-md border border-input bg-white shadow-sm focus-within:ring-1 focus-within:ring-ring">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
@@ -78,9 +79,12 @@ export default function PhoneField({
           placeholder={placeholder}
           maxLength={maxLen}
           value={national || ""}
+          required={required}
+          aria-required={required || undefined}
           onChange={(e) => onNationalChange?.(digitsOnly(e.target.value, maxLen))}
         />
       </div>
     </Field>
   );
 }
+

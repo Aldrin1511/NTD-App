@@ -60,7 +60,7 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
     canvas.getContext("2d").drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     onChange([dataUrl, ...photos].slice(0, max));
-    toast.success("Photo captured — stored on the device until sync");
+    toast.success("Photo captured — will upload with the record on Save / Sync");
     closeCamera();
   };
 
@@ -71,12 +71,12 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
       r.onload = () => onChange([r.result, ...photos].slice(0, max));
       r.readAsDataURL(f);
     });
-    if (files.length) toast.success(`${files.length} photo(s) attached — stored on the device until sync`);
+    if (files.length) toast.success(`${files.length} photo(s) attached — will upload with the record on Save / Sync`);
     e.target.value = "";
   };
 
   return (
-    <Field label={label} hint="Camera or gallery. Photos are held on the device and upload with the record.">
+    <Field label={label} hint="Camera or gallery. Photos stay on this device until Save (online) or Sync (offline).">
       <div className="flex flex-wrap gap-3">
         {photos.map((src, i) => (
           <div key={i} className="relative h-24 w-24 overflow-hidden rounded-md border border-border">

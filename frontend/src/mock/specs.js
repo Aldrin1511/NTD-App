@@ -32,6 +32,218 @@ export const SUSPECT_OPTIONS = [
   { id: "none", label: "Suspect Non-NTDs Skin Condition" },
 ];
 
+/**
+ * Offline geography for patient registration (country → province → district → village).
+ * Same { value, viewValue } shape as portal-be / HMIS geo APIs.
+ * Stable offline-* ids are UI-only; HMIS sync sends the display names.
+ */
+const geoId = (...parts) =>
+  `offline-${parts.map((p) => String(p).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")).join("-")}`;
+
+const villageNodes = (province, district, villages) =>
+  villages.map((name) => ({
+    value: geoId("vil", province, district, name),
+    viewValue: name,
+  }));
+
+const districtNode = (province, district, villages) => ({
+  value: geoId("dist", province, district),
+  viewValue: district,
+  villages: villageNodes(province, district, villages),
+});
+
+const provinceNode = (province, districts) => ({
+  value: geoId("prov", province),
+  viewValue: province,
+  districts: Object.entries(districts).map(([district, villages]) =>
+    districtNode(province, district, villages)
+  ),
+});
+
+/** Nested PNG geography used when geo APIs are offline / unavailable. */
+export const OFFLINE_GEO_PNG = {
+  value: geoId("country", "Papua New Guinea"),
+  viewValue: "Papua New Guinea",
+  provinces: [
+    provinceNode("CENTRAL", {
+      "Abau District": ["Abau", "Amazon Bay", "Cloudy Bay"],
+      "Goilala District": ["Tapini", "Woitape", "Guari"],
+      "Kairuku-Hiri District": ["Bereina", "Hisiu", "Porebada", "Hanuabada"],
+      "Rigo District": ["Kwikila", "Gaire", "Hula"],
+    }),
+    provinceNode("NATIONAL CAPITAL DISTRICT", {
+      "NCD": ["Port Moresby", "Boroko", "Waigani", "Gerehu", "Tokarara"],
+    }),
+    provinceNode("Madang", {
+      "Madang District": ["Bilbil", "Yabob", "Riwo", "Siar", "Kranket"],
+      "Sumkar District": ["Karkar", "Megiar", "Malala", "Bagabag"],
+      "Middle Ramu District": ["Aiome", "Josephstaal"],
+      "Raicoast District": ["Saidor", "Astrolabe Bay"],
+      "Usino Bundi District": ["Usino", "Bundi"],
+      "Bogia District": ["Bogia", "Manam"],
+    }),
+    provinceNode("Morobe", {
+      "Lae District": ["Bumbu", "Butibam", "Wagang", "Eriku"],
+      "Finschhafen District": ["Gagidu", "Sattelberg", "Heldsbach"],
+      "Bulolo District": ["Bulolo", "Wau"],
+      "Huon Gulf District": ["Salamaua", "Morobe Station"],
+      "Markham District": ["Kaiapit", "Munum"],
+      "Menyamya District": ["Menyamya", "Aseki"],
+      "Nawae District": ["Boana", "Nabak"],
+      "Tewae-Siassi District": ["Wasu", "Siassi"],
+      "Kabwum District": ["Kabwum", "Derim"],
+    }),
+    provinceNode("East Sepik", {
+      "Wewak District": ["Kreer", "Kaindi", "Boram", "Wirui"],
+      "Ambunti-Dreikikir District": ["Ambunti", "Pagwi", "Dreikikir"],
+      "Angoram District": ["Angoram", "Marienberg"],
+      "Maprik District": ["Maprik", "Yangoru"],
+      "Wosera-Gawi District": ["Wosera", "Gawi"],
+      "Yangoru-Saussia District": ["Yangoru", "Saussia"],
+    }),
+    provinceNode("West Sepik", {
+      "Vanimo-Green District": ["Vanimo", "Green River"],
+      "Aitape-Lumi District": ["Aitape", "Lumi"],
+      "Nuku District": ["Nuku", "Yangkok"],
+      "Telefomin District": ["Telefomin", "Oksapmin"],
+    }),
+    provinceNode("East New Britain", {
+      "Rabaul District": ["Rabaul", "Kokopo outskirts"],
+      "Gazelle District": ["Kerevat", "Vunadidir"],
+      "Kokopo District": ["Kokopo", "Takubar"],
+      "Pomio District": ["Pomio", "Palmalmal"],
+    }),
+    provinceNode("West New Britain", {
+      "Kimbe District": ["Kimbe", "Buvussi"],
+      "Talasea District": ["Talasea", "Hoskins"],
+      "Kandrian-Gloucester District": ["Kandrian", "Gloucester"],
+    }),
+    provinceNode("New Ireland", {
+      "Kavieng District": ["Kavieng", "Bagail"],
+      "Namatanai District": ["Namatanai", "Konos"],
+    }),
+    provinceNode("Manus", {
+      "Manus District": ["Lorengau", "Lombrum"],
+    }),
+    provinceNode("Milne Bay", {
+      "Alotau District": ["Alotau", "Gurney"],
+      "Esa'ala District": ["Esa'ala", "Dobuan"],
+      "Kiriwina-Goodenough District": ["Losuia", "Bolubolu"],
+      "Samarai-Murua District": ["Samarai", "Misima"],
+    }),
+    provinceNode("Northern (Oro)", {
+      "Popondetta District": ["Popondetta", "Kokoda"],
+      "Sohe District": ["Kokoda", "Ioma"],
+      "Ijivitari District": ["Tufi", "Wanigela"],
+    }),
+    provinceNode("Gulf", {
+      "Kerema District": ["Kerema", "Malalaua"],
+      "Kikori District": ["Kikori", "Baimuru"],
+    }),
+    provinceNode("Western", {
+      "North Fly District": ["Kiunga", "Tabubil"],
+      "Middle Fly District": ["Balimo", "Lake Murray"],
+      "South Fly District": ["Daru", "Oriomo"],
+    }),
+    provinceNode("Southern Highlands", {
+      "Mendi-Munihu District": ["Mendi", "Kagua"],
+      "Imbonggu District": ["Ialibu", "Pangia"],
+      "Kagua-Erave District": ["Kagua", "Erave"],
+      "Nipa-Kutubu District": ["Nipa", "Lake Kutubu"],
+    }),
+    provinceNode("Hela", {
+      "Tari-Pori District": ["Tari", "Pori"],
+      "Komo-Magarima District": ["Komo", "Magarima"],
+      "Koroba-Kopiago District": ["Koroba", "Kopiago"],
+    }),
+    provinceNode("Enga", {
+      "Wabag District": ["Wabag", "Kepelam"],
+      "Wapenamanda District": ["Wapenamanda", "Tsak"],
+      "Kompiam District": ["Kompiam", "Ambum"],
+      "Lagaip-Porgera District": ["Laiagam", "Porgera"],
+      "Kandep District": ["Kandep", "Mariant"],
+    }),
+    provinceNode("Western Highlands", {
+      "Mount Hagen District": ["Mount Hagen", "Kagamuga"],
+      "Mul-Baiyer District": ["Baiyer", "Mul"],
+      "Dei District": ["Dei", "Kotna"],
+      "Tambul-Nebilyer District": ["Tambul", "Nebilyer"],
+    }),
+    provinceNode("Jiwaka", {
+      "Anglimp-South Wahgi District": ["Minj", "Banz"],
+      "Jimi District": ["Tabibuga", "Kol"],
+      "North Wahgi District": ["Kudjip", "Nondugl"],
+    }),
+    provinceNode("Chimbu (Simbu)", {
+      "Kundiawa-Gembogl District": ["Kundiawa", "Gembogl"],
+      "Chuave District": ["Chuave", "Elimbari"],
+      "Gumine District": ["Gumine", "Dirima"],
+      "Kerowagi District": ["Kerowagi", "Kup"],
+      "Sinasina-Yonggomugl District": ["Sinasina", "Yonggomugl"],
+      "Karimui-Nomane District": ["Karimui", "Nomane"],
+    }),
+    provinceNode("Eastern Highlands", {
+      "Goroka District": ["Goroka", "Asaro"],
+      "Daulo District": ["Daulo", "Watabung"],
+      "Unggai-Bena District": ["Bena", "Unggai"],
+      "Kainantu District": ["Kainantu", "Yonki"],
+      "Henganofi District": ["Henganofi", "Fayantina"],
+      "Lufa District": ["Lufa", "Mt Michael"],
+      "Obura-Wonenara District": ["Obura", "Wonenara"],
+      "Okapa District": ["Okapa", "Auyana"],
+    }),
+  ],
+};
+
+export const OFFLINE_GEO_COUNTRIES = [
+  { value: OFFLINE_GEO_PNG.value, viewValue: OFFLINE_GEO_PNG.viewValue },
+];
+
+/** Lookup helpers — same contract as fetchGeoCountries / fetchGeoOptions. */
+export function offlineGeoCountries() {
+  return OFFLINE_GEO_COUNTRIES.map((c) => ({ ...c }));
+}
+
+export function offlineGeoOptions(type, parentId, hintName = "") {
+  const t = String(type || "");
+  const pid = String(parentId || "");
+  const hint = String(hintName || "").trim().toLowerCase();
+
+  if (t === "Country" || pid === "id") {
+    return offlineGeoCountries();
+  }
+
+  if (t === "Province") {
+    // Any PNG country id (API UUID or offline-*) → full province list
+    return OFFLINE_GEO_PNG.provinces.map(({ value, viewValue }) => ({ value, viewValue }));
+  }
+
+  if (t === "District") {
+    const prov =
+      OFFLINE_GEO_PNG.provinces.find((p) => p.value === pid) ||
+      (hint
+        ? OFFLINE_GEO_PNG.provinces.find((p) => p.viewValue.toLowerCase() === hint)
+        : null);
+    return (prov?.districts || []).map(({ value, viewValue }) => ({ value, viewValue }));
+  }
+
+  if (t === "Village") {
+    for (const prov of OFFLINE_GEO_PNG.provinces) {
+      const dist =
+        (prov.districts || []).find((d) => d.value === pid) ||
+        (hint
+          ? (prov.districts || []).find((d) => d.viewValue.toLowerCase() === hint)
+          : null);
+      if (dist) {
+        return (dist.villages || []).map(({ value, viewValue }) => ({ value, viewValue }));
+      }
+    }
+    return [];
+  }
+
+  return [];
+}
+
 export const MODE_OF_DETECTION = ["Voluntary", "Referral", "Household contact", "MDA", "Special project", "Others"];
 export const REFERRED_BY = ["Family member", "Village health worker", "Former patient", "Volunteer"];
 export const CASE_TYPES = ["New", "Relapse", "Transfer in"];
@@ -42,38 +254,6 @@ export const RELATIONSHIPS = ["Spouse", "Parent", "Child", "Sibling", "Grandpare
 export const TEST_RESULT = ["Positive", "Negative", "Pending", "Not done"];
 export const DETECT_RESULT = ["Detected", "Not detected", "Pending", "Not done"];
 export const VISIT_TYPES_DEFAULT = ["Initial encounter", "Follow-up", "Treatment review", "Home visit", "Outreach / community screening", "Referral visit"];
-
-const pastMedical = [
-  { k: "conditions", label: "Do you have any other medical problems?", type: "checks", options: ["TB", "HIV", "Diabetes", "Cancer", "Don't know", "None"] },
-  { k: "medications", label: "What medications are you on?", type: "lines", placeholder: "Medication name" },
-  { k: "allergy", label: "Are you allergic to any drugs?", type: "yesno" },
-  { k: "allergyDetail", label: "Allergy details", type: "textarea", when: ["allergy", "Yes"] },
-];
-
-const commonHpc = [
-  { k: "onsetHow", label: "How did it start?", type: "textarea" },
-  { k: "onsetWhen", label: "When did it start?", type: "duration" },
-  { k: "tookMeds", label: "Did you take any medication?", type: "yesno" },
-  { k: "medsTaken", label: "Medication taken", type: "lines", when: ["tookMeds", "Yes"], placeholder: "Medication name" },
-  { k: "firstTime", label: "Is this the first time?", type: "yesno" },
-  { k: "communitySimilar", label: "Anyone in the community with similar symptoms?", type: "yesno" },
-];
-
-const commonInterrogation = [
-  { k: "jointPain", label: "Do you have pain in your joints / bone?", type: "yesno" },
-  { k: "fever", label: "Do you have any fever?", type: "choice", options: ["High", "Moderate", "Low", "No"] },
-  { k: "chills", label: "Do you have chills?", type: "yesno" },
-  { k: "trauma", label: "Do you have history of trauma?", type: "yesno" },
-  { k: "lymphadenopathy", label: "Do you have lymphadenopathy?", type: "yesno" },
-];
-
-const caseDetails = [
-  { k: "mode", label: "Mode of detection", type: "choice", options: MODE_OF_DETECTION },
-  { k: "referredBy", label: "Referred by", type: "choice", options: REFERRED_BY, when: ["mode", "Referral"] },
-  { k: "caseType", label: "Case type", type: "choice", options: CASE_TYPES },
-  { k: "height", label: "Height (cms)", type: "number" },
-  { k: "weight", label: "Weight (kgs)", type: "number" },
-];
 
 const SCABIES_REFERRED_BY = [...REFERRED_BY, "Others"];
 const SCABIES_CASE_TYPES = [...CASE_TYPES, "Chronic/Persistent"];
@@ -807,6 +987,11 @@ export const DISEASE_SPECS = {
 
 export const SPEC_LIST = Object.values(DISEASE_SPECS);
 
+/** Live list — prefer this after form configs are loaded from ApplicationConfig. */
+export function getSpecList() {
+  return Object.values(DISEASE_SPECS);
+}
+
 /** Disease assessment tabs come from a started encounter, never from registration or suspect screening alone. */
 export const assessmentSpecs = (patientId, { encounters = [] } = {}) => {
   const ids = new Set();
@@ -814,7 +999,7 @@ export const assessmentSpecs = (patientId, { encounters = [] } = {}) => {
     if (patientId && e.patientId && e.patientId !== patientId) continue;
     if (e.disease && DISEASE_SPECS[e.disease]) ids.add(e.disease);
   }
-  return SPEC_LIST.filter((d) => ids.has(d.id));
+  return getSpecList().filter((d) => ids.has(d.id));
 };
 
 /** Suspected NTDs from screening — used to start an assessment, not to show disease chips. */
@@ -824,7 +1009,7 @@ export const suspectedSpecs = (patientId, { suspects = [] } = {}) => {
     if (patientId && s.patientId && s.patientId !== patientId) continue;
     if (s.suspect && DISEASE_SPECS[s.suspect]) ids.add(s.suspect);
   }
-  return SPEC_LIST.filter((d) => ids.has(d.id));
+  return getSpecList().filter((d) => ids.has(d.id));
 };
 
 /** Parse app dates; legacy datetimes without TZ were UTC from toISOString().slice */
