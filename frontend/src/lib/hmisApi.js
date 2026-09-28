@@ -19,10 +19,19 @@ function apiError(err, fallback) {
 
 /**
  * Login via BFF → admin facility resolve → tri-authentication.
- * BFF forwards httpOnly `bearer` cookie for later HMIS calls.
+ * Sends page hostname as facilityUrl (same as Apex) so production tenants
+ * resolve dynamically; localhost falls back to BFF FACILITY_URL env.
  */
 export async function loginWithTriAuth(email, password) {
-  const loginRes = await http.post("/api/auth/login", { email, password });
+  const facilityUrl =
+    typeof window !== "undefined" && window.location?.hostname
+      ? window.location.hostname
+      : "";
+  const loginRes = await http.post("/api/auth/login", {
+    email,
+    password,
+    ...(facilityUrl ? { facilityUrl } : {}),
+  });
   if (!loginRes.data?.status) {
     throw new Error(loginRes.data?.message || "Login failed");
   }
