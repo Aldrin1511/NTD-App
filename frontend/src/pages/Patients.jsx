@@ -14,6 +14,7 @@ import WhatsAppIcon from "@/components/WhatsAppIcon";
 import StatusChips, { PendingSyncChip, EncounterStatusChip, patientStatusRecords } from "@/components/StatusChips";
 import { buildVisitSummaryPrintHtml, buildPatientEncountersPrintHtml, featureRowsFromVisits, printHtmlDocument } from "@/lib/visitSummaryPrint";
 import { toast } from "sonner";
+import { MAL_ID, malLastVisitLabel } from "@/mock/malnutrition";
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -605,7 +606,12 @@ export default function Patients() {
                   {patientAgeLabel(p)} · {p.sex || p.gender || "—"} · {p.weight != null && p.weight !== "" ? `${p.weight}kg` : "—"} · Date of Birth {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {[p.village, p.district].filter(Boolean).join(", ") || "—"}
                 </p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {p.patientCode ? `PID ${p.patientCode}` : "PID —"} · Last encounter {lastEncounterDate ? fmtDate(lastEncounterDate) : "—"}
+                  {p.patientCode ? `PID ${p.patientCode}` : "PID —"} · Last encounter{" "}
+                  {(() => {
+                    const malVisits = encs.filter((e) => e.disease === MAL_ID);
+                    if (malVisits.length) return malLastVisitLabel(malVisits);
+                    return lastEncounterDate ? fmtDate(lastEncounterDate) : "—";
+                  })()}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">

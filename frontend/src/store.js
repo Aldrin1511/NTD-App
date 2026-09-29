@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
+import { DEFAULT_SCHOOLS, DEFAULT_DONORS } from "@/mock/schoolhealth";
 import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, upsertPatientDiseaseStatus, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs } from "@/lib/hmisApi";
 import { applyNtdFormConfigs } from "@/lib/ntdFormConfig";
 import {
@@ -173,6 +174,8 @@ const initial = () => ({
     { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "STAT", durationUnit: "BOLUS", drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
     { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "STAT", duration: 1, durationUnit: "Day(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
+  schools: DEFAULT_SCHOOLS,
+  donors: DEFAULT_DONORS,
   schoolHealth: [],
   currentUserId: null,
   branding: {
@@ -561,6 +564,18 @@ export function StoreProvider({ children }) {
       setFeatureConfig: (condition, features) =>
         patch((s) => ({ settings: { ...s.settings, featureConfig: { ...(s.settings.featureConfig || {}), [condition]: features } } })),
       // ---- School Health ----
+      addSchool: (school) =>
+        patch((s) => {
+          const next = (s.schools || []).reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, "")) || 0), 0) + 1;
+          return { schools: [...(s.schools || []), { id: `SCH-${String(next).padStart(3, "0")}`, ...school }] };
+        }),
+      removeSchool: (id) => patch((s) => ({ schools: (s.schools || []).filter((x) => x.id !== id) })),
+      addDonor: (donor) =>
+        patch((s) => {
+          const next = (s.donors || []).reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, "")) || 0), 0) + 1;
+          return { donors: [...(s.donors || []), { id: `DON-${String(next).padStart(3, "0")}`, ...donor }] };
+        }),
+      removeDonor: (id) => patch((s) => ({ donors: (s.donors || []).filter((x) => x.id !== id) })),
       addSchoolVisit: (v) => {
         const rec = { id: `SCH-${String(Math.floor(Math.random() * 900000) + 100000)}`, createdBy: state.currentUserId, worker: state.users.find((u) => u.id === state.currentUserId)?.name, children: [], report: null, status: v.status || "Planned", ...v };
         const nextPending = queuedCount(state) + 1;

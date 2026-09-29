@@ -35,11 +35,11 @@ const MUAC = [[3, 13], [6, 14], [12, 15], [24, 15.5], [36, 16], [60, 16.5]];
 const CV = { weight: 0.12, height: 0.038, hc: 0.028, bmi: 0.13, muac: 0.08 };
 
 export const GROWTH_METRICS = [
-  { k: "weight", label: "Weight", unit: "kg", min: 1, max: 90, step: 0.1, minAgeMo: 0, maxAgeMo: 216 },
-  { k: "height", label: "Height / Length", unit: "cm", min: 40, max: 190, step: 0.5, minAgeMo: 0, maxAgeMo: 216 },
-  { k: "hc", label: "Head circumference", unit: "cm", min: 30, max: 55, step: 0.2, minAgeMo: 0, maxAgeMo: 60 },
-  { k: "muac", label: "MUAC", unit: "cm", min: 7, max: 25, step: 0.1, minAgeMo: 3, maxAgeMo: 60 },
-  { k: "bmi", label: "BMI", unit: "kg/m²", min: 10, max: 35, step: 0.1, minAgeMo: 24, maxAgeMo: 216, derived: true },
+  { k: "height", label: "Length", unit: "cm", forAge: "Height For Age", min: 40, max: 190, step: 0.1, minAgeMo: 0, maxAgeMo: 216 },
+  { k: "weight", label: "Weight", unit: "kg", forAge: "Weight For Age", min: 1, max: 90, step: 0.1, minAgeMo: 0, maxAgeMo: 216 },
+  { k: "bmi", label: "BMI", unit: "kg/m²", forAge: "BMI For Age", min: 10, max: 35, step: 0.1, minAgeMo: 24, maxAgeMo: 216, derived: true },
+  { k: "hc", label: "Head Circumference", unit: "cm", forAge: "For Age", min: 30, max: 55, step: 0.1, minAgeMo: 0, maxAgeMo: 60 },
+  { k: "muac", label: "Arm Circumference", unit: "cm", forAge: "For Age", min: 7, max: 25, step: 0.1, minAgeMo: 3, maxAgeMo: 60 },
 ];
 
 export const metricApplies = (metric, ageMonths) => {
@@ -111,13 +111,30 @@ export const compute = ({ metric, value, ageMonths, sex, standard = "WHO", direc
   return { z, percentile, status: statusForZ(z, direction), median: Math.round(med * 10) / 10, sd: Math.round(sd * 100) / 100 };
 };
 
-/** Reference series for a graph: median, ±2SD across an age range. */
-export const referenceSeries = (metric, sex, standard, fromMo, toMo, stepMo = 6) => {
+/** Approximate z-scores for common growth-chart percentiles. */
+const PCT_Z = { p3: -1.88, p15: -1.04, p50: 0, p85: 1.04, p97: 1.88 };
+
+/** Reference series for a graph: percentile curves across age in months. */
+export const referenceSeries = (metric, sex, standard, fromMo, toMo, stepMo = 1) => {
   const out = [];
-  for (let a = fromMo; a <= toMo; a += stepMo) {
+  const start = Math.max(0, Math.floor(fromMo));
+  const end = Math.max(start, Math.ceil(toMo));
+  for (let a = start; a <= end; a += stepMo) {
     const med = medianFor(metric, a, sex, standard);
     const sd = sdFor(metric, a, sex, standard);
-    out.push({ age: Math.round((a / 12) * 10) / 10, median: Math.round(med * 10) / 10, p2: Math.round((med + 2 * sd) * 10) / 10, m2: Math.round((med - 2 * sd) * 10) / 10 });
+    const round = (v) => Math.round(v * 10) / 10;
+    out.push({
+      months: a,
+      age: Math.round((a / 12) * 10) / 10,
+      median: round(med),
+      p2: round(med + 2 * sd),
+      m2: round(med - 2 * sd),
+      p3: round(med + PCT_Z.p3 * sd),
+      p15: round(med + PCT_Z.p15 * sd),
+      p50: round(med),
+      p85: round(med + PCT_Z.p85 * sd),
+      p97: round(med + PCT_Z.p97 * sd),
+    });
   }
   return out;
 };
