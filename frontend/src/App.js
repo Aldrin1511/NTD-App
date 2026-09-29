@@ -13,7 +13,8 @@ import WellBabyEncounter from "@/pages/WellBabyEncounter";
 import MalnutritionEncounter from "@/pages/MalnutritionEncounter";
 import SchoolHealth, { SchoolHealthVisit } from "@/pages/SchoolHealth";
 import SuspectScreen from "@/pages/SuspectScreen";
-import Admin from "@/pages/Admin";
+// Admin module hidden for now — re-enable import + route when ready
+// import Admin from "@/pages/Admin";
 import Sync from "@/pages/Sync";
 
 const Guard = ({ children }) => {
@@ -67,7 +68,8 @@ function Shell() {
       <Route path="/school-health" element={<Guard><SchoolHealth /></Guard>} />
       <Route path="/school-health/:visitId" element={<Guard><SchoolHealthVisit /></Guard>} />
       <Route path="/patients/:id/disease/:diseaseId" element={<Guard><PatientRecord /></Guard>} />
-      <Route path="/admin" element={<Guard><Admin /></Guard>} />
+      {/* Admin hidden for now — redirect to patients */}
+      <Route path="/admin" element={<Guard><Navigate to="/patients" replace /></Guard>} />
       <Route path="/sync" element={<Guard><Sync /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

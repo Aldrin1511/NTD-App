@@ -21,6 +21,7 @@ export default function PatientNew() {
     authSession,
     patientRegisterDraft,
     setPatientRegisterDraft,
+    canAccessDisease,
   } = useStore();
   const navigate = useNavigate();
   const existing = id ? patients.find((x) => x.id === id) : null;
@@ -175,9 +176,11 @@ export default function PatientNew() {
               </Button>
             ) : (
               <>
-                <Button className="h-12 w-full text-base" data-testid="save-and-encounter-btn" disabled={!dirty || saving} onClick={() => save(true)}>
-                  {saving ? "Registering…" : "Save & start suspect screening"}
-                </Button>
+                {canAccessDisease("suspect") && (
+                  <Button className="h-12 w-full text-base" data-testid="save-and-encounter-btn" disabled={!dirty || saving} onClick={() => save(true)}>
+                    {saving ? "Registering…" : "Save & start suspect screening"}
+                  </Button>
+                )}
                 <Button variant="outline" className="h-12 w-full text-base" data-testid="save-patient-btn" disabled={!dirty || saving} onClick={() => save(false)}>
                   {saving ? "Registering…" : "Save patient only"}
                 </Button>

@@ -98,9 +98,11 @@ function applySessionUser(session, emailHint) {
     ? session.allowedDiseases.map(String)
     : [];
   writeCachedAllowedDiseases(session.userId, allowedDiseases);
+  const displayName = String(session.displayName || "").trim();
   return {
     id: session.userId || `u-${Date.now()}`,
-    name: (email.split("@")[0] || "user").trim() || "user",
+    name: displayName || (email.split("@")[0] || "user").trim() || "user",
+    displayName: displayName || undefined,
     email: email || session.userId,
     role: "Health Worker",
     scope: "all",
@@ -494,9 +496,11 @@ export function StoreProvider({ children }) {
           writeCachedAllowedDiseases(session.userId, allowedDiseases);
 
           if (!localUser) {
+            const displayName = String(session.displayName || "").trim();
             localUser = {
               id: session.userId || `u-${Date.now()}`,
-              name: email.split("@")[0],
+              name: displayName || email.split("@")[0],
+              displayName: displayName || undefined,
               email,
               role: "Health Worker",
               scope: "all",
@@ -506,7 +510,13 @@ export function StoreProvider({ children }) {
               allowedDiseases,
             };
           } else {
-            localUser = { ...localUser, allowedDiseases, facilityId: session.facilityId || localUser.facilityId };
+            const displayName = String(session.displayName || localUser.displayName || "").trim();
+            localUser = {
+              ...localUser,
+              allowedDiseases,
+              facilityId: session.facilityId || localUser.facilityId,
+              ...(displayName ? { name: displayName, displayName } : {}),
+            };
           }
 
           // Fetch registered NTD patients for this facility (portal-be Mongo mirror).

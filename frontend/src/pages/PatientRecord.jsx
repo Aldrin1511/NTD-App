@@ -30,6 +30,8 @@ import { REACTION_COLS, REACTION_GRID } from "@/components/LeprosyReaction";
 import AntenatalDashboard from "@/components/AntenatalDashboard";
 import WellBabyDashboard from "@/components/WellBabyDashboard";
 import MalnutritionDashboard from "@/components/MalnutritionDashboard";
+import { useAppointmentDateGate } from "@/components/AppointmentDatePrompt";
+import { visitDay } from "@/lib/appointmentDate";
 import { ANTENATAL_ID, ANTENATAL_NAME } from "@/mock/antenatal";
 import { WELLBABY_ID, WELLBABY_NAME } from "@/mock/wellbaby";
 import { MAL_ID, MAL_NAME } from "@/mock/malnutrition";
@@ -1187,7 +1189,7 @@ export default function PatientRecord() {
   const [searchParams] = useSearchParams();
   const backTo = location.state?.from || "/patients";
   const withFrom = (opts = {}) => (location.state?.from ? { ...opts, state: { from: location.state.from } } : opts);
-  const { patients, encounters, user, suspects, facilities, settings, branding, startEpisode, addEncounter, syncPatientEpisodes, syncPatientSuspects, syncPatientVisitPhi, loadLocations, authSession, canAccessDisease, online } = useStore();
+  const { patients, encounters, user, suspects, facilities, settings, branding, startEpisode, addEncounter, saveEncounter, syncPatientEpisodes, syncPatientSuspects, syncPatientVisitPhi, loadLocations, authSession, canAccessDisease, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const [tab, setTab] = useState(() => diseaseId || searchParams.get("tab") || "");
   const [lhs, setLhs] = useState(true);
@@ -1212,6 +1214,7 @@ export default function PatientRecord() {
   const [starting, setStarting] = useState(false);
   const [printPreviewHtml, setPrintPreviewHtml] = useState("");
   const [printAfterHydrate, setPrintAfterHydrate] = useState(false);
+  const { gate: gateAppointmentDate, dialog: appointmentDateDialog } = useAppointmentDateGate();
   const pendingOpenPrint = useRef(Boolean(location.state?.openPrint));
   const pendingSelectEpisodeId = useRef(String(location.state?.episodeId || ""));
   const pendingSelectVisitId = useRef(String(location.state?.visitId || ""));
@@ -1353,14 +1356,27 @@ export default function PatientRecord() {
     return ids;
   }, [encs, p?.episodeId]);
 
-  const episodeGoToOptions = useMemo(
-    () => [
-      "Suspect screening",
+  const episodeGoToOptions = useMemo(() => {
+    const opts = [];
+    if (canAccessDisease("suspect")) opts.push("Suspect screening");
+    opts.push(
       ...SPEC_LIST.filter((s) => canAccessDisease(s.id) && !activeDiseaseIds.has(s.id)).map((s) => s.name),
-      ...EXTRA_CONDITIONS.filter((c) => canAccessDisease(c.id) && !activeDiseaseIds.has(c.id)).map((c) => c.name),
-    ],
-    [activeDiseaseIds, canAccessDisease]
-  );
+      ...EXTRA_CONDITIONS.filter((c) => canAccessDisease(c.id) && !activeDiseaseIds.has(c.id)).map((c) => c.name)
+    );
+    return opts;
+  }, [activeDiseaseIds, canAccessDisease]);
+
+  /** Map Go-to label → disease id (empty string = Suspect screening). */
+  const goToLabelToDiseaseId = (label) => {
+    if (!label || label === "Suspect screening") return "";
+    return (
+      EXTRA_CONDITIONS.find((c) => c.name === label)?.id ||
+      SPEC_LIST.find((s) => s.name === label)?.id ||
+      ""
+    );
+  };
+
+  const defaultGoToDiseaseId = goToLabelToDiseaseId(episodeGoToOptions[0] || "");
 
   const pendingVisits = useMemo(
     () =>
@@ -1425,6 +1441,23 @@ export default function PatientRecord() {
     }));
   }, [enc.show, enc.mode, enc.facility, enc.locationId, locationFacilities]);
 
+  // Keep Go to on a valid option; default to the first available (Suspect screening when granted).
+  useEffect(() => {
+    if (!enc.show || enc.mode === "encounter") return;
+    if (!episodeGoToOptions.length) return;
+    const label = enc.disease
+      ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease)?.name ||
+        DISEASE_SPECS[enc.disease]?.name ||
+        ""
+      : canAccessDisease("suspect")
+        ? "Suspect screening"
+        : "";
+    if (label && episodeGoToOptions.includes(label)) return;
+    const nextId = goToLabelToDiseaseId(episodeGoToOptions[0]);
+    if (String(enc.disease || "") === String(nextId || "")) return;
+    setEnc((s) => ({ ...s, disease: nextId }));
+  }, [enc.show, enc.mode, enc.disease, episodeGoToOptions, canAccessDisease]);
+
   const printVisitSummaryRef = useRef(() => {});
 
   // Appointments → Print: open preview once episode/PHI are ready
@@ -1436,24 +1469,27 @@ export default function PatientRecord() {
 
   if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate(backTo)}>Back</Button></AppShell>;
 
-  const start = async () => {
+  const runStart = async (visitDate) => {
     if (enc.mode !== "encounter" && enc.disease && activeDiseaseIds.has(enc.disease)) {
       return toast.error("This disease already has an active episode — close it first or choose another");
     }
     if (enc.referral === "Yes" && (!enc.province || !enc.district)) return toast.error("Choose province and district for the referral");
     if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
     if (!enc.disease) {
+      if (!canAccessDisease("suspect")) {
+        return toast.error("Choose where to go — Suspect screening is not available for your access");
+      }
       // Suspect screening — navigate with visit context for HMIS save
       const locationId = enc.locationId || facilities.find((f) => f.name === enc.facility)?.id || "";
       const q = new URLSearchParams({
         fac: enc.facility || "",
         vt: enc.visitType || "",
         ref: enc.referral || "No",
-        date: enc.date || localISODate(),
+        date: visitDate || localISODate(),
         loc: locationId,
         new: String(Date.now()),
       });
-      setEnc({ ...enc, show: false });
+      setEnc({ ...enc, show: false, date: visitDate });
       navigate(`/patients/${p.id}/suspect?${q.toString()}`, withFrom());
       return;
     }
@@ -1472,7 +1508,7 @@ export default function PatientRecord() {
             visitType: enc.visitType,
             locationId,
             locationName: enc.facility,
-            visitDate: enc.date,
+            visitDate,
             referral: enc.referral,
             clinicianName: user?.name,
           });
@@ -1484,14 +1520,14 @@ export default function PatientRecord() {
             visitType: enc.visitType,
             locationId,
             locationName: enc.facility,
-            visitDate: enc.date,
+            visitDate,
             referral: enc.referral,
             clinicianName: user?.name,
           });
           toast.success(`${extra?.name || "Episode"} started`);
         }
         const visitId = result.visitId || result.encounter?.id;
-        setEnc({ ...enc, show: false, mode: "episode", recordId: "" });
+        setEnc({ ...enc, show: false, mode: "episode", recordId: "", date: visitDate });
         const q = new URLSearchParams({
           enc: String(visitId || ""),
           fac: enc.facility || "",
@@ -1519,7 +1555,7 @@ export default function PatientRecord() {
           visitType: enc.visitType,
           locationId,
           locationName: enc.facility,
-          visitDate: enc.date,
+          visitDate,
           referral: enc.referral,
           clinicianName: user?.name,
         });
@@ -1531,14 +1567,14 @@ export default function PatientRecord() {
           visitType: enc.visitType,
           locationId,
           locationName: enc.facility,
-          visitDate: enc.date,
+          visitDate,
           referral: enc.referral,
           clinicianName: user?.name,
         });
         toast.success(`${DISEASE_SPECS[enc.disease]?.name || "Episode"} started`);
       }
       const visitId = result.visitId || result.encounter?.id;
-      setEnc({ ...enc, show: false, mode: "episode", recordId: "" });
+      setEnc({ ...enc, show: false, mode: "episode", recordId: "", date: visitDate });
       navigate(
         `/patients/${p.id}/encounter/${enc.disease}?enc=${encodeURIComponent(visitId)}&fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}`,
         withFrom()
@@ -1550,8 +1586,43 @@ export default function PatientRecord() {
     }
   };
 
-  const openAddEncounter = () => {
-    if (!canEdit || !selectedEpisode) return;
+  const start = () => {
+    if (enc.mode !== "encounter" && enc.disease && activeDiseaseIds.has(enc.disease)) {
+      return toast.error("This disease already has an active episode — close it first or choose another");
+    }
+    if (enc.referral === "Yes" && (!enc.province || !enc.district)) return toast.error("Choose province and district for the referral");
+    if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
+    gateAppointmentDate(enc.date, (resolvedDate) => {
+      void runStart(resolvedDate);
+    });
+  };
+
+  const openPendingVisit = (v) => {
+    const dest = EXTRA_IDS.includes(v.disease)
+      ? (() => {
+          const extra = EXTRA_CONDITIONS.find((c) => c.id === v.disease);
+          const q = new URLSearchParams({
+            enc: String(v.id || ""),
+            fac: v.facility || "",
+            vt: v.type || "",
+            ref: v.referral || "No",
+          });
+          return `/patients/${p.id}/${extra?.route || "encounter"}?${q.toString()}`;
+        })()
+      : `/patients/${p.id}/encounter/${v.disease}?enc=${encodeURIComponent(v.id)}&fac=${encodeURIComponent(v.facility || "")}&vt=${encodeURIComponent(v.type || "")}&ref=${v.referral || "No"}`;
+    gateAppointmentDate(v.date, async (resolvedDate) => {
+      if (resolvedDate && visitDay(v.date) !== resolvedDate && typeof saveEncounter === "function") {
+        try {
+          await saveEncounter({ ...v, date: `${resolvedDate}T12:00:00` });
+        } catch (err) {
+          console.warn("Could not update visit date", err);
+        }
+      }
+      navigate(dest, withFrom());
+    });
+  };
+
+  const openAddEncounter = () => {    if (!canEdit || !selectedEpisode) return;
     const seed = [...(selectedEpisode.visits || [])]
       .slice()
       .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))[0]
@@ -1677,7 +1748,7 @@ export default function PatientRecord() {
             show: true,
             mode: "episode",
             recordId: "",
-            disease: "",
+            disease: defaultGoToDiseaseId,
           })
         }
       >
@@ -2053,12 +2124,7 @@ export default function PatientRecord() {
                     <Button
                       className="h-11 shrink-0"
                       data-testid={`start-pending-visit-${v.id}`}
-                      onClick={() =>
-                        navigate(
-                          `/patients/${p.id}/encounter/${v.disease}?enc=${encodeURIComponent(v.id)}&fac=${encodeURIComponent(v.facility || "")}&vt=${encodeURIComponent(v.type || "")}&ref=${v.referral || "No"}`,
-                          withFrom()
-                        )
-                      }
+                      onClick={() => openPendingVisit(v)}
                     >
                       Start visit
                     </Button>
@@ -2373,17 +2439,16 @@ export default function PatientRecord() {
                   : enc.disease && !activeDiseaseIds.has(enc.disease)
                     ? EXTRA_IDS.includes(enc.disease)
                       ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease)?.name
-                      : DISEASE_SPECS[enc.disease]?.name || "Suspect screening"
-                    : "Suspect screening"
+                      : DISEASE_SPECS[enc.disease]?.name || episodeGoToOptions[0] || ""
+                    : !enc.disease && canAccessDisease("suspect") && episodeGoToOptions[0] === "Suspect screening"
+                      ? "Suspect screening"
+                      : episodeGoToOptions[0] || ""
               }
               onChange={(v) => {
                 if (enc.mode === "encounter") return;
                 setEnc({
                   ...enc,
-                  disease:
-                    EXTRA_CONDITIONS.find((c) => c.name === v)?.id ||
-                    SPEC_LIST.find((s) => s.name === v)?.id ||
-                    "",
+                  disease: goToLabelToDiseaseId(v),
                 });
               }}
               testid="encounter-target-select"
@@ -2450,6 +2515,8 @@ export default function PatientRecord() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {appointmentDateDialog}
     </AppShell>
   );
 }

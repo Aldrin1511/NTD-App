@@ -4,7 +4,7 @@ import { useStore } from "@/store";
 import {
   Activity,
   Users,
-  Shield,
+  // Shield, // Admin nav hidden for now
   CloudOff,
   RefreshCw,
   CheckCircle2,
@@ -23,7 +23,7 @@ const nav = [
   { to: "/appointments", label: "Appointments", icon: CalendarDays, testid: "nav-appointments" },
   { to: "/school-health", label: "School Health", icon: School, testid: "nav-school-health" },
   { to: "/sync", label: "Sync", icon: RefreshCw, testid: "nav-sync" },
-  { to: "/admin", label: "Admin", icon: Shield, testid: "nav-admin" },
+  // Admin hidden for now — re-enable when ready: { to: "/admin", label: "Admin", icon: Shield, testid: "nav-admin" },
 ];
 
 export const SyncChip = () => {
@@ -164,7 +164,7 @@ export default function AppShell({ children, title, subtitle, action }) {
           <div className="ml-auto flex items-center gap-2">
             <SyncChip />
             <span className="hidden text-right sm:block">
-              <span className="block text-sm font-semibold leading-tight">{user?.name}</span>
+              <span className="block text-sm font-semibold leading-tight">{user?.displayName || user?.name}</span>
               <span className="block text-[11px] text-muted-foreground">{user?.role}</span>
             </span>
             <Button

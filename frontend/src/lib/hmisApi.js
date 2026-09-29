@@ -43,6 +43,7 @@ export async function loginWithTriAuth(email, password) {
     clientId: data.clientId,
     facilityName: data.facilityName,
     email: data.email || email,
+    displayName: data.displayName || "",
     allowedDiseases: Array.isArray(data.allowedDiseases)
       ? data.allowedDiseases.map(String)
       : [],
@@ -66,6 +67,7 @@ export async function fetchAuthSession() {
       clientId: data.clientId || "",
       facilityName: data.facilityName || "",
       email: data.email || "",
+      displayName: data.displayName || "",
       allowedDiseases: Array.isArray(data.allowedDiseases)
         ? data.allowedDiseases.map(String)
         : [],

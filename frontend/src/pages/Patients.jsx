@@ -15,6 +15,16 @@ import StatusChips, { PendingSyncChip, EncounterStatusChip, patientStatusRecords
 import { buildVisitSummaryPrintHtml, buildPatientEncountersPrintHtml, featureRowsFromVisits, printHtmlDocument } from "@/lib/visitSummaryPrint";
 import { toast } from "sonner";
 import { MAL_ID, malLastVisitLabel } from "@/mock/malnutrition";
+import { ANTENATAL_ID } from "@/mock/antenatal";
+import { WELLBABY_ID } from "@/mock/wellbaby";
+import { useAppointmentDateGate } from "@/components/AppointmentDatePrompt";
+import { visitDay } from "@/lib/appointmentDate";
+
+const EXTRA_ROUTES = {
+  [ANTENATAL_ID]: "antenatal",
+  [WELLBABY_ID]: "wellbaby",
+  [MAL_ID]: "malnutrition",
+};
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -43,10 +53,11 @@ const shift = (period, anchor, dir) => {
 };
 
 export default function Patients() {
-  const { visiblePatients, users, encounters, settings, suspects, loadPatients, loadAppointments, syncPatientVisitPhi, syncPatientEpisodes, branding, user, authSession } = useStore();
+  const { visiblePatients, users, encounters, settings, suspects, loadPatients, loadAppointments, syncPatientVisitPhi, syncPatientEpisodes, saveEncounter, branding, user, authSession } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
   const view = location.pathname.startsWith("/appointments") ? "encounter" : "patient";
+  const { gate: gateAppointmentDate, dialog: appointmentDateDialog } = useAppointmentDateGate();
   const [q, setQ] = useState("");
   const [village, setVillage] = useState("");
   const [status, setStatus] = useState("");
@@ -275,15 +286,47 @@ export default function Patients() {
                   visitId: e.visitId || e.id || "",
                 },
               };
-              if (visitSaved && e.disease) {
-                navigate(`/patients/${pt.id}/disease/${e.disease}`, fromAppts);
-                return;
-              }
+              const go = async (resolvedDate) => {
+                if (
+                  !visitSaved &&
+                  resolvedDate &&
+                  visitDay(e.date) !== resolvedDate &&
+                  typeof saveEncounter === "function"
+                ) {
+                  try {
+                    await saveEncounter({ ...e, date: `${resolvedDate}T12:00:00` });
+                  } catch (err) {
+                    console.warn("Could not update appointment date", err);
+                  }
+                }
+                if (visitSaved && e.disease) {
+                  navigate(`/patients/${pt.id}/disease/${e.disease}`, fromAppts);
+                  return;
+                }
+                if (visitSaved) {
+                  navigate(`/patients/${pt.id}`, fromAppts);
+                  return;
+                }
+                const extraRoute = EXTRA_ROUTES[e.disease];
+                if (extraRoute) {
+                  const q = new URLSearchParams({
+                    enc: String(e.id || ""),
+                    fac: e.facility || "",
+                    vt: e.type || "",
+                    ref: e.referral || "No",
+                  });
+                  navigate(`/patients/${pt.id}/${extraRoute}?${q.toString()}`, fromAppts);
+                  return;
+                }
+                navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${encodeURIComponent(e.id)}`, fromAppts);
+              };
               if (visitSaved) {
-                navigate(`/patients/${pt.id}`, fromAppts);
+                void go(visitDay(e.date));
                 return;
               }
-              navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${encodeURIComponent(e.id)}`, fromAppts);
+              gateAppointmentDate(e.date, (resolvedDate) => {
+                void go(resolvedDate);
+              });
             };
             const printAppointment = async (ev) => {
               ev.preventDefault();
@@ -701,6 +744,7 @@ export default function Patients() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {appointmentDateDialog}
     </AppShell>
   );
 }
