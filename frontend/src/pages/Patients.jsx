@@ -267,7 +267,13 @@ export default function Patients() {
             if (!pt) return null;
             const visitSaved = e.pendingStart === false || e.complete === true || e.status === "Complete";
             const openAppointment = () => {
-              const fromAppts = { state: { from: "/appointments" } };
+              const fromAppts = {
+                state: {
+                  from: "/appointments",
+                  episodeId: e.recordId || e.episodeId || "",
+                  visitId: e.visitId || e.id || "",
+                },
+              };
               if (visitSaved && e.disease) {
                 navigate(`/patients/${pt.id}/disease/${e.disease}`, fromAppts);
                 return;
@@ -276,7 +282,7 @@ export default function Patients() {
                 navigate(`/patients/${pt.id}`, fromAppts);
                 return;
               }
-              navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${e.id}`, fromAppts);
+              navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${encodeURIComponent(e.id)}`, fromAppts);
             };
             const printAppointment = async (ev) => {
               ev.preventDefault();
@@ -455,6 +461,14 @@ export default function Patients() {
           const encs = encounters.filter((e) => e.patientId === p.id);
           const unsynced = encs.some((e) => !e.synced);
           const lastEnc = [...encs].sort((a, b) => b.date.localeCompare(a.date))[0];
+          const lastEncounterDate =
+            lastEnc?.date ||
+            p.lastEncounter ||
+            [...(p.diseaseStatuses || [])]
+              .map((s) => s.lastEncounter)
+              .filter(Boolean)
+              .sort((a, b) => String(b).localeCompare(String(a)))[0] ||
+            "";
           const statusRecords = patientStatusRecords(p, encounters, settings);
           const printPatientEncounters = async (ev) => {
             ev.preventDefault();
@@ -591,7 +605,7 @@ export default function Patients() {
                   {patientAgeLabel(p)} · {p.sex || p.gender || "—"} · {p.weight != null && p.weight !== "" ? `${p.weight}kg` : "—"} · Date of Birth {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {[p.village, p.district].filter(Boolean).join(", ") || "—"}
                 </p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {p.patientCode ? `PID ${p.patientCode}` : "PID —"} · Last encounter {lastEnc ? fmtDate(lastEnc.date) : "—"}
+                  {p.patientCode ? `PID ${p.patientCode}` : "PID —"} · Last encounter {lastEncounterDate ? fmtDate(lastEncounterDate) : "—"}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">

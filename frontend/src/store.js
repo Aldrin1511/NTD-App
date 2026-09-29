@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
-import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs } from "@/lib/hmisApi";
+import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, upsertPatientDiseaseStatus, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs } from "@/lib/hmisApi";
 import { applyNtdFormConfigs } from "@/lib/ntdFormConfig";
 import {
   SUSPECT_SYMPTOMS,
@@ -136,6 +136,17 @@ function normalizeApiPatient(row) {
     sex: row.sex || row.gender || "",
     gender: row.gender || row.sex || "",
     diseases: Array.isArray(row.diseases) ? row.diseases : [],
+    diseaseStatuses: Array.isArray(row.diseaseStatuses)
+      ? row.diseaseStatuses
+          .map((s) => ({
+            diseaseId: String(s?.diseaseId || s?.disease || "").toLowerCase(),
+            diagnosis: s?.diagnosis || "",
+            outcome: s?.outcome || "",
+            lastEncounter: s?.lastEncounter || s?.date || "",
+          }))
+          .filter((s) => s.diseaseId)
+      : [],
+    lastEncounter: row.lastEncounter || "",
     status: row.status || "",
     phone: row.phone || "",
     village: row.village || "",
@@ -1681,6 +1692,38 @@ export function StoreProvider({ children }) {
           return { encounters: [...s.encounters, saved] };
         });
 
+        const persistListStatus = async () => {
+          if (!online || !saved.patientId || !saved.disease) return;
+          try {
+            const updated = await upsertPatientDiseaseStatus(saved.patientId, {
+              diseaseId: saved.disease,
+              disease: saved.disease,
+              diagnosis: saved.diagnosis || saved.data?.diagnosis || "",
+              outcome: saved.outcome || saved.data?.outcome || "",
+              lastEncounter: saved.date || new Date().toISOString(),
+            });
+            if (updated) {
+              const normalized = normalizeApiPatient(updated);
+              if (normalized) {
+                patch((s) => ({
+                  patients: s.patients.map((p) =>
+                    p.id === normalized.id
+                      ? {
+                          ...p,
+                          diseases: normalized.diseases?.length ? normalized.diseases : p.diseases,
+                          diseaseStatuses: normalized.diseaseStatuses,
+                          lastEncounter: normalized.lastEncounter || p.lastEncounter,
+                        }
+                      : p
+                  ),
+                }));
+              }
+            }
+          } catch (err) {
+            console.warn("persist patient diseaseStatuses failed", err);
+          }
+        };
+
         if (needsQueue) {
           await putLocalEncounter(saved);
           const deps = [];
@@ -1716,6 +1759,8 @@ export function StoreProvider({ children }) {
               outcome: saved.outcome || saved.data?.outcome || "",
             },
           });
+        } else {
+          await persistListStatus();
         }
 
         // Online + forgotten offline queue → prompt to sync before continuing elsewhere.
@@ -1793,10 +1838,44 @@ export function StoreProvider({ children }) {
       finalizeEncounterPhi: async (encounter) => {
         if (!encounter?.patientId || !encounter?.encounterId || !encounter?.visitId) return null;
         if (!online) return null;
-        return finalizeEncounterPhi(encounter.patientId, {
+        const result = await finalizeEncounterPhi(encounter.patientId, {
           encounterId: encounter.encounterId,
           visitId: encounter.visitId,
+          disease: encounter.disease,
+          diagnosis: encounter.diagnosis || encounter.data?.diagnosis || "",
+          outcome: encounter.outcome || encounter.data?.outcome || "",
+          date: encounter.date || new Date().toISOString(),
+          lastEncounter: encounter.date || new Date().toISOString(),
         });
+        // Keep in-memory patient chips in sync without waiting for next list fetch.
+        if (encounter.disease) {
+          const diseaseId = String(encounter.disease).toLowerCase();
+          const diagnosis = encounter.diagnosis || encounter.data?.diagnosis || "";
+          const outcome = encounter.outcome || encounter.data?.outcome || "";
+          const lastEncounter = encounter.date || new Date().toISOString();
+          patch((s) => ({
+            patients: s.patients.map((p) => {
+              if (p.id !== encounter.patientId) return p;
+              const prev = Array.isArray(p.diseaseStatuses) ? [...p.diseaseStatuses] : [];
+              const idx = prev.findIndex((x) => String(x.diseaseId).toLowerCase() === diseaseId);
+              const next = { diseaseId, diagnosis, outcome, lastEncounter };
+              if (idx >= 0) prev[idx] = { ...prev[idx], ...next };
+              else prev.push(next);
+              const diseases = [...new Set([...(p.diseases || []), diseaseId])];
+              const overall = [...prev]
+                .map((x) => x.lastEncounter)
+                .filter(Boolean)
+                .sort((a, b) => String(b).localeCompare(String(a)))[0];
+              return {
+                ...p,
+                diseases,
+                diseaseStatuses: prev,
+                lastEncounter: overall || p.lastEncounter || lastEncounter,
+              };
+            }),
+          }));
+        }
+        return result;
       },
       /**
        * Cancel → Discard and leave — delete ProgressEdited drafts and restore prior committed PHI.
@@ -1838,6 +1917,8 @@ export function StoreProvider({ children }) {
        * Dashboard: load PHI for visits and merge into local encounter.data.
        * Uses episode API rows (not stale React state) so it always runs after reload.
        * When committed PHI exists, clears pendingStart so the dashboard shows the form summary.
+       * Also awaits PUT disease-status so Patients list chips survive the next refresh
+       * without requiring another form save (backfill for existing PHI like Thalapathy).
        */
       syncPatientVisitPhi: async (patientId, opts = {}) => {
         if (!patientId || !authSession?.facilityId) return [];
@@ -1861,9 +1942,15 @@ export function StoreProvider({ children }) {
               featureCode: e.featureCode || featureCodeForDisease(e.disease),
               disease: e.disease,
               encounterId: e.encounterId,
+              createdOn: e.date,
+              visitDate: e.date,
             }));
         }
         if (!visits.length) return [];
+
+        const visitMetaById = new Map(
+          visits.map((row) => [String(row.visitId || row.id || ""), row])
+        );
 
         const results = await Promise.all(
           visits.map(async (row) => {
@@ -1880,6 +1967,16 @@ export function StoreProvider({ children }) {
               if (!phi.hasAny && !phi.items?.length) return null;
               const form = rehydrateFormFromPhi(phi.items || []);
               const completed = phi.hasCommitted || Object.keys(form).length > 0;
+              const visitDateRaw =
+                row.visitDate ||
+                row.createdOn ||
+                row.date ||
+                (typeof row.createdOn === "string" ? row.createdOn : "");
+              const visitDate = visitDateRaw
+                ? String(visitDateRaw).includes("T")
+                  ? String(visitDateRaw)
+                  : `${String(visitDateRaw).slice(0, 10)}T12:00:00`
+                : "";
               return {
                 visitId,
                 form,
@@ -1888,6 +1985,7 @@ export function StoreProvider({ children }) {
                 featureCode: featureCode || "",
                 recordId: row.recordId || "",
                 disease: row.disease || "",
+                visitDate,
               };
             } catch (err) {
               console.warn("syncPatientVisitPhi visit failed", visitId, err);
@@ -1898,40 +1996,143 @@ export function StoreProvider({ children }) {
         const loaded = results.filter(Boolean);
         if (!loaded.length) return [];
 
+        // Build merged encounter rows outside setState so backfill does not rely on updater timing.
+        const mergedEncounters = loaded.map((row) => {
+          const existing = state.encounters.find((e) => e.id === row.visitId) || {};
+          const meta = visitMetaById.get(String(row.visitId)) || {};
+          const date =
+            existing.date ||
+            row.visitDate ||
+            (meta.createdOn ? String(meta.createdOn) : "") ||
+            new Date().toISOString();
+          const diagnosis = row.form.diagnosis || existing.diagnosis || "";
+          const outcome =
+            row.form.outcome || existing.outcome || (row.completed ? "Active" : "Open");
+          return {
+            ...existing,
+            id: row.visitId,
+            visitId: row.visitId,
+            patientId,
+            recordId: row.recordId || existing.recordId || "",
+            encounterId: row.encounterId || existing.encounterId || "",
+            featureCode:
+              row.featureCode ||
+              existing.featureCode ||
+              featureCodeForDisease(row.disease || existing.disease),
+            episodeId: row.recordId || existing.episodeId || row.visitId,
+            disease: row.disease || existing.disease || "",
+            facility: existing.facility || meta.locationName || "",
+            locationId: existing.locationId || "",
+            type: existing.type || meta.visitType || "",
+            referral: existing.referral || "No",
+            date,
+            worker: existing.worker || meta.clinicianName || "",
+            treatment: existing.treatment || "",
+            synced: true,
+            data: { ...(existing.data || {}), ...row.form },
+            diagnosis,
+            outcome,
+            pendingStart: row.completed ? false : existing.pendingStart !== false,
+            complete: row.completed ? true : existing.complete === true,
+            status: row.completed ? "Complete" : existing.status || "Pending",
+          };
+        });
+
         patch((s) => {
-          const byVisit = new Map(loaded.map((r) => [r.visitId, r]));
           const byId = new Map(s.encounters.map((e) => [e.id, e]));
-          for (const row of loaded) {
-            const existing = byId.get(row.visitId);
-            const merged = {
-              ...(existing || {}),
-              id: row.visitId,
-              visitId: row.visitId,
-              patientId,
-              recordId: row.recordId || existing?.recordId || "",
-              encounterId: row.encounterId || existing?.encounterId || "",
-              featureCode: row.featureCode || existing?.featureCode || featureCodeForDisease(row.disease || existing?.disease),
-              episodeId: row.recordId || existing?.episodeId || row.visitId,
-              disease: row.disease || existing?.disease || "",
-              facility: existing?.facility || "",
-              locationId: existing?.locationId || "",
-              type: existing?.type || "",
-              referral: existing?.referral || "No",
-              date: existing?.date || new Date().toISOString(),
-              worker: existing?.worker || "",
-              treatment: existing?.treatment || "",
-              synced: true,
-              data: { ...(existing?.data || {}), ...row.form },
-              diagnosis: row.form.diagnosis || existing?.diagnosis || "",
-              outcome: row.form.outcome || existing?.outcome || (row.completed ? "Active" : "Open"),
-              pendingStart: row.completed ? false : existing?.pendingStart !== false,
-              complete: row.completed ? true : existing?.complete === true,
-              status: row.completed ? "Complete" : existing?.status || "Pending",
-            };
-            byId.set(row.visitId, merged);
+          for (const merged of mergedEncounters) {
+            byId.set(merged.id, { ...(byId.get(merged.id) || {}), ...merged });
           }
           return { encounters: [...byId.values()] };
         });
+
+        // Build latest clinical status per disease from hydrated PHI / encounters.
+        const latestByDisease = new Map();
+        for (const enc of mergedEncounters) {
+          const diseaseId = String(enc.disease || "").toLowerCase();
+          if (!diseaseId) continue;
+          const diagnosis = String(enc.diagnosis || enc.data?.diagnosis || "").trim();
+          const outcome = String(enc.outcome || enc.data?.outcome || "").trim();
+          // Skip pure placeholders — do not overwrite Confirmed/Worse with Open.
+          if (!diagnosis && (!outcome || /^(open|active)$/i.test(outcome))) continue;
+          const lastEncounter = enc.date || new Date().toISOString();
+          const prev = latestByDisease.get(diseaseId);
+          if (!prev || String(lastEncounter).localeCompare(String(prev.lastEncounter || "")) >= 0) {
+            latestByDisease.set(diseaseId, {
+              diseaseId,
+              diagnosis: diagnosis || prev?.diagnosis || "",
+              outcome: outcome || prev?.outcome || "",
+              lastEncounter,
+            });
+          }
+        }
+
+        // Immediate in-memory patch so going back to Patients shows correct chips
+        // even before / while the PUT round-trips.
+        if (latestByDisease.size) {
+          const statuses = [...latestByDisease.values()];
+          const overall = statuses
+            .map((s) => s.lastEncounter)
+            .filter(Boolean)
+            .sort((a, b) => String(b).localeCompare(String(a)))[0];
+          patch((s) => ({
+            patients: s.patients.map((p) => {
+              if (p.id !== patientId) return p;
+              const prev = Array.isArray(p.diseaseStatuses) ? [...p.diseaseStatuses] : [];
+              for (const next of statuses) {
+                const idx = prev.findIndex(
+                  (x) => String(x.diseaseId).toLowerCase() === next.diseaseId
+                );
+                if (idx >= 0) prev[idx] = { ...prev[idx], ...next };
+                else prev.push(next);
+              }
+              return {
+                ...p,
+                diseases: [...new Set([...(p.diseases || []), ...statuses.map((x) => x.diseaseId)])],
+                diseaseStatuses: prev,
+                lastEncounter: overall || p.lastEncounter,
+              };
+            }),
+          }));
+        }
+
+        // Await TriasNtd persist so a subsequent list fetch (or refresh) stays correct.
+        if (latestByDisease.size && online) {
+          let lastDoc = null;
+          for (const s of latestByDisease.values()) {
+            try {
+              lastDoc = await upsertPatientDiseaseStatus(patientId, {
+                diseaseId: s.diseaseId,
+                disease: s.diseaseId,
+                diagnosis: s.diagnosis,
+                outcome: s.outcome,
+                lastEncounter: s.lastEncounter,
+              });
+            } catch (err) {
+              console.warn("backfill diseaseStatuses failed", patientId, s.diseaseId, err);
+            }
+          }
+          if (lastDoc) {
+            const normalized = normalizeApiPatient(lastDoc);
+            if (normalized) {
+              patch((s) => ({
+                patients: s.patients.map((p) =>
+                  p.id === patientId
+                    ? {
+                        ...p,
+                        diseases: normalized.diseases?.length ? normalized.diseases : p.diseases,
+                        diseaseStatuses: normalized.diseaseStatuses?.length
+                          ? normalized.diseaseStatuses
+                          : p.diseaseStatuses,
+                        lastEncounter: normalized.lastEncounter || p.lastEncounter,
+                      }
+                    : p
+                ),
+              }));
+            }
+          }
+        }
+
         return loaded;
       },
       /**
@@ -1946,6 +2147,11 @@ export function StoreProvider({ children }) {
         return finalizeEncounterPhi(encounter.patientId, {
           encounterId: encounter.encounterId,
           visitId: encounter.visitId,
+          disease: encounter.disease,
+          diagnosis: encounter.diagnosis || encounter.data?.diagnosis || "",
+          outcome: encounter.outcome || encounter.data?.outcome || "",
+          date: encounter.date || new Date().toISOString(),
+          lastEncounter: encounter.date || new Date().toISOString(),
         });
       },
       dismissSyncPrompt: () => setSyncPrompt(null),

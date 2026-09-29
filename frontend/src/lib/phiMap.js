@@ -224,7 +224,24 @@ export function rehydrateFormFromPhi(rows) {
   const form = {};
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const info = (row && row.information) || {};
-    const fieldKey = String(info.fieldKey || "").trim();
+    let fieldKey = String(info.fieldKey || "").trim();
+    // Older PHI rows may lack fieldKey — recover diagnosis/outcome from item / subFeature labels.
+    if (!fieldKey) {
+      const item = String(row?.item || info.item || "").trim().toLowerCase();
+      const sub = String(info.subFeatureCode || "").trim().toLowerCase();
+      if (item === "diagnosis" || sub === "diagnosis") fieldKey = "diagnosis";
+      else if (
+        item === "outcome" ||
+        sub === "final case outcome" ||
+        sub === "outcome" ||
+        /final case outcome/i.test(String(row?.item || ""))
+      ) {
+        // Prefer the outcome scalar, not scores/classification blobs.
+        if (typeof info.value === "string" || typeof info.value === "number") {
+          fieldKey = "outcome";
+        }
+      }
+    }
     if (!fieldKey) return;
     const value = info.value;
     if (fieldKey.includes(".")) setByPath(form, fieldKey, value);

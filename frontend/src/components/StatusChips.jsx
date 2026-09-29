@@ -28,7 +28,7 @@ const real = (v) => {
   return s && s !== "—" ? s : "";
 };
 
-/** One chip group per disease the patient has a record for (encounters or patient.diseases). */
+/** One chip group per disease the patient has a record for (encounters, diseaseStatuses, or patient.diseases). */
 export function patientStatusRecords(p, encounters, settings) {
   const encs = (encounters || []).filter((e) => e.patientId === p.id);
   const latestByDisease = new Map();
@@ -37,7 +37,15 @@ export function patientStatusRecords(p, encounters, settings) {
     const prev = latestByDisease.get(e.disease);
     if (!prev || String(e.date).localeCompare(String(prev.date)) > 0) latestByDisease.set(e.disease, e);
   }
-  const ids = DISEASES.map((d) => d.id).filter((id) => latestByDisease.has(id) || (p.diseases || []).includes(id));
+  const statusByDisease = new Map();
+  for (const s of p.diseaseStatuses || []) {
+    const id = String(s?.diseaseId || "").toLowerCase();
+    if (!id || !DISEASE_SPECS[id]) continue;
+    statusByDisease.set(id, s);
+  }
+  const ids = DISEASES.map((d) => d.id).filter(
+    (id) => latestByDisease.has(id) || statusByDisease.has(id) || (p.diseases || []).includes(id)
+  );
   if (!ids.length && encs.length) {
     const last = [...encs].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
     if (last?.disease) ids.push(last.disease);
@@ -48,11 +56,28 @@ export function patientStatusRecords(p, encounters, settings) {
 
   return ids.map((diseaseId) => {
     const last = latestByDisease.get(diseaseId);
-    const diagnosis = real(last?.diagnosis) || real(last?.data?.diagnosis);
-    let outcome = real(last?.outcome) || real(last?.data?.outcome);
+    const persisted = statusByDisease.get(diseaseId);
+    const fromEncDiagnosis = real(last?.diagnosis) || real(last?.data?.diagnosis);
+    const fromEncOutcome = real(last?.outcome) || real(last?.data?.outcome);
+    const fromPersistedDiagnosis = real(persisted?.diagnosis);
+    const fromPersistedOutcome = real(persisted?.outcome);
+    const encIsPlaceholder = !fromEncDiagnosis && (!fromEncOutcome || /^(open|active)$/i.test(fromEncOutcome));
+    const persistedIsClinical =
+      Boolean(fromPersistedDiagnosis) ||
+      (Boolean(fromPersistedOutcome) && !/^(open|active)$/i.test(fromPersistedOutcome));
+    // Prefer local encounter when it has clinical data; else prefer persisted clinical over Open.
+    const diagnosis =
+      (!encIsPlaceholder && fromEncDiagnosis) ||
+      fromPersistedDiagnosis ||
+      fromEncDiagnosis;
+    let outcome =
+      (!encIsPlaceholder && fromEncOutcome) ||
+      (persistedIsClinical ? fromPersistedOutcome : "") ||
+      fromEncOutcome ||
+      fromPersistedOutcome;
     if (diseaseId === patientDisease && real(p.outcome)) outcome = real(p.outcome);
-    // Disease known from patient.diseases (list API) but encounters not loaded yet — show Open.
-    if (!outcome && (p.diseases || []).includes(diseaseId) && !last) outcome = "Open";
+    // Disease known from list but no encounter/status yet — show Open.
+    if (!outcome && (p.diseases || []).includes(diseaseId) && !last && !persisted) outcome = "Open";
     if ((!outcome || /^(open|active)$/i.test(outcome)) && ltfu && lastOverall?.disease === diseaseId) {
       outcome = "Lost to follow-up";
     }

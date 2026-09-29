@@ -898,6 +898,11 @@ export default function Encounter() {
           patientId: p.id,
           encounterId,
           visitId,
+          disease: spec.id,
+          diagnosis: diagnosis || "",
+          outcome: outcome || "",
+          date: savedLocal.date || existing?.date || new Date().toISOString(),
+          data: payload,
         });
       }
       await saveEncounter(savedLocal);

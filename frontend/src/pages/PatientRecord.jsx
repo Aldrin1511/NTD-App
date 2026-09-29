@@ -1223,7 +1223,8 @@ export default function PatientRecord() {
   const [printPreviewHtml, setPrintPreviewHtml] = useState("");
   const [printAfterHydrate, setPrintAfterHydrate] = useState(false);
   const pendingOpenPrint = useRef(Boolean(location.state?.openPrint));
-  const pendingPrintEpisodeId = useRef(String(location.state?.episodeId || ""));
+  const pendingSelectEpisodeId = useRef(String(location.state?.episodeId || ""));
+  const pendingSelectVisitId = useRef(String(location.state?.visitId || ""));
   const canEdit = user?.canEdit;
   const patientSynced = Boolean(p && !p.localOnly && !String(p.id || "").startsWith("local-"));
   const canEditPatientDetails = Boolean(canEdit && online && patientSynced);
@@ -1320,13 +1321,23 @@ export default function PatientRecord() {
     return map;
   }, [encs, myDiseases, p?.episodeId]);
 
-  // Prefer the episode that launched Print from Appointments
+  // Prefer the episode/visit that opened this record (e.g. Appointments card)
   useEffect(() => {
-    const epId = pendingPrintEpisodeId.current;
-    if (!epId || !activeTab) return;
+    if (!activeTab) return;
     const eps = episodesByDisease[activeTab] || [];
-    if (!eps.some((ep) => ep.id === epId)) return;
-    setEpisodeSel((prev) => (prev[activeTab] === epId ? prev : { ...prev, [activeTab]: epId }));
+    if (!eps.length) return;
+
+    let targetId = pendingSelectEpisodeId.current;
+    const visitId = pendingSelectVisitId.current;
+    if (visitId) {
+      const byVisit = eps.find((ep) =>
+        (ep.visits || []).some((v) => String(v.id) === visitId || String(v.visitId) === visitId)
+      );
+      if (byVisit) targetId = byVisit.id;
+    }
+    if (!targetId) return;
+    if (!eps.some((ep) => ep.id === targetId)) return;
+    setEpisodeSel((prev) => (prev[activeTab] === targetId ? prev : { ...prev, [activeTab]: targetId }));
   }, [activeTab, episodesByDisease]);
 
   const selectedEpisode = (episodesByDisease[activeTab] || []).find((e) => e.id === episodeSel[activeTab]) || (episodesByDisease[activeTab] || [])[0];

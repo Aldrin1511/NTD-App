@@ -271,7 +271,15 @@ async function replaySaveForm(op) {
     });
   }
 
-  await finalizeEncounterPhi(resolvedPatientId, { encounterId, visitId });
+  await finalizeEncounterPhi(resolvedPatientId, {
+    encounterId,
+    visitId,
+    disease,
+    diagnosis: p.diagnosis || data.diagnosis || "",
+    outcome: p.outcome || data.outcome || "",
+    date: p.date || new Date().toISOString(),
+    lastEncounter: p.date || new Date().toISOString(),
+  });
   return {
     patientId: resolvedPatientId,
     visitId,

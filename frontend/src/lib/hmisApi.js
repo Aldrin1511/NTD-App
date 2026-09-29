@@ -329,12 +329,20 @@ export async function upsertEncounterPhiItem(patientId, body) {
   }
 }
 
-/** Save / Save & close → ProgressEdited → action null. */
-export async function finalizeEncounterPhi(patientId, { encounterId, visitId }) {
+/** Save / Save & close → ProgressEdited → action null (+ persist diseaseStatuses for list chips). */
+export async function finalizeEncounterPhi(
+  patientId,
+  { encounterId, visitId, disease, diagnosis, outcome, date, lastEncounter }
+) {
   try {
     const res = await http.post(`/api/patients/${encodeURIComponent(patientId)}/phi/finalize`, {
       encounterId,
       visitId,
+      disease: disease || undefined,
+      diagnosis: diagnosis || undefined,
+      outcome: outcome || undefined,
+      date: date || lastEncounter || undefined,
+      lastEncounter: lastEncounter || date || undefined,
     });
     if (!res.data?.status) {
       throw new Error(res.data?.message || "Failed to finalize form");
@@ -345,6 +353,25 @@ export async function finalizeEncounterPhi(patientId, { encounterId, visitId }) 
       throw new Error("Not authenticated — sign in with programme credentials");
     }
     throw new Error(apiError(err, "Failed to finalize form"));
+  }
+}
+
+/** Persist latest diagnosis/outcome/lastEncounter on TriasNtd patient (Patients list chips). */
+export async function upsertPatientDiseaseStatus(patientId, body) {
+  try {
+    const res = await http.put(
+      `/api/patients/${encodeURIComponent(patientId)}/disease-status`,
+      body
+    );
+    if (!res.data?.status) {
+      throw new Error(res.data?.message || "Failed to update disease status");
+    }
+    return res.data.data || {};
+  } catch (err) {
+    if (err?.response?.status === 401) {
+      throw new Error("Not authenticated — sign in with programme credentials");
+    }
+    throw new Error(apiError(err, "Failed to update disease status"));
   }
 }
 
