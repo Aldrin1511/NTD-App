@@ -23,6 +23,7 @@ import {
 import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
 import AntenatalMedications from "@/components/AntenatalMedications";
 import { toast } from "sonner";
+import { persistIntegratedEncounter, useExtraPhiAutosave, useLoadEncounterPhi } from "@/lib/extraEncounterSync";
 
 const emptyLabRow = (name) => ({
   test: name || WELLBABY_LAB_TESTS[0]?.name || "HIV test",
@@ -212,13 +213,52 @@ const nextAllergySelection = (next = []) => {
   return list.filter((a) => a !== NO_KNOWN_ALLERGY);
 };
 
+/** Normalize WB form shape (init + PHI hydrate). */
+const normalizeWbForm = (partial = {}, { encounters = [], patient = null, patientId = "", existing = null, seedDeliveryAllergy = true } = {}) => {
+  const base = { ...empty(), ...partial };
+  if (seedDeliveryAllergy) {
+    base.delivery = seedDelivery(encounters, patient, existing
+      ? { ...existing, data: { ...(existing.data || {}), delivery: partial.delivery || existing.data?.delivery } }
+      : existing);
+    base.allergy = Array.isArray(partial.allergy) && partial.allergy.length
+      ? nextAllergySelection(partial.allergy)
+      : seedAllergy(encounters, patientId, existing);
+  } else {
+    // PHI hydrate: prefer loaded delivery/allergy when present; else keep ANC/prior seeds
+    if (deliveryHasContent(partial.delivery || {})) {
+      base.delivery = normalizeDelivery(partial.delivery, patient || {});
+    } else {
+      base.delivery = seedDelivery(encounters, patient, existing);
+    }
+    if (Array.isArray(partial.allergy) && partial.allergy.length) {
+      base.allergy = nextAllergySelection(partial.allergy);
+    } else {
+      base.allergy = seedAllergy(encounters, patientId, existing);
+    }
+  }
+  if (!Array.isArray(base.lab)) base.lab = [];
+  if (!base.lab.length) {
+    base.lab = WELLBABY_LAB_TESTS.map((t) => emptyLabRow(t.name));
+  } else {
+    const missing = WELLBABY_LAB_TESTS.filter((t) => !base.lab.some((r) => r.test === t.name));
+    if (missing.length) {
+      base.lab = [...base.lab, ...missing.map((t) => emptyLabRow(t.name))];
+    }
+  }
+  base.posology = { ...(base.posology || {}) };
+  base.medCourses = { ...(base.medCourses || {}) };
+  if (!Array.isArray(base.drugs)) base.drugs = [];
+  if (!Array.isArray(base.notes) || !base.notes.length) base.notes = [""];
+  return base;
+};
+
 export default function WellBabyEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, user, settings, facilities, online, ensureCatalogueDrug } = useStore();
+  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, online, ensureCatalogueDrug } = useStore();
   const p = patients.find((x) => x.id === id);
-  const existing = encounters.find((e) => e.id === params.get("enc") && e.disease === WELLBABY_ID);
+  const existing = encounters.find((e) => e.disease === WELLBABY_ID && (e.id === params.get("enc") || e.visitId === params.get("enc")));
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
   const priorWb = useMemo(() => latestPriorWb(encounters, id, existing?.id), [encounters, id, existing?.id]);
   const priorGrowthMeasures = useMemo(() => {
@@ -228,21 +268,15 @@ export default function WellBabyEncounter() {
       .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
     return withGrowth?.data?.growth?.measures || {};
   }, [encounters, id, existing?.id]);
-  const [d, setD] = useState(() => {
-    const base = { ...empty(), ...(existing?.data || {}) };
-    base.delivery = seedDelivery(encounters, p, existing);
-    base.allergy = seedAllergy(encounters, id, existing);
-    if (!Array.isArray(base.lab)) base.lab = [];
-    if (!base.lab.length) {
-      base.lab = WELLBABY_LAB_TESTS.map((t) => emptyLabRow(t.name));
-    } else {
-      const missing = WELLBABY_LAB_TESTS.filter((t) => !base.lab.some((r) => r.test === t.name));
-      if (missing.length) {
-        base.lab = [...base.lab, ...missing.map((t) => emptyLabRow(t.name))];
-      }
-    }
-    return base;
-  });
+  const [d, setD] = useState(() =>
+    normalizeWbForm(existing?.data || {}, {
+      encounters,
+      patient: p,
+      patientId: id,
+      existing,
+      seedDeliveryAllergy: true,
+    }),
+  );
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
   const [revealedVacIds, setRevealedVacIds] = useState([]);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
@@ -256,39 +290,73 @@ export default function WellBabyEncounter() {
   const vaccineDrugs = (settings.drugs || []).filter((x) => x.type === "Vaccine" || x.form === "Vaccine");
   const facilityHasLab = useMemo(() => (facilities || []).some((f) => f.name === facility && f.hasLab), [facilities, facility]);
 
+  const { queueSectionDiff, queueField } = useExtraPhiAutosave({
+    online,
+    upsertEncounterPhiField,
+    patientId: p?.id || id,
+    existing,
+    diseaseId: WELLBABY_ID,
+  });
+
+  const { phiLoading } = useLoadEncounterPhi({
+    existing,
+    online,
+    loadEncounterPhi,
+    applyForm: (form) =>
+      normalizeWbForm(
+        { ...(existing?.data || {}), ...form },
+        { encounters, patient: p, patientId: id, existing, seedDeliveryAllergy: false },
+      ),
+    setD,
+    setSavedAt,
+  });
+
   if (!p) return <div className="p-8">Patient not found. <Button onClick={() => navigate("/patients")}>Back</Button></div>;
 
-  const set = (k, v) => setD((s) => ({ ...s, [k]: v }));
-  const setDelivery = (patch) => setD((s) => ({ ...s, delivery: { ...s.delivery, ...patch } }));
+  const set = (k, v) => {
+    setD((s) => ({ ...s, [k]: v }));
+    queueField(k, v);
+  };
+  const setDelivery = (patch) => {
+    const prev = d.delivery || {};
+    const next = { ...prev, ...patch };
+    setD((s) => ({ ...s, delivery: next }));
+    queueSectionDiff("delivery", prev, next);
+  };
   const delivery = d.delivery || {};
   const babies = delivery.babies || [];
   const fetusCount = Number(delivery.fetuses || 0);
   const motherFromId = delivery.motherId ? patients.find((x) => x.id === delivery.motherId) : null;
   const motherLabel = delivery.motherName || motherFromId?.name || "mother";
-  const setFetuses = (v) => setD((s) => ({
-    ...s,
-    delivery: {
-      ...s.delivery,
+  const setFetuses = (v) => {
+    const prev = d.delivery || {};
+    const next = {
+      ...prev,
       fetuses: v,
-      babies: syncBabiesToFetuses(s.delivery.babies, v, s.delivery.type || s.delivery.mode || ""),
-    },
-  }));
-  const updBaby = (i, patch) => setD((s) => ({
-    ...s,
-    delivery: {
-      ...s.delivery,
-      babies: (s.delivery.babies || []).map((b, j) => (j === i ? { ...b, ...patch } : b)),
-    },
-  }));
-  const updBabyExam = (i, k, v) =>
-    setD((s) => ({
-      ...s,
-      delivery: {
-        ...s.delivery,
-        babies: (s.delivery.babies || []).map((b, j) =>
-          (j === i ? { ...b, physicalExam: { ...(b.physicalExam || {}), [k]: v } } : b)),
-      },
-    }));
+      babies: syncBabiesToFetuses(prev.babies, v, prev.type || prev.mode || ""),
+    };
+    setD((s) => ({ ...s, delivery: next }));
+    queueSectionDiff("delivery", prev, next);
+  };
+  const updBaby = (i, patch) => {
+    const prev = d.delivery || {};
+    const next = {
+      ...prev,
+      babies: (prev.babies || []).map((b, j) => (j === i ? { ...b, ...patch } : b)),
+    };
+    setD((s) => ({ ...s, delivery: next }));
+    queueSectionDiff("delivery", prev, next);
+  };
+  const updBabyExam = (i, k, v) => {
+    const prev = d.delivery || {};
+    const next = {
+      ...prev,
+      babies: (prev.babies || []).map((b, j) =>
+        (j === i ? { ...b, physicalExam: { ...(b.physicalExam || {}), [k]: v } } : b)),
+    };
+    setD((s) => ({ ...s, delivery: next }));
+    queueSectionDiff("delivery", prev, next);
+  };
   const carriedFromPrior = !existing && !!(priorWb && deliveryHasContent(priorWb.data?.delivery));
   const carriedFromMother =
     !existing
@@ -298,8 +366,19 @@ export default function WellBabyEncounter() {
       || (p.bornFrom && deliveryHasContent(delivery))
     );
 
-  const toggleVaccine = (item) => setD((s) => { const cur = s.immunization[item.id]; return { ...s, immunization: { ...s.immunization, [item.id]: cur?.given ? { given: false } : { given: true, date: localISODate() } } }; });
-  const setVaccineDate = (k, date) => setD((s) => ({ ...s, immunization: { ...s.immunization, [k]: { given: true, date } } }));
+  const toggleVaccine = (item) => {
+    const prev = d.immunization || {};
+    const cur = prev[item.id];
+    const next = { ...prev, [item.id]: cur?.given ? { given: false } : { given: true, date: localISODate() } };
+    setD((s) => ({ ...s, immunization: next }));
+    queueSectionDiff("immunization", prev, next);
+  };
+  const setVaccineDate = (k, date) => {
+    const prev = d.immunization || {};
+    const next = { ...prev, [k]: { given: true, date } };
+    setD((s) => ({ ...s, immunization: next }));
+    queueSectionDiff("immunization", prev, next);
+  };
   const scheduleVaccines = schedule.vaccines || [];
   const asOf = visitDate ? new Date(visitDate) : new Date();
   const visibleVaccines = entryVisibleVaccines(scheduleVaccines, d.immunization, dob, revealedVacIds, asOf);
@@ -319,53 +398,113 @@ export default function WellBabyEncounter() {
     }
     if (raw.startsWith("drug:")) setVaccineDate(raw.slice(5), localISODate());
   };
-  const toggleMilestone = (m) => setD((s) => { const cur = s.milestones[m.id]; return { ...s, milestones: { ...s.milestones, [m.id]: cur?.achieved ? { achieved: false } : { achieved: true, date: localISODate() } } }; });
-  const setMilestoneDate = (mid, date) => setD((s) => ({ ...s, milestones: { ...s.milestones, [mid]: { achieved: true, date } } }));
-  const clearMilestone = (mid) => setD((s) => ({ ...s, milestones: { ...s.milestones, [mid]: { achieved: false } } }));
+  const toggleMilestone = (m) => {
+    const prev = d.milestones || {};
+    const cur = prev[m.id];
+    const next = { ...prev, [m.id]: cur?.achieved ? { achieved: false } : { achieved: true, date: localISODate() } };
+    setD((s) => ({ ...s, milestones: next }));
+    queueSectionDiff("milestones", prev, next);
+  };
+  const setMilestoneDate = (mid, date) => {
+    const prev = d.milestones || {};
+    const next = { ...prev, [mid]: { achieved: true, date } };
+    setD((s) => ({ ...s, milestones: next }));
+    queueSectionDiff("milestones", prev, next);
+  };
+  const clearMilestone = (mid) => {
+    const prev = d.milestones || {};
+    const next = { ...prev, [mid]: { achieved: false } };
+    setD((s) => ({ ...s, milestones: next }));
+    queueSectionDiff("milestones", prev, next);
+  };
 
   const labTestNames = WELLBABY_LAB_TESTS.map((t) => t.name);
 
   const addLabForTest = (testName, afterIndex) => {
     const row = emptyLabRow(testName);
     setD((s) => {
+      let next;
       if (afterIndex == null) {
         const lastIdx = s.lab.reduce((acc, r, i) => (r.test === testName ? i : acc), -1);
-        if (lastIdx < 0) return { ...s, lab: [row, ...s.lab] };
-        const next = [...s.lab];
-        next.splice(lastIdx + 1, 0, row);
-        return { ...s, lab: next };
+        if (lastIdx < 0) next = [row, ...s.lab];
+        else {
+          next = [...s.lab];
+          next.splice(lastIdx + 1, 0, row);
+        }
+      } else {
+        next = [...s.lab];
+        next.splice(afterIndex + 1, 0, row);
       }
-      const next = [...s.lab];
-      next.splice(afterIndex + 1, 0, row);
+      queueField("lab", next, "Laboratory", "Lab");
       return { ...s, lab: next };
     });
   };
-  const updLab = (i, patch) => setD((s) => ({ ...s, lab: s.lab.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
+  const updLab = (i, patch) => {
+    setD((s) => {
+      const next = s.lab.map((x, j) => (j === i ? { ...x, ...patch } : x));
+      queueField("lab", next, "Laboratory", "Lab");
+      return { ...s, lab: next };
+    });
+  };
   const rmLab = (i) => setD((s) => {
     const removed = s.lab[i];
-    const next = s.lab.filter((_, j) => j !== i);
+    let next = s.lab.filter((_, j) => j !== i);
     if (removed && labTestNames.includes(removed.test) && !next.some((r) => r.test === removed.test)) {
-      return { ...s, lab: [...next, emptyLabRow(removed.test)] };
+      next = [...next, emptyLabRow(removed.test)];
     }
+    queueField("lab", next, "Laboratory", "Lab");
     return { ...s, lab: next };
   });
 
-  const setNote = (i, v) => setD((s) => ({ ...s, notes: s.notes.map((n, j) => (j === i ? v : n)) }));
-  const addNote = () => setD((s) => ({ ...s, notes: ["", ...s.notes] }));
-  const rmNote = (i) => setD((s) => ({ ...s, notes: s.notes.length <= 1 ? [""] : s.notes.filter((_, j) => j !== i) }));
+  const setNote = (i, v) => {
+    const next = d.notes.map((n, j) => (j === i ? v : n));
+    setD((s) => ({ ...s, notes: next }));
+    queueField("notes", next, "Visit notes", "Visit notes");
+  };
+  const addNote = () => {
+    const next = ["", ...d.notes];
+    setD((s) => ({ ...s, notes: next }));
+    queueField("notes", next, "Visit notes", "Visit notes");
+  };
+  const rmNote = (i) => {
+    const next = d.notes.length <= 1 ? [""] : d.notes.filter((_, j) => j !== i);
+    setD((s) => ({ ...s, notes: next }));
+    queueField("notes", next, "Visit notes", "Visit notes");
+  };
   const catalogueDrugs = (settings.drugs || []).filter((x) => x.type !== "Vaccine" && x.form !== "Vaccine").map((x) => x.name);
 
-  const persist = (close) => {
-    const episodeId = existing?.episodeId || patientEncs.filter((e) => e.disease === WELLBABY_ID)[0]?.episodeId || newWbEpisodeId();
-    await saveEncounter({
-      id: existing?.id, patientId: p.id, episodeId, disease: WELLBABY_ID, facility, worker: user?.name, type: visitType,
-      diagnosis: ageLabel !== "—" ? `Age ${ageLabel}` : "",
-      treatment: (d.drugs || []).join(" + "),
-      outcome: "", data: { ...d, delivery, ageMonths, growthAge: ageMonths },
+  const persist = async (close) => {
+    const episodeId =
+      existing?.episodeId
+      || existing?.recordId
+      || patientEncs.filter((e) => e.disease === WELLBABY_ID)[0]?.episodeId
+      || patientEncs.filter((e) => e.disease === WELLBABY_ID)[0]?.recordId
+      || newWbEpisodeId();
+    const { canWritePhi } = await persistIntegratedEncounter({
+      online,
+      saveEncounter,
+      upsertEncounterPhiField,
+      finalizeEncounterPhi,
+      existing,
+      payload: {
+        id: existing?.id,
+        patientId: p.id,
+        episodeId,
+        disease: WELLBABY_ID,
+        facility,
+        worker: user?.name,
+        type: visitType,
+        diagnosis: ageLabel !== "—" ? `Age ${ageLabel}` : "",
+        treatment: (d.drugs || []).join(" + "),
+        outcome: "",
+        data: { ...d, delivery, ageMonths, growthAge: ageMonths },
+      },
     });
     setSavedAt(new Date().toLocaleTimeString());
     if (close) navigate(`/patients/${p.id}?tab=wellbaby`);
-    toast.success(online ? (close ? "Well baby visit saved" : "Saved to device") : "Saved · queued until online");
+    if (canWritePhi) toast.success(close ? "Well baby visit saved" : "Saved");
+    else if (online) toast.success(close ? "Well baby visit queued for sync" : "Saved · queued for sync");
+    else toast.success("Saved · queued until online");
   };
 
   const sections = [
@@ -633,7 +772,15 @@ export default function WellBabyEncounter() {
           drugMeta={WELLBABY_DRUG_META}
           diseaseId={WELLBABY_ID}
           testid="wb-medications"
-          onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+          onChange={(patch) => {
+            setD((s) => {
+              const next = { ...s, ...patch };
+              if (patch.drugs != null) queueField("drugs", next.drugs, "Medications", "Drugs");
+              if (patch.posology != null) queueField("posology", next.posology, "Medications", "Posology");
+              if (patch.medCourses != null) queueField("medCourses", next.medCourses, "Medications", "Medication courses");
+              return next;
+            });
+          }}
         />
       ),
     },
@@ -743,6 +890,7 @@ export default function WellBabyEncounter() {
       patient={p} patientEncs={patientEncs} sidebarDiseases={[{ id: WELLBABY_ID, name: WELLBABY_NAME }]}
       title={`${WELLBABY_NAME} visit`} context={`${facility} · ${visitType} · ${ageLabel}`}
       sections={sections} onSave={persist} savedAt={savedAt} focusSection={focusSection}
+      saveDisabled={phiLoading}
       backTo={() => navigate(`/patients/${p.id}?tab=wellbaby`)}
     />
   );

@@ -57,6 +57,22 @@ export const DRUG_FREQUENCIES = [
   "1-1-0",
 ];
 
+/** Duration unit options used by Admin drug / regimen forms. */
+export const DRUG_DURATION_UNITS = [
+  "Year(s)",
+  "Month(s)",
+  "Week(s)",
+  "Day(s)",
+  "Hour(s)",
+  "Min(s)",
+  "As needed",
+  "Ongoing",
+  "BOLUS",
+  "l/hr",
+  "ml/hr",
+  "mU/min",
+];
+
 export const DRUGS = [
   { name: "Permethrin 5% Cream/Lotion", form: "Topical", strength: "5%", diseases: ["scabies"] },
   { name: "Benzyl Benzoate 25%", form: "Topical", strength: "25%", diseases: ["scabies"] },

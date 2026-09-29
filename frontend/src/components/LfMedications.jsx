@@ -3,8 +3,8 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
-import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
-import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
+import { CompactPosology, DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology, setVisitPosology } from "@/lib/medications";
 import {
   Dialog,
   DialogContent,
@@ -54,11 +54,12 @@ export function decDose(weight, tabletMg = 100) {
   return { mg, tabs: halfTabs(mg, tabletMg), tabletMg };
 }
 
-function DrugCard({ id, title, selected, onToggle, children, disabled, disabledHint, subtitle }) {
+function DrugCard({ id, title, selected, expanded, onToggle, onActivate, compactBody, children, disabled, disabledHint, subtitle }) {
   return (
     <div
       className={`rounded-lg border p-4 ${selected ? "border-primary bg-secondary/40" : "border-border bg-white"} ${disabled ? "opacity-70" : ""}`}
       data-testid={`lf-drug-${id}`}
+      onFocusCapture={selected ? onActivate : undefined}
     >
       <button
         type="button"
@@ -80,7 +81,11 @@ function DrugCard({ id, title, selected, onToggle, children, disabled, disabledH
           {disabled && disabledHint && <p className="mt-1 text-xs text-red-700">{disabledHint}</p>}
         </div>
       </button>
-      {children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>}
+      {selected && !expanded && compactBody ? (
+        <div className="mt-3 border-t border-border/60 pt-3">{compactBody}</div>
+      ) : (
+        children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>
+      )}
     </div>
   );
 }
@@ -129,25 +134,57 @@ export default function LfMedications({
 
   const [iverDialog, setIverDialog] = useState(false);
   const [doxyDialog, setDoxyDialog] = useState(false);
+  const [activeDrug, setActiveDrug] = useState(null);
 
   const iver = ivermectinDose(weight, Number(ivermectinTabletMg) || 3);
   const alb = albendazoleDose(yearsNum);
   const dec = decDose(weight, 100);
 
-  const setOral = (name, on) => {
+  const iverDefaults = {
+    dosage: iver ? formatDosePhysical(iver.mg, iver.tabs) : "0.2 mg/kg",
+    frequency: "Once",
+    duration: "Single dose (IDA)",
+  };
+  const albDefaults = {
+    dosage: alb ? formatDosePhysical(alb.mg, alb.tabs) : "200 mg (<10y) / 400 mg (10y+)",
+    frequency: "Once",
+    duration: "Single dose (IDA)",
+  };
+  const decDefaults = {
+    dosage: dec ? formatDosePhysical(dec.mg, dec.tabs) : "6 mg/kg",
+    frequency: "Once",
+    duration: "Single dose (IDA)",
+  };
+  const doxyDefaults = { dosage: "100 mg", frequency: "As prescribed", duration: "—" };
+  const dressingDefaults = { dosage: "Apply", frequency: "As needed", duration: "—" };
+  const selfCareDefaults = { dosage: "—", frequency: "Daily self-care", duration: "—" };
+
+  const seedPosology = (name, on, defaults) => {
+    if (!on) return dropVisitPosology(posology, name);
+    if (posology?.[name] || !defaults) return posology;
+    return setVisitPosology(posology, name, {
+      dosage: defaults.dosage || "",
+      frequency: defaults.frequency || "",
+      duration: defaults.duration || "",
+    }, defaults);
+  };
+
+  const setOral = (name, on, defaults) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       oral: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
     });
   };
-  const setTopical = (name, on) => {
+  const setTopical = (name, on, defaults) => {
     const next = on ? [...new Set([...topical, name])] : topical.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       topical: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
     });
   };
   const setRec = (name, on) => {
@@ -156,6 +193,16 @@ export default function LfMedications({
       : recommendations.filter((x) => x !== name);
     onChange({ recommendations: next });
   };
+
+  const compact = (name, defaults) => (
+    <CompactPosology
+      name={name}
+      defaults={defaults}
+      posology={posology}
+      onExpand={() => setActiveDrug(name)}
+      testidPrefix="lf-drug"
+    />
+  );
 
   const toggleIvermectin = () => {
     if (selected.ivermectin) {
@@ -166,7 +213,7 @@ export default function LfMedications({
       setIverDialog(true);
       return;
     }
-    setOral(LF_DRUGS.ivermectin, true);
+    setOral(LF_DRUGS.ivermectin, true, iverDefaults);
   };
 
   const toggleDoxy = () => {
@@ -178,7 +225,7 @@ export default function LfMedications({
       setDoxyDialog(true);
       return;
     }
-    setOral(LF_DRUGS.doxycycline, true);
+    setOral(LF_DRUGS.doxycycline, true, doxyDefaults);
   };
 
   return (
@@ -203,6 +250,9 @@ export default function LfMedications({
           title={LF_DRUGS.ivermectin}
           subtitle="Tablets: 3 mg / 6 mg / 12 mg · Dose 0.2 mg per kg"
           selected={selected.ivermectin}
+          expanded={activeDrug === LF_DRUGS.ivermectin}
+          onActivate={() => setActiveDrug(LF_DRUGS.ivermectin)}
+          compactBody={compact(LF_DRUGS.ivermectin, iverDefaults)}
           onToggle={toggleIvermectin}
         >
           <AlertPanel level="info" title="Note" testid="lf-ivermectin-note">
@@ -229,11 +279,7 @@ export default function LfMedications({
               posology={posology}
               onChange={onChange}
               {...regimenVisit}
-              defaults={{
-                dosage: iver ? formatDosePhysical(iver.mg, iver.tabs) : "0.2 mg/kg",
-                frequency: "Once",
-                duration: "Single dose (IDA)",
-              }}
+              defaults={iverDefaults}
             />
           )}
         </DrugCard>
@@ -242,7 +288,10 @@ export default function LfMedications({
           id="albendazole"
           title={LF_DRUGS.albendazole}
           selected={selected.albendazole}
-          onToggle={() => setOral(LF_DRUGS.albendazole, !selected.albendazole)}
+          expanded={activeDrug === LF_DRUGS.albendazole}
+          onActivate={() => setActiveDrug(LF_DRUGS.albendazole)}
+          compactBody={compact(LF_DRUGS.albendazole, albDefaults)}
+          onToggle={() => setOral(LF_DRUGS.albendazole, !selected.albendazole, albDefaults)}
         >
           <AlertPanel level="info" title="Note" testid="lf-albendazole-note">
             200 mg for child less than 10 years; 400 mg for adult 10+ years.
@@ -260,11 +309,7 @@ export default function LfMedications({
               posology={posology}
               onChange={onChange}
               {...regimenVisit}
-              defaults={{
-                dosage: alb ? formatDosePhysical(alb.mg, alb.tabs) : "200 mg (<10y) / 400 mg (10y+)",
-                frequency: "Once",
-                duration: "Single dose (IDA)",
-              }}
+              defaults={albDefaults}
             />
           )}
         </DrugCard>
@@ -273,7 +318,10 @@ export default function LfMedications({
           id="dec"
           title={LF_DRUGS.dec}
           selected={selected.dec}
-          onToggle={() => setOral(LF_DRUGS.dec, !selected.dec)}
+          expanded={activeDrug === LF_DRUGS.dec}
+          onActivate={() => setActiveDrug(LF_DRUGS.dec)}
+          compactBody={compact(LF_DRUGS.dec, decDefaults)}
+          onToggle={() => setOral(LF_DRUGS.dec, !selected.dec, decDefaults)}
         >
           <DosePhysicalBox
             testid="lf-dec-dose"
@@ -288,11 +336,7 @@ export default function LfMedications({
               posology={posology}
               onChange={onChange}
               {...regimenVisit}
-              defaults={{
-                dosage: dec ? formatDosePhysical(dec.mg, dec.tabs) : "6 mg/kg",
-                frequency: "Once",
-                duration: "Single dose (IDA)",
-              }}
+              defaults={decDefaults}
             />
           )}
         </DrugCard>
@@ -303,6 +347,9 @@ export default function LfMedications({
         id="doxycycline"
         title={LF_DRUGS.doxycycline}
         selected={selected.doxycycline}
+        expanded={activeDrug === LF_DRUGS.doxycycline}
+        onActivate={() => setActiveDrug(LF_DRUGS.doxycycline)}
+        compactBody={compact(LF_DRUGS.doxycycline, doxyDefaults)}
         onToggle={toggleDoxy}
       >
         <AlertPanel level={doxyTooYoung ? "review" : "info"} title="Note" testid="lf-doxycycline-note">
@@ -317,11 +364,7 @@ export default function LfMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: "100 mg",
-              frequency: "As prescribed",
-              duration: "—",
-            }}
+            defaults={doxyDefaults}
           />
         )}
       </DrugCard>
@@ -331,7 +374,10 @@ export default function LfMedications({
         id="dressing"
         title={LF_DRUGS.dressing}
         selected={selected.dressing}
-        onToggle={() => setTopical(LF_DRUGS.dressing, !selected.dressing)}
+        expanded={activeDrug === LF_DRUGS.dressing}
+        onActivate={() => setActiveDrug(LF_DRUGS.dressing)}
+        compactBody={compact(LF_DRUGS.dressing, dressingDefaults)}
+        onToggle={() => setTopical(LF_DRUGS.dressing, !selected.dressing, dressingDefaults)}
       >
         {selected.dressing && (
           <DrugVisitFields
@@ -341,7 +387,7 @@ export default function LfMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{ dosage: "Apply", frequency: "As needed", duration: "—" }}
+            defaults={dressingDefaults}
           />
         )}
       </DrugCard>
@@ -349,7 +395,10 @@ export default function LfMedications({
         id="self-care"
         title={LF_DRUGS.selfCare}
         selected={selected.selfCare}
-        onToggle={() => setTopical(LF_DRUGS.selfCare, !selected.selfCare)}
+        expanded={activeDrug === LF_DRUGS.selfCare}
+        onActivate={() => setActiveDrug(LF_DRUGS.selfCare)}
+        compactBody={compact(LF_DRUGS.selfCare, selfCareDefaults)}
+        onToggle={() => setTopical(LF_DRUGS.selfCare, !selected.selfCare, selfCareDefaults)}
       >
         {selected.selfCare && (
           <DrugVisitFields
@@ -359,7 +408,7 @@ export default function LfMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{ dosage: "—", frequency: "Daily self-care", duration: "—" }}
+            defaults={selfCareDefaults}
           />
         )}
       </DrugCard>
@@ -402,7 +451,7 @@ export default function LfMedications({
               type="button"
               data-testid="lf-ivermectin-override"
               onClick={() => {
-                setOral(LF_DRUGS.ivermectin, true);
+                setOral(LF_DRUGS.ivermectin, true, iverDefaults);
                 setIverDialog(false);
               }}
             >
@@ -428,7 +477,7 @@ export default function LfMedications({
               type="button"
               data-testid="lf-doxycycline-override"
               onClick={() => {
-                setOral(LF_DRUGS.doxycycline, true);
+                setOral(LF_DRUGS.doxycycline, true, doxyDefaults);
                 setDoxyDialog(false);
               }}
             >

@@ -210,6 +210,36 @@ export function AddDrugSelect({
   );
 }
 
+/** Collapsed summary of visit posology — click to expand editors. */
+export function CompactPosology({
+  name,
+  defaults = {},
+  posology = {},
+  onExpand,
+  testidPrefix = "drug",
+}) {
+  const ov = posology?.[name] || {};
+  const dosage = ov.dosage || defaults.dosage || "—";
+  const frequency = ov.frequency || defaults.frequency || "—";
+  const duration = ov.duration || defaults.duration || "—";
+  const qualifier = ov.qualifier || defaults.qualifier || "";
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      className="w-full rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-left text-sm hover:border-primary/40"
+      data-testid={`${testidPrefix}-compact-${slugDrug(name)}`}
+    >
+      <p className="font-medium text-foreground">{dosage}</p>
+      <p className="text-muted-foreground">
+        {frequency}
+        {duration && duration !== "—" ? ` · ${duration}` : ""}
+        {qualifier ? ` · ${qualifier}` : ""}
+      </p>
+    </button>
+  );
+}
+
 export function VisitPosology({
   name,
   defaults = {},
@@ -282,9 +312,24 @@ export function DrugVisitFields({
   allRegimens = [],
   catalogue = [],
   onChange,
+  /** When false, show CompactPosology instead of full editors. */
+  expanded = true,
+  onExpand,
+  testidPrefix = "drug",
 }) {
   if (!selected) return null;
   const merged = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults, allRegimens);
+  if (!expanded) {
+    return (
+      <CompactPosology
+        name={name}
+        defaults={merged}
+        posology={posology}
+        onExpand={onExpand}
+        testidPrefix={testidPrefix}
+      />
+    );
+  }
   return (
     <>
       {!hideVisitPosology(name) && (
@@ -306,13 +351,29 @@ export function ExtraSelectedDrugs({
   matchedRegimens = [],
   allRegimens = [],
   onChange,
+  /** Optional shared active-drug key so extras collapse with protocol drugs. */
+  activeDrug,
+  setActiveDrug,
 }) {
   const extras = extraDrugNames(diseaseId, topical, oral);
+  const [localActive, setLocalActive] = useState(null);
+  const active = activeDrug !== undefined ? activeDrug : localActive;
+  const setActive = setActiveDrug || setLocalActive;
+
+  useEffect(() => {
+    if (!extras.length) return;
+    if (active && extras.includes(active)) return;
+    // Expand the most recently added catalogue extra.
+    setActive(extras[extras.length - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to extras list changes
+  }, [extras.join("|")]);
+
   if (!extras.length) return null;
   const remove = (name) => {
     const drug = catalogue.find((d) => d.name === name);
     const topicalNext = topical.filter((x) => x !== name);
     const oralNext = oral.filter((x) => x !== name);
+    if (active === name) setActive(null);
     onChange({
       topical: isTopicalForm(drug?.form) ? topicalNext : topical.filter((x) => x !== name),
       oral: isTopicalForm(drug?.form) ? oral.filter((x) => x !== name) : oralNext,
@@ -326,31 +387,49 @@ export function ExtraSelectedDrugs({
         const drug = catalogue.find((d) => d.name === name);
         const tabs = parseTabletOptions(drug?.strength);
         const masterDefaults = posologyDefaultsFromRegimens(name, matchedRegimens, catalogue, defaults, allRegimens);
+        const expanded = active === name;
         return (
-          <div key={name} className="rounded-lg border border-border bg-white p-4" data-testid={`extra-drug-${name}`}>
+          <div
+            key={name}
+            className={`rounded-lg border p-4 ${expanded ? "border-primary bg-secondary/40" : "border-border bg-white"}`}
+            data-testid={`extra-drug-${name}`}
+            onFocusCapture={() => setActive(name)}
+          >
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setActive(name)}>
                 <p className="font-semibold">{name}</p>
                 <p className="text-xs text-muted-foreground">{[drug?.form, drug?.strength].filter(Boolean).join(" · ")}</p>
-              </div>
+              </button>
               <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-red-600" onClick={() => remove(name)} data-testid={`extra-drug-remove-${name}`}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             </div>
-            {tabs.length > 1 && (
-              <p className="mt-2 text-xs text-muted-foreground">Available strengths: {tabs.map((t) => `${t} mg`).join(", ")}</p>
-            )}
-            <div className="mt-3 space-y-3">
-              {!hideVisitPosology(name) && (
-                <VisitPosology
+            {expanded ? (
+              <div className="mt-3 space-y-3">
+                {tabs.length > 1 && (
+                  <p className="text-xs text-muted-foreground">Available strengths: {tabs.map((t) => `${t} mg`).join(", ")}</p>
+                )}
+                {!hideVisitPosology(name) && (
+                  <VisitPosology
+                    name={name}
+                    defaults={masterDefaults}
+                    posology={posology}
+                    onChange={onChange}
+                  />
+                )}
+                <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
+              </div>
+            ) : (
+              <div className="mt-3">
+                <CompactPosology
                   name={name}
                   defaults={masterDefaults}
                   posology={posology}
-                  onChange={onChange}
+                  onExpand={() => setActive(name)}
+                  testidPrefix="extra-drug"
                 />
-              )}
-              <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
-            </div>
+              </div>
+            )}
           </div>
         );
       })}

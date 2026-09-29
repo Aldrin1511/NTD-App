@@ -1,7 +1,7 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertPanel } from "@/components/Fields";
-import { FeatureCard } from "@/components/EntryKit";
+import { FeatureCard, ExpandAllButton } from "@/components/EntryKit";
 import { GrowthReview } from "@/components/GrowthChart";
 import MilestoneChart from "@/components/MilestoneChart";
 import { dobFromAge, formatAgeYMD } from "@/components/Capture";
@@ -56,6 +56,7 @@ const VaccineBoxes = ({ vaccines, records, dob, testidPrefix = "wb-dash-vac" }) 
 
 export default function WellBabyDashboard({ patient, encounters, settings, canEdit, onEdit, onAddVisit }) {
   const episodes = useMemo(() => groupDiseaseEpisodes(encounters, WELLBABY_ID, null), [encounters]);
+  const [featureOpen, setFeatureOpen] = useState({});
   const episode = episodes[0];
   const visits = useMemo(() => [...(episode?.visits || [])].sort((a, b) => String(b.date).localeCompare(String(a.date))), [episode]);
   const dob = patient?.dob || dobFromAge(patient?.age, patient?.createdAt);
@@ -132,15 +133,39 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       .join(" · ") || "—";
   };
 
+  const featureKeys = [
+    deliveryVisits.length > 0 && "delivery",
+    newbornVisits.length > 0 && "newborn",
+    "growth",
+    "immunization",
+    "milestones",
+    complaintVisits.length > 0 && "complaints",
+    allergyVisits.length > 0 && "allergy",
+    drugVisits.length > 0 && "drugs",
+    labVisits.length > 0 && "lab",
+    noteVisits.length > 0 && "notes",
+  ].filter(Boolean);
+  const allExpanded = featureKeys.length > 0 && featureKeys.every((k) => featureOpen[k] !== false);
+  const cardOpen = (k) => featureOpen[k] !== false;
+  const setCardOpen = (k) => (next) => setFeatureOpen((o) => ({ ...o, [k]: next }));
+
   return (
     <div className="space-y-4" data-testid="wb-dashboard">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-secondary px-4 py-3">
         <div><p className="font-semibold">Well Baby record · {visits.length} visit{visits.length === 1 ? "" : "s"}</p><p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">Current age {formatAgeYMD(dob) || "—"} · DOB {dob ? fmtDate(dob) : "—"}</p></div>
-        {canEdit && <Button className="h-10" onClick={onAddVisit} data-testid="wb-add-visit"><Plus className="mr-1 h-4 w-4" /> Well baby visit</Button>}
+        <div className="flex shrink-0 items-center gap-2">
+          <ExpandAllButton
+            allExpanded={allExpanded}
+            onToggle={() => setFeatureOpen(Object.fromEntries(featureKeys.map((k) => [k, !allExpanded])))}
+            testid="wb-toggle-all-features-btn"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
+          />
+          {canEdit && <Button className="h-10" onClick={onAddVisit} data-testid="wb-add-visit"><Plus className="mr-1 h-4 w-4" /> Well baby visit</Button>}
+        </div>
       </div>
 
       {deliveryVisits.length > 0 && (
-        <FeatureCard title="Delivery details" count={deliveryVisits.length} lastAt={fmtDateTime(deliveryVisits[0].date)} testid="wb-feat-delivery">
+        <FeatureCard title="Delivery details" count={deliveryVisits.length} lastAt={fmtDateTime(deliveryVisits[0].date)} testid="wb-feat-delivery" open={cardOpen("delivery")} onOpenChange={setCardOpen("delivery")}>
           {deliveryVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0" data-testid={`wb-delivery-visit-${v.id}`}>
               <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.delivery} testid={`wb-delivery-edit-${v.id}`} />
@@ -151,7 +176,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       )}
 
       {newbornVisits.length > 0 && (
-        <FeatureCard title="New born details" count={newbornVisits.length} lastAt={fmtDateTime(newbornVisits[0].date)} testid="wb-feat-newborn">
+        <FeatureCard title="New born details" count={newbornVisits.length} lastAt={fmtDateTime(newbornVisits[0].date)} testid="wb-feat-newborn" open={cardOpen("newborn")} onOpenChange={setCardOpen("newborn")}>
           {newbornVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0" data-testid={`wb-newborn-visit-${v.id}`}>
               <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.newborn} testid={`wb-newborn-edit-${v.id}`} />
@@ -161,12 +186,12 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
         </FeatureCard>
       )}
 
-      <FeatureCard title="Growth chart" count={growthVisits.length || undefined} lastAt={growthVisits[0] ? fmtDateTime(growthVisits[0].date) : undefined} testid="wb-feat-growth">
+      <FeatureCard title="Growth chart" count={growthVisits.length || undefined} lastAt={growthVisits[0] ? fmtDateTime(growthVisits[0].date) : undefined} testid="wb-feat-growth" open={cardOpen("growth")} onOpenChange={setCardOpen("growth")}>
         {growthVisits[0] && <VisitHead v={growthVisits[0]} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.growth} testid={`wb-growth-edit-${growthVisits[0].id}`} />}
         <GrowthReview sex={patient.sex || patient.gender} dob={dob} entries={growthEntries} testid="wb-growth-review" />
       </FeatureCard>
 
-      <FeatureCard title="Immunization" count={immunVisits.length || Object.keys(mergedImmun).length} lastAt={editVisit ? fmtDateTime(editVisit.date) : undefined} testid="wb-feat-immunization">
+      <FeatureCard title="Immunization" count={immunVisits.length || Object.keys(mergedImmun).length} lastAt={editVisit ? fmtDateTime(editVisit.date) : undefined} testid="wb-feat-immunization" open={cardOpen("immunization")} onOpenChange={setCardOpen("immunization")}>
         {immunVisits.length > 0 ? (
           immunVisits.map((v, idx) => {
             const visitGiven = {};
@@ -191,13 +216,13 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
         )}
       </FeatureCard>
 
-      <FeatureCard title="Gross motor milestones" count={msVisits.length || Object.keys(mergedMs).length} lastAt={msVisits[0] ? fmtDateTime(msVisits[0].date) : undefined} testid="wb-feat-milestones">
+      <FeatureCard title="Gross motor milestones" count={msVisits.length || Object.keys(mergedMs).length} lastAt={msVisits[0] ? fmtDateTime(msVisits[0].date) : undefined} testid="wb-feat-milestones" open={cardOpen("milestones")} onOpenChange={setCardOpen("milestones")}>
         {(msVisits[0] || visits[0]) && <VisitHead v={msVisits[0] || visits[0]} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.milestones} testid="wb-ms-edit" />}
         <MilestoneChart records={mergedMs} dob={dob} ageMonths={ageMonths} readOnly testid="wb-dash-milestones" />
       </FeatureCard>
 
       {complaintVisits.length > 0 && (
-        <FeatureCard title="Chief complaints" count={complaintVisits.length} lastAt={fmtDateTime(complaintVisits[0].date)} testid="wb-feat-complaints">
+        <FeatureCard title="Chief complaints" count={complaintVisits.length} lastAt={fmtDateTime(complaintVisits[0].date)} testid="wb-feat-complaints" open={cardOpen("complaints")} onOpenChange={setCardOpen("complaints")}>
           {complaintVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0">
               <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.complaints} testid={`wb-complaint-edit-${v.id}`} />
@@ -208,7 +233,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       )}
 
       {allergyVisits.length > 0 && (
-        <FeatureCard title="Allergy" count={allergyVisits.length} lastAt={fmtDateTime(allergyVisits[0].date)} testid="wb-feat-allergy">
+        <FeatureCard title="Allergy" count={allergyVisits.length} lastAt={fmtDateTime(allergyVisits[0].date)} testid="wb-feat-allergy" open={cardOpen("allergy")} onOpenChange={setCardOpen("allergy")}>
           {allergyVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0" data-testid={`wb-allergy-visit-${v.id}`}>
               <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.allergy} testid={`wb-allergy-edit-${v.id}`} />
@@ -219,7 +244,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       )}
 
       {drugVisits.length > 0 && (
-        <FeatureCard title="Medications" count={drugVisits.reduce((n, v) => n + (v.data?.drugs?.length || 0), 0)} lastAt={fmtDateTime(drugVisits[0].date)} testid="wb-feat-drugs">
+        <FeatureCard title="Medications" count={drugVisits.reduce((n, v) => n + (v.data?.drugs?.length || 0), 0)} lastAt={fmtDateTime(drugVisits[0].date)} testid="wb-feat-drugs" open={cardOpen("drugs")} onOpenChange={setCardOpen("drugs")}>
           <div className="space-y-4">
             {drugVisits.map((v) => {
               const rows = medicationRows(v, WELLBABY_DRUG_META);
@@ -265,7 +290,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       )}
 
       {labVisits.length > 0 && (
-        <FeatureCard title="Laboratory" count={labVisits.reduce((n, v) => n + v.data.lab.length, 0)} lastAt={fmtDateTime(labVisits[0].date)} testid="wb-feat-lab">
+        <FeatureCard title="Laboratory" count={labVisits.reduce((n, v) => n + v.data.lab.length, 0)} lastAt={fmtDateTime(labVisits[0].date)} testid="wb-feat-lab" open={cardOpen("lab")} onOpenChange={setCardOpen("lab")}>
           <div className="space-y-4">
             {labVisits.map((v) => (
               <div key={v.id} data-testid={`wb-lab-visit-${v.id}`}>
@@ -304,7 +329,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
       )}
 
       {noteVisits.length > 0 && (
-        <FeatureCard title="Visit notes" count={noteVisits.length} lastAt={fmtDateTime(noteVisits[0].date)} testid="wb-feat-notes">
+        <FeatureCard title="Visit notes" count={noteVisits.length} lastAt={fmtDateTime(noteVisits[0].date)} testid="wb-feat-notes" open={cardOpen("notes")} onOpenChange={setCardOpen("notes")}>
           {noteVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0">
               <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.notes} testid={`wb-note-edit-${v.id}`} />

@@ -12,6 +12,37 @@ const txt = { green: "text-green-700", amber: "text-amber-700", red: "text-red-7
 
 export const statusClasses = { ring, txt };
 
+export const UnfoldMoreIcon = ({ className = "h-5 w-5" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 5.83 15.17 9l1.41-1.41L12 3 7.41 7.59 8.83 9 12 5.83zm0 12.34L8.83 15l-1.41 1.41L12 21l4.59-4.59L15.17 15 12 18.17z" />
+  </svg>
+);
+
+export const UnfoldLessIcon = ({ className = "h-5 w-5" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="m7.41 18.59 1.42 1.41L12 16.83 15.17 20l1.41-1.41L12 14l-4.59 4.59zm9.18-13.18L15.17 4 12 7.17 8.83 4 7.41 5.41 12 10l4.59-4.59z" />
+  </svg>
+);
+
+/** Expand/collapse-all control matching skin-NTD dashboard & Encounter.jsx. */
+export const ExpandAllButton = ({
+  allExpanded,
+  onToggle,
+  testid = "toggle-all-sections-btn",
+  className = "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border text-primary hover:bg-secondary",
+}) => (
+  <button
+    type="button"
+    data-testid={testid}
+    aria-label={allExpanded ? "Unfold less" : "Unfold more"}
+    title={allExpanded ? "Collapse all" : "Expand all"}
+    onClick={onToggle}
+    className={className}
+  >
+    {allExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
+  </button>
+);
+
 const roundStep = (v, step) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return "";
@@ -260,10 +291,11 @@ export const MiniFieldRenderer = ({ fields, data, onChange, prefix }) => (
 );
 
 /** Full entry-view shell: sidebar + collapsible sections + progress + save bar. */
-export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, title, context, sections, onSave, savedAt, backTo, preface, focusSection }) => {
+export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, title, context, sections, onSave, savedAt, backTo, preface, focusSection, saveDisabled = false }) => {
   const [open, setOpen] = useState({});
   const doneCount = sections.filter((s) => s.done).length;
   const focusIdx = focusSection != null && focusSection !== "" ? Number(focusSection) - 1 : null;
+  const allExpanded = sections.every((_, i) => open[i] !== false);
 
   useEffect(() => {
     if (focusIdx == null || Number.isNaN(focusIdx) || focusIdx < 0) return undefined;
@@ -284,6 +316,10 @@ export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, tit
               <p className="font-head text-xl font-bold tracking-tight sm:text-2xl">{title}</p>
               <p className="text-xs text-muted-foreground" data-testid="cond-context">{context}</p>
             </div>
+            <ExpandAllButton
+              allExpanded={allExpanded}
+              onToggle={() => setOpen(Object.fromEntries(sections.map((_, i) => [i, !allExpanded])))}
+            />
             <Button variant="outline" className="h-11 shrink-0" data-testid="cond-exit-btn" onClick={() => backTo()}><ArrowLeft className="mr-2 h-4 w-4" /> Exit to record</Button>
           </div>
           <div className="rounded-lg border border-border bg-white p-4">
@@ -310,8 +346,8 @@ export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, tit
         <div className="mx-auto flex max-w-[1500px] items-center gap-3 px-4 py-3 sm:px-6">
           <span className="hidden text-xs text-muted-foreground sm:block" data-testid="cond-saved-indicator">{savedAt ? `Last saved: ${savedAt}` : "Draft — not saved yet"}</span>
           <div className="ml-auto flex flex-1 gap-3 sm:flex-none">
-            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="cond-save-btn" onClick={() => onSave(false)}><Save className="mr-2 h-4 w-4" /> Save</Button>
-            <Button className="h-12 flex-1 text-base sm:flex-none sm:px-8" data-testid="cond-save-close-btn" onClick={() => onSave(true)}><Check className="mr-2 h-4 w-4" /> Save &amp; close</Button>
+            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="cond-save-btn" disabled={saveDisabled} onClick={() => onSave(false)}><Save className="mr-2 h-4 w-4" /> Save</Button>
+            <Button className="h-12 flex-1 text-base sm:flex-none sm:px-8" data-testid="cond-save-close-btn" disabled={saveDisabled} onClick={() => onSave(true)}><Check className="mr-2 h-4 w-4" /> Save &amp; close</Button>
           </div>
         </div>
       </div>
@@ -319,8 +355,15 @@ export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, tit
   );
 };
 
-export const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpen = true }) => {
-  const [open, setOpen] = useState(defaultOpen);
+export const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpen = true, open: openProp, onOpenChange }) => {
+  const [uncontrolled, setUncontrolled] = useState(defaultOpen);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : uncontrolled;
+  const setOpen = (next) => {
+    const value = typeof next === "function" ? next(open) : next;
+    if (!controlled) setUncontrolled(value);
+    onOpenChange?.(value);
+  };
   return (
     <section className="rounded-lg border border-border bg-white" data-testid={testid}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 px-4 py-3 text-left" data-testid={`${testid}-toggle`}>

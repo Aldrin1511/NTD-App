@@ -50,7 +50,8 @@ export const OUTCOMES = [
 ];
 
 export const isMalEpisodeClosed = (o) => {
-  const s = String(o || "").trim();
+  const raw = o && typeof o === "object" ? o.status ?? o.outcome ?? "" : o;
+  const s = String(raw || "").trim();
   return !!s && !/^active$/i.test(s);
 };
 
@@ -86,8 +87,10 @@ export const isMalLostToFollowUp = (visits = [], ref = new Date()) => {
   if (!visits.length) return false;
   const sorted = [...visits].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const last = sorted[sorted.length - 1];
-  const status = last?.outcome || last?.data?.outcome?.status || "Active";
-  if (isMalEpisodeClosed(status)) return false;
+  const status = last?.outcome || last?.data?.outcome?.status || last?.data?.outcome || "Active";
+  const statusStr =
+    status && typeof status === "object" ? String(status.status || status.outcome || "Active") : status;
+  if (isMalEpisodeClosed(statusStr)) return false;
   const lastDate = new Date(last.date);
   if (Number.isNaN(lastDate.getTime())) return false;
   const days = (ref.getTime() - lastDate.getTime()) / 86400000;
@@ -98,7 +101,9 @@ export const isMalLostToFollowUp = (visits = [], ref = new Date()) => {
 export const malDisplayStatus = (visits = [], ref = new Date()) => {
   const sorted = [...visits].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const last = sorted[sorted.length - 1];
-  const recorded = last?.outcome || last?.data?.outcome?.status || "";
+  const raw = last?.outcome || last?.data?.outcome?.status || last?.data?.outcome || "";
+  const recorded =
+    raw && typeof raw === "object" ? String(raw.status || raw.outcome || "").trim() : String(raw || "").trim();
   if (isMalEpisodeClosed(recorded)) return recorded;
   if (isMalLostToFollowUp(visits, ref)) return "Lost to follow up";
   return "Active";

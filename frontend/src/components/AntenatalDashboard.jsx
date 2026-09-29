@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertPanel } from "@/components/Fields";
+import { FeatureCard, ExpandAllButton } from "@/components/EntryKit";
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes, visitLabel } from "@/mock/specs";
 import {
   ANTENATAL_ID, resolveDating, trimesterLabel, trimesterOf, gaFromEdd, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
@@ -11,7 +12,7 @@ import {
 } from "@/mock/antenatal";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { ancMedicationRows } from "@/components/AntenatalMedications";
-import { ChevronDown, Pencil, Plus, Baby, Activity } from "lucide-react";
+import { Pencil, Plus, Baby, Activity } from "lucide-react";
 
 const chip = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-foreground" };
 
@@ -111,21 +112,6 @@ const VitalsParamTable = ({ params, visits, getMeasures, testid }) => {
   );
 };
 
-const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpen = true }) => {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="rounded-lg border border-border bg-white" data-testid={testid}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 px-4 py-3 text-left" data-testid={`${testid}-toggle`}>
-        <h2 className="min-w-0 flex-1 font-head text-lg font-semibold">{title}</h2>
-        {lastAt && <span className="truncate text-xs font-medium text-muted-foreground">{lastAt}</span>}
-        {count != null && <Badge variant="outline" className="rounded">{count} entr{count === 1 ? "y" : "ies"}</Badge>}
-        <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && <div className="border-t border-border p-4">{children}</div>}
-    </section>
-  );
-};
-
 const VisitHead = ({ v, onEdit, canEdit, section, testid }) => (
   <div className="mb-2 flex items-start justify-between gap-2">
     <p className="text-xs font-semibold text-primary">{fmtDateTime(v.date)} · {v.worker} · {v.type}</p>
@@ -174,6 +160,7 @@ const statusBadgeCls = {
 export default function AntenatalDashboard({ patient, encounters, canEdit, onEdit, onAddVisit }) {
   const episodes = useMemo(() => groupDiseaseEpisodes(encounters, ANTENATAL_ID, null), [encounters]);
   const [sel, setSel] = useState(episodes[0]?.id || "");
+  const [featureOpen, setFeatureOpen] = useState({});
   const episode = episodes.find((e) => e.id === sel) || episodes[0];
   const visits = useMemo(() => [...(episode?.visits || [])].sort((a, b) => String(b.date).localeCompare(String(a.date))), [episode]);
 
@@ -251,6 +238,26 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
 
   const cd = latest?.data?.caseDetails || {};
 
+  const showExamLegacy = examVisits.length > 0 && !deliveryVisits.some((v) => (v.data?.delivery?.babies || []).some((b) => b.physicalExam && Object.keys(b.physicalExam).some((k) => b.physicalExam[k])));
+  const featureKeys = [
+    "visits",
+    caseVisits[0] && "case",
+    (medicalAll.length > 0 || Object.keys(menstrual).length > 0 || histVisits[0]) && "history",
+    motherVitalsVisits.length > 0 && "motherVitals",
+    fetalVitalsVisits.length > 0 && "fetalVitals",
+    labVisits.length > 0 && "lab",
+    radVisits.length > 0 && "radiology",
+    drugVisits.length > 0 && "drugs",
+    "immunization",
+    deliveryVisits.length > 0 && "delivery",
+    showExamLegacy && "exam",
+    noteVisits.length > 0 && "notes",
+    outcomeVisits.length > 0 && "outcome",
+  ].filter(Boolean);
+  const allExpanded = featureKeys.length > 0 && featureKeys.every((k) => featureOpen[k] !== false);
+  const cardOpen = (k) => featureOpen[k] !== false;
+  const setCardOpen = (k) => (next) => setFeatureOpen((o) => ({ ...o, [k]: next }));
+
   return (
     <div className="space-y-4" data-testid="anc-dashboard">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-secondary px-4 py-3" data-testid="anc-episode-summary">
@@ -273,9 +280,19 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
           </div>
           <p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">Start: {fmtDate(episode.start)} · Latest: {fmtDate(episode.last)}</p>
         </div>
-        {canEdit && !closed && (
-          <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="anc-add-visit"><Plus className="mr-1 h-4 w-4" /> ANC visit</Button>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {featureKeys.length > 0 && (
+            <ExpandAllButton
+              allExpanded={allExpanded}
+              onToggle={() => setFeatureOpen(Object.fromEntries(featureKeys.map((k) => [k, !allExpanded])))}
+              testid="anc-toggle-all-features-btn"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
+            />
+          )}
+          {canEdit && !closed && (
+            <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="anc-add-visit"><Plus className="mr-1 h-4 w-4" /> ANC visit</Button>
+          )}
+        </div>
       </div>
 
       {risks.length > 0 && (
@@ -310,7 +327,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
         </div>
       </div>
 
-      <FeatureCard title="ANC visits by trimester" count={visits.length} testid="anc-feat-visits">
+      <FeatureCard title="ANC visits by trimester" count={visits.length} testid="anc-feat-visits" open={cardOpen("visits")} onOpenChange={setCardOpen("visits")}>
         <div className="grid gap-4 sm:grid-cols-3">
           {[1, 2, 3].map((t) => (
             <div key={t}>
@@ -330,7 +347,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       </FeatureCard>
 
       {caseVisits[0] && (
-        <FeatureCard title="Case details" count={caseVisits.length} lastAt={fmtDateTime(caseVisits[0].date)} testid="anc-feat-case">
+        <FeatureCard title="Case details" count={caseVisits.length} lastAt={fmtDateTime(caseVisits[0].date)} testid="anc-feat-case" open={cardOpen("case")} onOpenChange={setCardOpen("case")}>
           <VisitHead v={caseVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.case} testid={`anc-case-edit-${caseVisits[0].id}`} />
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm" data-testid="anc-gpla-summary">
             {[
@@ -354,7 +371,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {(medicalAll.length > 0 || Object.keys(menstrual).length > 0 || histVisits[0]) && (
-        <FeatureCard title="History" count={histVisits.length || undefined} lastAt={histVisits[0] ? fmtDateTime(histVisits[0].date) : undefined} testid="anc-feat-history">
+        <FeatureCard title="History" count={histVisits.length || undefined} lastAt={histVisits[0] ? fmtDateTime(histVisits[0].date) : undefined} testid="anc-feat-history" open={cardOpen("history")} onOpenChange={setCardOpen("history")}>
           {histVisits[0] && <VisitHead v={histVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.history} testid={`anc-hist-edit-${histVisits[0].id}`} />}
           {medicalAll.length > 0 && (
             <div className="mb-3" data-testid="anc-medical-list">
@@ -384,7 +401,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {motherVitalsVisits.length > 0 && (
-        <FeatureCard title="Mother vitals" count={motherVitalsVisits.length} lastAt={fmtDateTime(motherVitalsVisits[0].date)} testid="anc-feat-mother-vitals">
+        <FeatureCard title="Mother vitals" count={motherVitalsVisits.length} lastAt={fmtDateTime(motherVitalsVisits[0].date)} testid="anc-feat-mother-vitals" open={cardOpen("motherVitals")} onOpenChange={setCardOpen("motherVitals")}>
           <VisitHead v={motherVitalsVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.motherVitals} testid={`anc-mv-edit-${motherVitalsVisits[0].id}`} />
           {weightGraph.length > 0 && (
             <div className="mb-4 h-64 w-full rounded-lg border border-border bg-white p-2" data-testid="anc-weight-graph">
@@ -420,7 +437,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {fetalVitalsVisits.length > 0 && (
-        <FeatureCard title="Fetal vitals" count={fetalVitalsVisits.length} lastAt={fmtDateTime(fetalVitalsVisits[0].date)} testid="anc-feat-fetal-vitals">
+        <FeatureCard title="Fetal vitals" count={fetalVitalsVisits.length} lastAt={fmtDateTime(fetalVitalsVisits[0].date)} testid="anc-feat-fetal-vitals" open={cardOpen("fetalVitals")} onOpenChange={setCardOpen("fetalVitals")}>
           <VisitHead v={fetalVitalsVisits[0]} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.fetalVitals} testid={`anc-fv-edit-${fetalVitalsVisits[0].id}`} />
           <VitalsParamTable
             testid="anc-fetal-vitals-table"
@@ -435,7 +452,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {labVisits.length > 0 && (
-        <FeatureCard title="Laboratory" count={labVisits.reduce((n, v) => n + v.data.lab.length, 0)} lastAt={fmtDateTime(labVisits[0].date)} testid="anc-feat-lab">
+        <FeatureCard title="Laboratory" count={labVisits.reduce((n, v) => n + v.data.lab.length, 0)} lastAt={fmtDateTime(labVisits[0].date)} testid="anc-feat-lab" open={cardOpen("lab")} onOpenChange={setCardOpen("lab")}>
           <div className="space-y-4">
             {labVisits.map((v) => (
               <div key={v.id} data-testid={`anc-lab-visit-${v.id}`}>
@@ -474,7 +491,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {radVisits.length > 0 && (
-        <FeatureCard title="Radiology" count={radVisits.reduce((n, v) => n + v.data.radiology.length, 0)} lastAt={fmtDateTime(radVisits[0].date)} testid="anc-feat-radiology">
+        <FeatureCard title="Radiology" count={radVisits.reduce((n, v) => n + v.data.radiology.length, 0)} lastAt={fmtDateTime(radVisits[0].date)} testid="anc-feat-radiology" open={cardOpen("radiology")} onOpenChange={setCardOpen("radiology")}>
           <div className="space-y-3">
             {radVisits.map((v) => (
               <div key={v.id}>
@@ -492,7 +509,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {drugVisits.length > 0 && (
-        <FeatureCard title="Medications" count={drugVisits.reduce((n, v) => n + (v.data?.drugs?.length || 0), 0)} lastAt={fmtDateTime(drugVisits[0].date)} testid="anc-feat-drugs">
+        <FeatureCard title="Medications" count={drugVisits.reduce((n, v) => n + (v.data?.drugs?.length || 0), 0)} lastAt={fmtDateTime(drugVisits[0].date)} testid="anc-feat-drugs" open={cardOpen("drugs")} onOpenChange={setCardOpen("drugs")}>
           <div className="space-y-4">
             {drugVisits.map((v) => {
               const rows = ancMedicationRows(v);
@@ -539,7 +556,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
         </FeatureCard>
       )}
 
-      <FeatureCard title="Immunization" count={Object.keys(mergedImmun).length} testid="anc-feat-immunization">
+      <FeatureCard title="Immunization" count={Object.keys(mergedImmun).length} testid="anc-feat-immunization" open={cardOpen("immunization")} onOpenChange={setCardOpen("immunization")}>
         {immunEditVisit && <VisitHead v={immunEditVisit} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.immunization} testid={`anc-immun-edit-${immunEditVisit.id}`} />}
         <div data-testid="anc-dash-immunization">
           <ImmunizationDashCards
@@ -553,7 +570,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       </FeatureCard>
 
       {deliveryVisits.length > 0 && (
-        <FeatureCard title="Delivery & new born" count={deliveryVisits.length} testid="anc-feat-delivery">
+        <FeatureCard title="Delivery & new born" count={deliveryVisits.length} testid="anc-feat-delivery" open={cardOpen("delivery")} onOpenChange={setCardOpen("delivery")}>
           {deliveryVisits.map((v) => {
             const del = v.data.delivery || {};
             return (
@@ -590,8 +607,8 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
         </FeatureCard>
       )}
 
-      {examVisits.length > 0 && !deliveryVisits.some((v) => (v.data?.delivery?.babies || []).some((b) => b.physicalExam && Object.keys(b.physicalExam).some((k) => b.physicalExam[k]))) && (
-        <FeatureCard title="Physical examination" count={examVisits.length} lastAt={fmtDateTime(examVisits[0].date)} testid="anc-feat-exam">
+      {showExamLegacy && (
+        <FeatureCard title="Physical examination" count={examVisits.length} lastAt={fmtDateTime(examVisits[0].date)} testid="anc-feat-exam" open={cardOpen("exam")} onOpenChange={setCardOpen("exam")}>
           {examVisits.map((v) => (
             <div key={v.id} className="border-b border-border/60 py-2 last:border-0">
               <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.newborn} testid={`anc-exam-edit-${v.id}`} />
@@ -606,7 +623,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {noteVisits.length > 0 && (
-        <FeatureCard title="Visit notes" count={noteVisits.length} lastAt={fmtDateTime(noteVisits[0].date)} testid="anc-feat-notes">
+        <FeatureCard title="Visit notes" count={noteVisits.length} lastAt={fmtDateTime(noteVisits[0].date)} testid="anc-feat-notes" open={cardOpen("notes")} onOpenChange={setCardOpen("notes")}>
           <div className="space-y-2">
             {noteVisits.map((v) => (
               <div key={v.id}>
@@ -619,7 +636,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       )}
 
       {outcomeVisits.length > 0 && (
-        <FeatureCard title="Case outcome" count={outcomeVisits.length} testid="anc-feat-outcome">
+        <FeatureCard title="Case outcome" count={outcomeVisits.length} testid="anc-feat-outcome" open={cardOpen("outcome")} onOpenChange={setCardOpen("outcome")}>
           <div className="space-y-2">
             {outcomeVisits.map((v) => (
               <div

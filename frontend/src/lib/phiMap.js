@@ -7,17 +7,87 @@ export const FEATURE_CODES = {
   lf: "LFAS",
   buruli: "BUAS",
   leprosy: "LPRSYA",
+  antenatal: "ANAS",
+  malnutrition: "MLAS",
+  wellbaby: "WBAS",
 };
 
 export function featureCodeForDisease(disease) {
   return FEATURE_CODES[String(disease || "").toLowerCase()] || "";
 }
 
+/** ANC / malnutrition / well-baby — dedicated forms; ignore stub DISEASE_SPECS from Access configs. */
+export const EXTRA_DISEASE_IDS = new Set(["antenatal", "malnutrition", "wellbaby"]);
+
+export function isExtraDisease(disease) {
+  return EXTRA_DISEASE_IDS.has(String(disease || "").toLowerCase());
+}
+
+/** Top-level form section → PHI subFeatureCode (mirrors skin-NTD section naming). */
+export const EXTRA_PHI_SECTIONS = {
+  antenatal: {
+    caseDetails: "Case details",
+    history: "Ante Natal Clinical history",
+    vitals: "Ante Natal Assessment",
+    lab: "Laboratory",
+    radiology: "Radiology",
+    drugs: "Medications",
+    posology: "Medications",
+    medCourses: "Medications",
+    immunization: "Immunization",
+    notes: "Visit notes",
+    delivery: "Delivery",
+    physicalExam: "Physical exam",
+    outcome: "Final case outcome",
+  },
+  malnutrition: {
+    caseDetails: "Case details",
+    visitType: "Case details",
+    week: "Case details",
+    weight: "Malnutrition Assessment",
+    height: "Malnutrition Assessment",
+    length: "Malnutrition Assessment",
+    muac: "Malnutrition Assessment",
+    oedema: "Malnutrition Assessment",
+    zScore: "Malnutrition Assessment",
+    dangerSigns: "Danger signs",
+    history: "Malnutrition Clinical history",
+    meds: "Medications",
+    posology: "Medications",
+    medCourses: "Medications",
+    notes: "Visit notes",
+    outcome: "Final case outcome",
+  },
+  wellbaby: {
+    delivery: "Delivery / birth history",
+    growth: "Growth",
+    immunization: "Immunization",
+    milestones: "Milestones",
+    allergy: "Allergy",
+    lab: "Laboratory",
+    drugs: "Medications",
+    posology: "Medications",
+    medCourses: "Medications",
+    notes: "Visit notes",
+    outcome: "Final case outcome",
+  },
+};
+
 function isEmpty(v) {
   if (v === undefined || v === null || v === "") return true;
   if (Array.isArray(v) && v.length === 0) return true;
   if (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) return true;
   return false;
+}
+
+export function humanizePhiKey(key) {
+  return (
+    String(key || "")
+      .replace(/([A-Z])/g, " $1")
+      .replace(/[_-]+/g, " ")
+      .replace(/^\w/, (c) => c.toUpperCase())
+      .trim() || String(key || "")
+  );
 }
 
 function setByPath(obj, path, value) {
@@ -56,6 +126,9 @@ export function examSectionTitle(diseaseId) {
   if (diseaseId === "lf") return "Lymphatic Filariasis Examination";
   if (diseaseId === "buruli") return "Buruli Ulcer Examination";
   if (diseaseId === "leprosy") return "Leprosy Examination";
+  if (diseaseId === "antenatal") return "Ante Natal Assessment";
+  if (diseaseId === "malnutrition") return "Malnutrition Assessment";
+  if (diseaseId === "wellbaby") return "Well Baby Assessment";
   return "Assessment / body charting";
 }
 
@@ -139,15 +212,135 @@ function pushBlob(items, item, subFeatureCode, value, fieldKey) {
   items.push({ item, subFeatureCode, value, fieldKey });
 }
 
+/** Flatten nested form objects into leaf fieldKey → value (arrays stay as one leaf). */
+export function collectPhiLeaves(obj, prefix = "", out = {}) {
+  if (obj === undefined) return out;
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+    if (prefix) out[prefix] = obj;
+    return out;
+  }
+  const keys = Object.keys(obj);
+  if (!keys.length) {
+    if (prefix) out[prefix] = obj;
+    return out;
+  }
+  keys.forEach((k) => {
+    if (String(k).startsWith("_")) return;
+    collectPhiLeaves(obj[k], prefix ? `${prefix}.${k}` : k, out);
+  });
+  return out;
+}
+
+/**
+ * Diff two section objects into one-PHI-per-leaf rows (for live autosave on ANC/Mal/WB).
+ */
+export function phiItemsForExtraSectionDiff({
+  pathPrefix,
+  subFeatureCode,
+  prev = {},
+  next = {},
+}) {
+  const items = [];
+  const prevLeaves = collectPhiLeaves(prev, pathPrefix);
+  const nextLeaves = collectPhiLeaves(next, pathPrefix);
+  const keys = new Set([...Object.keys(prevLeaves), ...Object.keys(nextLeaves)]);
+  keys.forEach((fk) => {
+    if (JSON.stringify(prevLeaves[fk]) === JSON.stringify(nextLeaves[fk])) return;
+    if (nextLeaves[fk] === undefined) return;
+    const leaf = fk.includes(".") ? fk.split(".").pop() : fk;
+    items.push({
+      item: humanizePhiKey(leaf),
+      subFeatureCode: subFeatureCode || "Case details",
+      value: nextLeaves[fk],
+      fieldKey: fk,
+    });
+  });
+  return items;
+}
+
+/** One PHI row for a single top-level or nested field change on an extra disease form. */
+export function phiItemForExtraFieldChange({
+  fieldKey,
+  value,
+  subFeatureCode,
+  itemLabel,
+}) {
+  const leaf = String(fieldKey || "").includes(".")
+    ? String(fieldKey).split(".").pop()
+    : String(fieldKey || "");
+  return {
+    item: itemLabel || humanizePhiKey(leaf),
+    subFeatureCode: subFeatureCode || "Case details",
+    value,
+    fieldKey,
+  };
+}
+
+function flattenExtraEncounterToPhiItems({ disease, data = {}, diagnosis, outcome }) {
+  const items = [];
+  const diseaseId = String(disease || "").toLowerCase();
+  const sections = EXTRA_PHI_SECTIONS[diseaseId] || {};
+  const fallbackSection = examSectionTitle(diseaseId);
+
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (key === "diagnosis" || key === "outcome") return;
+    if (String(key).startsWith("_")) return;
+    const sub = sections[key] || fallbackSection;
+    const leaves = collectPhiLeaves(value, key);
+    Object.entries(leaves).forEach(([fk, v]) => {
+      if (isEmpty(v)) return;
+      const leaf = fk.includes(".") ? fk.split(".").pop() : fk;
+      items.push({
+        item: humanizePhiKey(leaf),
+        subFeatureCode: sub,
+        value: v,
+        fieldKey: fk,
+      });
+    });
+  });
+
+  if (!isEmpty(diagnosis || data.diagnosis)) {
+    items.push({
+      item: "Diagnosis",
+      subFeatureCode: "Diagnosis",
+      value: diagnosis || data.diagnosis,
+      fieldKey: "diagnosis",
+    });
+  }
+
+  const out =
+    outcome ||
+    (typeof data.outcome === "object" && data.outcome != null
+      ? data.outcome.status || data.outcome
+      : data.outcome);
+  if (!isEmpty(out)) {
+    items.push({
+      item: "Outcome",
+      subFeatureCode: "Final case outcome",
+      value: out,
+      fieldKey: "outcome",
+    });
+  }
+
+  return items.filter((q) => q.item && q.subFeatureCode);
+}
+
 /**
  * Flatten encounter form state into one-PHI-per-question rows (Surgery PRFM pattern).
  * Simple spec fields use question label; complex blocks use a labelled blob + fieldKey.
+ * ANC / malnutrition / wellbaby always use dedicated flatten (Access stub specs are empty).
  */
 export function flattenEncounterToPhiItems({ disease, data = {}, diagnosis, outcome }) {
-  const items = [];
   const diseaseId = String(disease || "").toLowerCase();
+  if (isExtraDisease(diseaseId)) {
+    return flattenExtraEncounterToPhiItems({ disease: diseaseId, data, diagnosis, outcome });
+  }
+
+  const items = [];
   const spec = DISEASE_SPECS[diseaseId];
-  if (!spec) return items;
+  if (!spec) {
+    return flattenExtraEncounterToPhiItems({ disease: diseaseId, data, diagnosis, outcome });
+  }
 
   emitFields(items, spec.caseDetails, data.caseDetails, "Case details", "caseDetails");
   emitFields(

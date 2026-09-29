@@ -1,8 +1,8 @@
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertPanel } from "@/components/Fields";
-import { FeatureCard } from "@/components/EntryKit";
+import { FeatureCard, ExpandAllButton } from "@/components/EntryKit";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes } from "@/mock/specs";
 import { ageMonthsToLabel } from "@/mock/growth";
@@ -50,6 +50,7 @@ const buildWeekColumns = (followUps = []) => {
 
 export default function MalnutritionDashboard({ patient, encounters, canEdit, onEdit, onAddVisit }) {
   const episode = useMemo(() => groupDiseaseEpisodes(encounters, MAL_ID, null)[0], [encounters]);
+  const [featureOpen, setFeatureOpen] = useState({});
   const visits = useMemo(
     () => [...(episode?.visits || [])].sort((a, b) => String(a.date).localeCompare(String(b.date))),
     [episode],
@@ -124,6 +125,12 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
 
   const latestData = latest?.data || {};
 
+  const showOutcome = !!(outcome || /^lost to follow/i.test(displayStatus));
+  const featureKeys = ["case", "progress", showOutcome && "outcome"].filter(Boolean);
+  const allExpanded = featureKeys.length > 0 && featureKeys.every((k) => featureOpen[k] !== false);
+  const cardOpen = (k) => featureOpen[k] !== false;
+  const setCardOpen = (k) => (next) => setFeatureOpen((o) => ({ ...o, [k]: next }));
+
   return (
     <div className="space-y-4" data-testid="mal-dashboard">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-secondary px-4 py-3">
@@ -161,11 +168,19 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
             {weeksVisited > 0 ? ` · ${weeksVisited}/12 weeks recorded` : ""}
           </p>
         </div>
-        {canEdit && onAddVisit && !closed && (
-          <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="mal-add-visit">
-            <Plus className="mr-1 h-4 w-4" /> Malnutrition visit
-          </Button>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <ExpandAllButton
+            allExpanded={allExpanded}
+            onToggle={() => setFeatureOpen(Object.fromEntries(featureKeys.map((k) => [k, !allExpanded])))}
+            testid="mal-toggle-all-features-btn"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
+          />
+          {canEdit && onAddVisit && !closed && (
+            <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="mal-add-visit">
+              <Plus className="mr-1 h-4 w-4" /> Malnutrition visit
+            </Button>
+          )}
+        </div>
       </div>
 
       {grade.level && (
@@ -192,7 +207,7 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
         ))}
       </div>
 
-      <FeatureCard title="Case details" lastAt={admission ? fmtDateTime(admission.date) : undefined} testid="mal-feat-case">
+      <FeatureCard title="Case details" lastAt={admission ? fmtDateTime(admission.date) : undefined} testid="mal-feat-case" open={cardOpen("case")} onOpenChange={setCardOpen("case")}>
         {admission && canEdit && (
           <div className="mb-2 flex justify-end">
             <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => onEdit(admission)} data-testid={`mal-edit-case-${admission.id}`}>
@@ -222,7 +237,7 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
         </dl>
       </FeatureCard>
 
-      <FeatureCard title="Progress" testid="mal-feat-progress">
+      <FeatureCard title="Progress" testid="mal-feat-progress" open={cardOpen("progress")} onOpenChange={setCardOpen("progress")}>
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <p className="mb-2 text-xs font-semibold text-muted-foreground">Weight (kg)</p>
@@ -326,8 +341,8 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
         </div>
       </FeatureCard>
 
-      {(outcome || /^lost to follow/i.test(displayStatus)) && (
-        <FeatureCard title="Case outcome" testid="mal-feat-outcome" defaultOpen>
+      {showOutcome && (
+        <FeatureCard title="Case outcome" testid="mal-feat-outcome" open={cardOpen("outcome")} onOpenChange={setCardOpen("outcome")}>
           <p className="text-sm font-semibold">{outcome?.status || displayStatus}</p>
           {outcome?.status === "Recovered / Discharged" && (
             <p className="text-sm text-muted-foreground">

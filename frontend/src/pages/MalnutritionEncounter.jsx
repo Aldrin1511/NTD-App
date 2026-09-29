@@ -17,6 +17,7 @@ import {
 } from "@/mock/malnutrition";
 import { dropVisitPosology, setVisitPosology, slugDrug } from "@/lib/medications";
 import { toast } from "sonner";
+import { persistIntegratedEncounter, useExtraPhiAutosave, useLoadEncounterPhi } from "@/lib/extraEncounterSync";
 
 const ANTHRO = [
   { k: "weight", label: "Current weight", unit: "kg", min: 2, max: 40, step: 0.1 },
@@ -82,9 +83,9 @@ export default function MalnutritionEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, user, online } = useStore();
+  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, online } = useStore();
   const p = patients.find((x) => x.id === id);
-  const existing = encounters.find((e) => e.id === params.get("enc") && e.disease === MAL_ID);
+  const existing = encounters.find((e) => e.disease === MAL_ID && (e.id === params.get("enc") || e.visitId === params.get("enc")));
   const weekFromUrl = params.get("week");
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
   const malEncs = useMemo(
@@ -115,11 +116,12 @@ export default function MalnutritionEncounter() {
   /** Remount/reset key: each saved visit or each new week gets its own fresh form. */
   const encounterKey = existing?.id || `new-week-${weekFromUrl || "next"}`;
 
-  const buildForm = () => {
+  const buildForm = (override = null) => {
     // New follow-up / new week: start empty (do not copy admission monitoring data).
     // Case details still seed from admission via lockedCaseDetails / seededCase.
-    const base = existing?.data
-      ? { ...empty(), ...existing.data }
+    const source = override != null ? override : existing?.data;
+    const base = source
+      ? { ...empty(), ...source }
       : { ...empty() };
     base.outcome = { status: "Active", ...(base.outcome || {}) };
     if (!base.outcome.status) base.outcome.status = "Active";
@@ -135,7 +137,7 @@ export default function MalnutritionEncounter() {
     }
     if (visitType === "Follow-up") {
       // Never keep clinical fields from a previous visit when opening a blank week
-      if (!existing) {
+      if (!existing && override == null) {
         Object.assign(base, {
           ...empty(),
           visitType: "Follow-up",
@@ -163,6 +165,14 @@ export default function MalnutritionEncounter() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when visit identity changes
   }, [encounterKey]);
 
+  const { phiLoading } = useLoadEncounterPhi({
+    existing,
+    online,
+    loadEncounterPhi,
+    applyForm: (form) => buildForm({ ...(existing?.data || {}), ...form }),
+    setD,
+    setSavedAt,
+  });
   // Keep first-visit weight synced from case details admission weight when empty / matching prior
   useEffect(() => {
     if (d.visitType !== "Admission") return;
@@ -194,6 +204,14 @@ export default function MalnutritionEncounter() {
   }, [isAdmissionVisit, priorInEpisode, weekFromUrl, encounterKey]);
 
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
+
+  const { queueSectionDiff, queueField } = useExtraPhiAutosave({
+    online,
+    upsertEncounterPhiField,
+    patientId: p?.id || id,
+    existing,
+    diseaseId: MAL_ID,
+  });
 
   const dob = p?.dob || dobFromAge(p?.age, p?.createdAt);
   const ageMonths = monthsBetween(dob, existing?.date || localISODate());
@@ -237,10 +255,28 @@ export default function MalnutritionEncounter() {
     );
   }
 
-  const set = (k, v) => setD((s) => ({ ...s, [k]: v, ...(k === "weight" ? { _weightTouched: true } : {}) }));
-  const setCase = (patch) => setD((s) => ({ ...s, caseDetails: { ...s.caseDetails, ...patch } }));
-  const setDanger = (k, v) => setD((s) => ({ ...s, dangerSigns: { ...s.dangerSigns, [k]: v } }));
-  const setHist = (k, v) => setD((s) => ({ ...s, history: { ...s.history, [k]: v } }));
+  const set = (k, v) => {
+    setD((s) => ({ ...s, [k]: v, ...(k === "weight" ? { _weightTouched: true } : {}) }));
+    queueField(k, v);
+  };
+  const setCase = (patch) => {
+    const prev = d.caseDetails || {};
+    const next = { ...prev, ...patch };
+    setD((s) => ({ ...s, caseDetails: next }));
+    queueSectionDiff("caseDetails", prev, next);
+  };
+  const setDanger = (k, v) => {
+    const prev = d.dangerSigns || {};
+    const next = { ...prev, [k]: v };
+    setD((s) => ({ ...s, dangerSigns: next }));
+    queueSectionDiff("dangerSigns", prev, next);
+  };
+  const setHist = (k, v) => {
+    const prev = d.history || {};
+    const next = { ...prev, [k]: v };
+    setD((s) => ({ ...s, history: next }));
+    queueSectionDiff("history", prev, next);
+  };
 
   const toggleMed = (name, on) => {
     setD((s) => {
@@ -254,6 +290,8 @@ export default function MalnutritionEncounter() {
           duration: meta.duration || "",
         }, meta);
       }
+      queueField("meds", meds, "Medications", "Meds");
+      queueField("posology", posology, "Medications", "Posology");
       return { ...s, meds, posology };
     });
   };
@@ -261,10 +299,12 @@ export default function MalnutritionEncounter() {
   const idx = malIndices({ weight: d.weight, height: d.height, ageMonths, sex });
   const alert = monitoringAlert(d, prevMonitoring);
 
-  const persist = (close) => {
+  const persist = async (close) => {
     const episodeId =
       existing?.episodeId
+      || existing?.recordId
       || priorInEpisode[0]?.episodeId
+      || priorInEpisode[0]?.recordId
       || newMalEpisodeId();
     const visitType = isAdmissionVisit ? "Admission" : "Follow-up";
     const type = visitType === "Follow-up" ? `Follow-up${d.week ? ` · Week ${d.week}` : ""}` : "Admission";
@@ -276,30 +316,39 @@ export default function MalnutritionEncounter() {
       caseNo: d.caseDetails?.caseNo || lockedCaseDetails.caseNo || caseNo,
       admissionDate: d.caseDetails?.admissionDate || lockedCaseDetails.admissionDate || localISODate(),
     };
-    await saveEncounter({
-      id: existing?.id,
-      patientId: p.id,
-      episodeId,
-      disease: MAL_ID,
-      facility,
-      worker: user?.name,
-      type,
-      diagnosis: caseDetails.admissionType || "",
-      treatment: (d.meds || []).join(" + "),
-      outcome: isMalEpisodeClosed(outcomeStatus) ? outcomeStatus : "Active",
-      data: {
-        ...d,
-        visitType,
-        targetWeight: undefined,
-        caseDetails,
-        indices: idx,
-        alert,
-        ageMonths,
+    const { canWritePhi } = await persistIntegratedEncounter({
+      online,
+      saveEncounter,
+      upsertEncounterPhiField,
+      finalizeEncounterPhi,
+      existing,
+      payload: {
+        id: existing?.id,
+        patientId: p.id,
+        episodeId,
+        disease: MAL_ID,
+        facility,
+        worker: user?.name,
+        type,
+        diagnosis: caseDetails.admissionType || "",
+        treatment: (d.meds || []).join(" + "),
+        outcome: isMalEpisodeClosed(outcomeStatus) ? outcomeStatus : "Active",
+        data: {
+          ...d,
+          visitType,
+          targetWeight: undefined,
+          caseDetails,
+          indices: idx,
+          alert,
+          ageMonths,
+        },
       },
     });
     setSavedAt(new Date().toLocaleTimeString());
     if (close) navigate(`/patients/${p.id}?tab=malnutrition`);
-    toast.success(online ? (close ? "Malnutrition visit saved" : "Saved to device") : "Saved · queued until online");
+    if (canWritePhi) toast.success(close ? "Malnutrition visit saved" : "Saved");
+    else if (online) toast.success(close ? "Malnutrition visit queued for sync" : "Saved · queued for sync");
+    else toast.success("Saved · queued until online");
   };
 
   const IndexBadge = ({ label, r }) => (
@@ -530,7 +579,14 @@ export default function MalnutritionEncounter() {
                   selected={(d.meds || []).includes(name)}
                   onToggle={(on) => toggleMed(name, on)}
                   posology={d.posology}
-                  onPosology={(patch) => setD((s) => ({ ...s, ...patch }))}
+                  onPosology={(patch) => {
+                    setD((s) => {
+                      const next = { ...s, ...patch };
+                      if (patch.posology != null) queueField("posology", next.posology, "Medications", "Posology");
+                      if (patch.meds != null) queueField("meds", next.meds, "Medications", "Meds");
+                      return next;
+                    });
+                  }}
                 />
               ))}
             </div>
@@ -631,6 +687,7 @@ export default function MalnutritionEncounter() {
       sections={sections}
       onSave={persist}
       savedAt={savedAt}
+      saveDisabled={phiLoading}
       backTo={() => navigate(`/patients/${p.id}?tab=malnutrition`)}
     />
   );

@@ -23,6 +23,16 @@ import { featureCodeForDisease, rehydrateFormFromPhi } from "@/lib/phiMap";
 import { resolveDob } from "@/lib/hmisPatient";
 import { formatInternational } from "@/lib/phone";
 import { dobFromAgeYmd } from "@/components/Capture";
+
+/** ANC/Mal store outcome as `{ status, ... }`; chips/API need a string. */
+function outcomeToStatus(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "object") {
+    const nested = value.status ?? value.outcome ?? "";
+    return nested == null ? "" : String(nested);
+  }
+  return String(value);
+}
 import {
   OP,
   newLocalId,
@@ -142,7 +152,7 @@ function normalizeApiPatient(row) {
           .map((s) => ({
             diseaseId: String(s?.diseaseId || s?.disease || "").toLowerCase(),
             diagnosis: s?.diagnosis || "",
-            outcome: s?.outcome || "",
+            outcome: outcomeToStatus(s?.outcome),
             lastEncounter: s?.lastEncounter || s?.date || "",
           }))
           .filter((s) => s.diseaseId)
@@ -852,7 +862,7 @@ export function StoreProvider({ children }) {
           ),
         })),
       /**
-       * Start episode for Scabies/Yaws/LF/Buruli/Leprosy:
+       * Start episode for Scabies/Yaws/LF/Buruli/Leprosy/AnteNatal/Malnutrition/WellBaby:
        * portal-be creates RecordsT + VisitsT + VisitMetaT, then we keep a local pending visit.
        */
       startEpisode: async ({
@@ -1668,6 +1678,7 @@ export function StoreProvider({ children }) {
               enc.featureCode ||
               featureCodeForDisease(enc.disease || existing.disease),
             disease: enc.disease || existing.disease,
+            outcome: outcomeToStatus(enc.outcome) || outcomeToStatus(enc.data?.outcome) || outcomeToStatus(existing.outcome) || "",
             pendingStart: false,
             complete: true,
             revised,
@@ -1693,6 +1704,7 @@ export function StoreProvider({ children }) {
             localOnly: needsQueue,
             featureCode: featureCodeForDisease(enc.disease || "scabies"),
             ...rest,
+            outcome: outcomeToStatus(enc.outcome) || outcomeToStatus(enc.data?.outcome) || "",
             id: providedId || `ENC-${String(Math.floor(Math.random() * 900000) + 100000)}`,
           };
         }
@@ -1714,7 +1726,7 @@ export function StoreProvider({ children }) {
               diseaseId: saved.disease,
               disease: saved.disease,
               diagnosis: saved.diagnosis || saved.data?.diagnosis || "",
-              outcome: saved.outcome || saved.data?.outcome || "",
+              outcome: outcomeToStatus(saved.outcome) || outcomeToStatus(saved.data?.outcome) || "",
               lastEncounter: saved.date || new Date().toISOString(),
             });
             if (updated) {
@@ -1771,7 +1783,7 @@ export function StoreProvider({ children }) {
               disease: saved.disease,
               data: cloneFormDataForSync(saved.data || {}),
               diagnosis: saved.diagnosis || saved.data?.diagnosis || "",
-              outcome: saved.outcome || saved.data?.outcome || "",
+              outcome: outcomeToStatus(saved.outcome) || outcomeToStatus(saved.data?.outcome) || "",
             },
           });
         } else {
@@ -1858,7 +1870,7 @@ export function StoreProvider({ children }) {
           visitId: encounter.visitId,
           disease: encounter.disease,
           diagnosis: encounter.diagnosis || encounter.data?.diagnosis || "",
-          outcome: encounter.outcome || encounter.data?.outcome || "",
+          outcome: outcomeToStatus(encounter.outcome) || outcomeToStatus(encounter.data?.outcome) || "",
           date: encounter.date || new Date().toISOString(),
           lastEncounter: encounter.date || new Date().toISOString(),
         });
@@ -1866,7 +1878,7 @@ export function StoreProvider({ children }) {
         if (encounter.disease) {
           const diseaseId = String(encounter.disease).toLowerCase();
           const diagnosis = encounter.diagnosis || encounter.data?.diagnosis || "";
-          const outcome = encounter.outcome || encounter.data?.outcome || "";
+          const outcome = outcomeToStatus(encounter.outcome) || outcomeToStatus(encounter.data?.outcome) || "";
           const lastEncounter = encounter.date || new Date().toISOString();
           patch((s) => ({
             patients: s.patients.map((p) => {
@@ -2164,7 +2176,7 @@ export function StoreProvider({ children }) {
           visitId: encounter.visitId,
           disease: encounter.disease,
           diagnosis: encounter.diagnosis || encounter.data?.diagnosis || "",
-          outcome: encounter.outcome || encounter.data?.outcome || "",
+          outcome: outcomeToStatus(encounter.outcome) || outcomeToStatus(encounter.data?.outcome) || "",
           date: encounter.date || new Date().toISOString(),
           lastEncounter: encounter.date || new Date().toISOString(),
         });

@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
-import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
-import { DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology, setVisitPosology } from "@/lib/medications";
+import { CompactPosology, DrugVisitFields } from "@/components/MedicationShared";
 import { isReactionFilled } from "@/components/LeprosyReaction";
 
 export const LEPROSY_DRUGS = {
@@ -125,11 +125,12 @@ function formatWeightDose(weight, mgPerKg) {
   return { mg, text: `${mg.toFixed(1)} mg` };
 }
 
-function DrugCard({ id, title, selected, onToggle, children, subtitle }) {
+function DrugCard({ id, title, selected, expanded, onToggle, onActivate, compactBody, children, subtitle }) {
   return (
     <div
       className={`rounded-lg border p-4 ${selected ? "border-primary bg-secondary/40" : "border-border bg-white"}`}
       data-testid={`leprosy-drug-${id}`}
+      onFocusCapture={selected ? onActivate : undefined}
     >
       <button
         type="button"
@@ -149,7 +150,11 @@ function DrugCard({ id, title, selected, onToggle, children, subtitle }) {
           {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
         </div>
       </button>
-      {children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>}
+      {selected && !expanded && compactBody ? (
+        <div className="mt-3 border-t border-border/60 pt-3">{compactBody}</div>
+      ) : (
+        children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>
+      )}
     </div>
   );
 }
@@ -243,6 +248,7 @@ export default function LeprosyMedications({
   const bandLabel = band ? mdtBandLabel(band, diagnosis) : "";
   const hasReaction = Array.isArray(reactions) && reactions.some(isReactionFilled);
   const pred = prednisoloneSchedule();
+  const [activeDrug, setActiveDrug] = useState(null);
 
   const selected = useMemo(
     () => ({
@@ -252,15 +258,47 @@ export default function LeprosyMedications({
     [oral],
   );
 
-  const setOral = (name, on) => {
+  const mdtDefaults = {
+    dosage: "Blister pack",
+    frequency: "",
+    duration: "",
+  };
+  const predDefaults = {
+    dosage: prednisoloneTaperDetails(pred).join(" → "),
+    frequency: "",
+    duration: "12 weeks",
+  };
+
+  const seedPosology = (name, on, defaults) => {
+    if (!on) return dropVisitPosology(posology, name);
+    if (posology?.[name] || !defaults) return posology;
+    return setVisitPosology(posology, name, {
+      dosage: defaults.dosage || "",
+      frequency: defaults.frequency || "",
+      duration: defaults.duration || "",
+    }, defaults);
+  };
+
+  const setOral = (name, on, defaults) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       oral: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
       ...(on && name === LEPROSY_DRUGS.mdt && band ? { mdtBandId: band.id } : {}),
     });
   };
+
+  const compact = (name, defaults) => (
+    <CompactPosology
+      name={name}
+      defaults={defaults}
+      posology={posology}
+      onExpand={() => setActiveDrug(name)}
+      testidPrefix="leprosy-drug"
+    />
+  );
 
   return (
     <div className="space-y-5" data-testid="leprosy-medications">
@@ -276,7 +314,10 @@ export default function LeprosyMedications({
           title={LEPROSY_DRUGS.mdt}
           subtitle={bandLabel || "Age/weight band pending"}
           selected={selected.mdt}
-          onToggle={() => setOral(LEPROSY_DRUGS.mdt, !selected.mdt)}
+          expanded={activeDrug === LEPROSY_DRUGS.mdt}
+          onActivate={() => setActiveDrug(LEPROSY_DRUGS.mdt)}
+          compactBody={compact(LEPROSY_DRUGS.mdt, mdtDefaults)}
+          onToggle={() => setOral(LEPROSY_DRUGS.mdt, !selected.mdt, mdtDefaults)}
         >
           <MdtTable band={band} weight={weight} diagnosis={diagnosis} />
           {selected.mdt && (
@@ -287,11 +328,7 @@ export default function LeprosyMedications({
               posology={posology}
               onChange={onChange}
               {...regimenVisit}
-              defaults={{
-                dosage: "Blister pack",
-                frequency: "",
-                duration: "",
-              }}
+              defaults={mdtDefaults}
             />
           )}
         </DrugCard>
@@ -306,7 +343,10 @@ export default function LeprosyMedications({
             title={LEPROSY_DRUGS.prednisolone}
             subtitle="12-week reducing dose · tablet strength 5 mg"
             selected={selected.prednisolone}
-            onToggle={() => setOral(LEPROSY_DRUGS.prednisolone, !selected.prednisolone)}
+            expanded={activeDrug === LEPROSY_DRUGS.prednisolone}
+            onActivate={() => setActiveDrug(LEPROSY_DRUGS.prednisolone)}
+            compactBody={compact(LEPROSY_DRUGS.prednisolone, predDefaults)}
+            onToggle={() => setOral(LEPROSY_DRUGS.prednisolone, !selected.prednisolone, predDefaults)}
           >
             <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-[420px] text-left text-sm" data-testid="prednisolone-table">
@@ -342,11 +382,7 @@ export default function LeprosyMedications({
                 posology={posology}
                 onChange={onChange}
                 {...regimenVisit}
-                defaults={{
-                  dosage: prednisoloneTaperDetails(pred).join(" → "),
-                  frequency: "",
-                  duration: "12 weeks",
-                }}
+                defaults={predDefaults}
               />
             )}
           </DrugCard>

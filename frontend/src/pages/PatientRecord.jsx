@@ -1036,7 +1036,9 @@ const ReactionSummary = ({ assessments }) => (
 const summariseOutcome = (e) => {
   const x = e.data || {};
   const raw = x.outcome || e.outcome || "";
-  const outcome = isRecordedOutcome(raw) ? raw : "";
+  const normalized =
+    raw && typeof raw === "object" ? String(raw.status || raw.outcome || "").trim() : String(raw || "").trim();
+  const outcome = isRecordedOutcome(normalized) ? normalized : "";
   const recommendations = (x.recommendations || []).map((r) => String(r || "").trim()).filter(Boolean);
   if (!outcome && !recommendations.length) return "";
   return { kind: "outcome", outcome, recommendations };
@@ -1228,7 +1230,13 @@ export default function PatientRecord() {
 
   const encs = useMemo(() => encounters.filter((e) => e.patientId === id).sort((a, b) => b.date.localeCompare(a.date)), [encounters, id]);
   const mySuspects = useMemo(() => suspects.filter((s) => s.patientId === id).sort((a, b) => b.date.localeCompare(a.date)), [suspects, id]);
-  const myDiseases = useMemo(() => assessmentSpecs(id, { encounters: encs }), [id, encs]);
+  // Skin NTDs only — ANC / malnutrition / well-baby are EXTRA_CONDITIONS (own dashboards).
+  // Form-config ApplicationConfig also puts those ids on DISEASE_SPECS, which would otherwise
+  // double them in tabs + clinical summary Conditions.
+  const myDiseases = useMemo(
+    () => assessmentSpecs(id, { encounters: encs }).filter((d) => !EXTRA_IDS.includes(d.id)),
+    [id, encs],
+  );
   const presentExtras = useMemo(() => EXTRA_CONDITIONS.filter((c) => encs.some((e) => e.disease === c.id)), [encs]);
   const isExtra = (t) => presentExtras.some((c) => c.id === t);
   const sidebarDiseases = useMemo(() => [...myDiseases, ...presentExtras.map((c) => ({ id: c.id, name: c.name }))], [myDiseases, presentExtras]);
@@ -1349,7 +1357,7 @@ export default function PatientRecord() {
     () => [
       "Suspect screening",
       ...SPEC_LIST.filter((s) => canAccessDisease(s.id) && !activeDiseaseIds.has(s.id)).map((s) => s.name),
-      ...EXTRA_CONDITIONS.filter((c) => !activeDiseaseIds.has(c.id)).map((c) => c.name),
+      ...EXTRA_CONDITIONS.filter((c) => canAccessDisease(c.id) && !activeDiseaseIds.has(c.id)).map((c) => c.name),
     ],
     [activeDiseaseIds, canAccessDisease]
   );
@@ -1450,9 +1458,52 @@ export default function PatientRecord() {
       return;
     }
     if (EXTRA_IDS.includes(enc.disease)) {
-      const q = `fac=${encodeURIComponent(enc.facility)}&vt=${encodeURIComponent(enc.visitType)}&ref=${enc.referral}&new=${Date.now()}`;
-      setEnc({ ...enc, show: false });
-      navigate(`/patients/${p.id}/${EXTRA_CONDITIONS.find((c) => c.id === enc.disease).route}?${q}`, withFrom());
+      if (starting) return;
+      setStarting(true);
+      try {
+        const locationId = enc.locationId || facilities.find((f) => f.name === enc.facility)?.id;
+        const extra = EXTRA_CONDITIONS.find((c) => c.id === enc.disease);
+        let result;
+        if (enc.mode === "encounter" && enc.recordId) {
+          result = await addEncounter({
+            patientId: p.id,
+            recordId: enc.recordId,
+            disease: enc.disease,
+            visitType: enc.visitType,
+            locationId,
+            locationName: enc.facility,
+            visitDate: enc.date,
+            referral: enc.referral,
+            clinicianName: user?.name,
+          });
+          toast.success("Encounter visit created");
+        } else {
+          result = await startEpisode({
+            patientId: p.id,
+            disease: enc.disease,
+            visitType: enc.visitType,
+            locationId,
+            locationName: enc.facility,
+            visitDate: enc.date,
+            referral: enc.referral,
+            clinicianName: user?.name,
+          });
+          toast.success(`${extra?.name || "Episode"} started`);
+        }
+        const visitId = result.visitId || result.encounter?.id;
+        setEnc({ ...enc, show: false, mode: "episode", recordId: "" });
+        const q = new URLSearchParams({
+          enc: String(visitId || ""),
+          fac: enc.facility || "",
+          vt: enc.visitType || "",
+          ref: enc.referral || "No",
+        });
+        navigate(`/patients/${p.id}/${extra.route}?${q.toString()}`, withFrom());
+      } catch (err) {
+        toast.error(err?.message || (enc.mode === "encounter" ? "Failed to add encounter" : "Failed to start episode"));
+      } finally {
+        setStarting(false);
+      }
       return;
     }
     if (starting) return;

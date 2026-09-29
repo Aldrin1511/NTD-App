@@ -1,8 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { AlertPanel, withDrugCourse } from "@/components/Fields";
-import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
-import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
+import { CompactPosology, DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology, setVisitPosology } from "@/lib/medications";
 
 export const BURULI_DRUGS = {
   rifampicin: "Tab Rifampicin 300mg (10mg per Kg)",
@@ -47,11 +47,12 @@ export function clarithromycinDose(weight, tabletMg = 500) {
   };
 }
 
-function DrugCard({ id, title, selected, onToggle, children, subtitle }) {
+function DrugCard({ id, title, selected, expanded, onToggle, onActivate, compactBody, children, subtitle }) {
   return (
     <div
       className={`rounded-lg border p-4 ${selected ? "border-primary bg-secondary/40" : "border-border bg-white"}`}
       data-testid={`buruli-drug-${id}`}
+      onFocusCapture={selected ? onActivate : undefined}
     >
       <button
         type="button"
@@ -71,7 +72,11 @@ function DrugCard({ id, title, selected, onToggle, children, subtitle }) {
           {subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}
         </div>
       </button>
-      {children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>}
+      {selected && !expanded && compactBody ? (
+        <div className="mt-3 border-t border-border/60 pt-3">{compactBody}</div>
+      ) : (
+        children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>
+      )}
     </div>
   );
 }
@@ -88,6 +93,7 @@ export default function BuruliMedications({
   catalogue = [],
 }) {
   const regimenVisit = { matchedRegimens, catalogue };
+  const [activeDrug, setActiveDrug] = useState(null);
   const selected = useMemo(
     () => ({
       rifampicin: oral.includes(BURULI_DRUGS.rifampicin),
@@ -99,14 +105,46 @@ export default function BuruliMedications({
   const rif = rifampicinDose(weight, Number(rifampicinTabletMg) || 300);
   const cla = clarithromycinDose(weight, Number(clarithromycinTabletMg) || 500);
 
-  const setOral = (name, on) => {
+  const rifDefaults = {
+    dosage: rif ? formatDosePhysical(rif.mg, rif.tabs) : "10 mg/kg",
+    frequency: "Once daily",
+    duration: "8 weeks",
+  };
+  const claDefaults = {
+    dosage: cla ? `${formatDosePhysical(cla.mg, cla.tabs)} per dose` : "7.5 mg/kg",
+    frequency: "Twice daily",
+    duration: "8 weeks",
+  };
+
+  const seedPosology = (name, on, defaults) => {
+    if (!on) return dropVisitPosology(posology, name);
+    if (posology?.[name] || !defaults) return posology;
+    return setVisitPosology(posology, name, {
+      dosage: defaults.dosage || "",
+      frequency: defaults.frequency || "",
+      duration: defaults.duration || "",
+    }, defaults);
+  };
+
+  const setOral = (name, on, defaults) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       oral: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
     });
   };
+
+  const compact = (name, defaults) => (
+    <CompactPosology
+      name={name}
+      defaults={defaults}
+      posology={posology}
+      onExpand={() => setActiveDrug(name)}
+      testidPrefix="buruli-drug"
+    />
+  );
 
   return (
     <div className="space-y-4" data-testid="buruli-medications">
@@ -124,7 +162,10 @@ export default function BuruliMedications({
         title={BURULI_DRUGS.rifampicin}
         subtitle="Once a day for 8 weeks · Dose 10 mg per kg (max 600 mg)"
         selected={selected.rifampicin}
-        onToggle={() => setOral(BURULI_DRUGS.rifampicin, !selected.rifampicin)}
+        expanded={activeDrug === BURULI_DRUGS.rifampicin}
+        onActivate={() => setActiveDrug(BURULI_DRUGS.rifampicin)}
+        compactBody={compact(BURULI_DRUGS.rifampicin, rifDefaults)}
+        onToggle={() => setOral(BURULI_DRUGS.rifampicin, !selected.rifampicin, rifDefaults)}
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <DoseUnitSelect
@@ -147,11 +188,7 @@ export default function BuruliMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: rif ? formatDosePhysical(rif.mg, rif.tabs) : "10 mg/kg",
-              frequency: "Once daily",
-              duration: "8 weeks",
-            }}
+            defaults={rifDefaults}
           />
         )}
       </DrugCard>
@@ -162,7 +199,10 @@ export default function BuruliMedications({
         title={BURULI_DRUGS.clarithromycin}
         subtitle="Twice a day for 8 weeks · Dose 7.5 mg per kg (max 500 mg per dose)"
         selected={selected.clarithromycin}
-        onToggle={() => setOral(BURULI_DRUGS.clarithromycin, !selected.clarithromycin)}
+        expanded={activeDrug === BURULI_DRUGS.clarithromycin}
+        onActivate={() => setActiveDrug(BURULI_DRUGS.clarithromycin)}
+        compactBody={compact(BURULI_DRUGS.clarithromycin, claDefaults)}
+        onToggle={() => setOral(BURULI_DRUGS.clarithromycin, !selected.clarithromycin, claDefaults)}
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <DoseUnitSelect
@@ -185,11 +225,7 @@ export default function BuruliMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: cla ? `${formatDosePhysical(cla.mg, cla.tabs)} per dose` : "7.5 mg/kg",
-              frequency: "Twice daily",
-              duration: "8 weeks",
-            }}
+            defaults={claDefaults}
           />
         )}
       </DrugCard>
