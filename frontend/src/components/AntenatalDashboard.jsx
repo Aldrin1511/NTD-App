@@ -7,7 +7,7 @@ import { fmtDate, fmtDateTime, groupDiseaseEpisodes, visitLabel } from "@/mock/s
 import {
   ANTENATAL_ID, resolveDating, trimesterLabel, trimesterOf, gaFromEdd, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
   FETAL_VITALS, FETAL_VITAL_CHOICES, vitalStatus, ANC_IMMUNIZATION, immunizationDueDate, isImmunizationOverdue,
-  isAncEpisodeClosed, babyName, ancStatusColor, ancRiskLevel, PHYSICAL_EXAM_FIELDS,
+  isAncEpisodeClosed, babyName, ancStatusColor, ancRiskLevel, PHYSICAL_EXAM_FIELDS, autoRiskFactors,
 } from "@/mock/antenatal";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { ancMedicationRows } from "@/components/AntenatalMedications";
@@ -188,7 +188,9 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
   const lmp = latest?.data?.caseDetails?.lmp;
   const closed = isAncEpisodeClosed(episode.outcome);
   const status = episode.outcome || latest?.data?.outcome?.status || "Active";
-  const risks = latest?.data?.history?.riskFactors || [];
+  const risks = latest?.data?.history?.riskFactors?.length
+    ? latest.data.history.riskFactors
+    : autoRiskFactors(latest?.data || {}, patient);
   const riskLvl = ancRiskLevel(risks);
   const medicalAll = latest?.data?.history?.medical || [];
   const menstrual = latest?.data?.history?.menstrual || {};
@@ -446,7 +448,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                         <th className="py-1.5 pr-3 font-semibold">Result</th>
                         <th className="py-1.5 pr-3 font-semibold">Value</th>
                         <th className="py-1.5 pr-3 font-semibold">Location</th>
-                        <th className="py-1.5 font-semibold">Date</th>
+                        <th className="py-1.5 font-semibold">Completed date</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -505,7 +507,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                           <th className="py-2 pr-3 font-semibold">Dosage</th>
                           <th className="py-2 pr-3 font-semibold">Frequency</th>
                           <th className="py-2 pr-3 font-semibold">Duration</th>
-                          <th className="py-2 font-semibold">Date</th>
+                          <th className="py-2 font-semibold">Qualifier</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -516,7 +518,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                               <td className="py-2 pr-3">{row.dosage}</td>
                               <td className="py-2 pr-3">{row.frequency}</td>
                               <td className="py-2 pr-3">{row.duration}</td>
-                              <td className="py-2 whitespace-nowrap">{row.date ? fmtDate(row.date) : "—"}</td>
+                              <td className="py-2">{row.qualifier || "—"}</td>
                             </tr>
                             {row.advice ? (
                               <tr className="border-b border-border">

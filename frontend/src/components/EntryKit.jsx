@@ -22,8 +22,8 @@ const roundStep = (v, step) => {
   return Math.round(n);
 };
 
-/** Slider + typed number input. */
-export const SliderStat = ({ field, value, onChange, status = "", testid }) => {
+/** Slider + typed number input. Optional read-only `previous` value from last visit. */
+export const SliderStat = ({ field, value, onChange, status = "", previous, testid }) => {
   const has = value !== undefined && value !== "" && value !== null;
   const mid = field.normal
     ? (field.normal[0] + field.normal[1]) / 2
@@ -31,6 +31,7 @@ export const SliderStat = ({ field, value, onChange, status = "", testid }) => {
   const cur = has ? Number(value) : mid;
   const [draft, setDraft] = useState(has ? String(value) : "");
   const [editing, setEditing] = useState(false);
+  const hasPrev = previous !== undefined && previous !== null && previous !== "";
 
   useEffect(() => {
     if (!editing) setDraft(has ? String(value) : "");
@@ -100,22 +101,35 @@ export const SliderStat = ({ field, value, onChange, status = "", testid }) => {
         {field.normal && <span>normal {field.normal[0]}–{field.normal[1]}</span>}
         <span>{field.max}</span>
       </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">Type or drag</p>
+      {hasPrev ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid={`${testid}-prev`}>
+          Previous: <span className="font-semibold text-foreground/80">{previous}{field.unit ? ` ${field.unit}` : ""}</span>
+        </p>
+      ) : (
+        <p className="mt-1 text-[10px] text-muted-foreground">Type or drag</p>
+      )}
     </div>
   );
 };
 
-export const ChoiceChips = ({ label, options, value, onChange, testid, multi = false, negativeOptions = [] }) => {
+export const ChoiceChips = ({ label, options, value, onChange, testid, multi = false, negativeOptions = [], previous }) => {
   const arr = multi ? (Array.isArray(value) ? value : []) : null;
   const isOn = (o) => (multi ? arr.includes(o) : value === o);
   const isNeg = (o) => negativeOptions.includes(o);
+  const hasPrev = previous !== undefined && previous !== null && previous !== "";
   const toggle = (o) => {
     if (multi) onChange(arr.includes(o) ? arr.filter((x) => x !== o) : [...arr, o]);
     else onChange(value === o ? "" : o);
   };
+  const prevLine = hasPrev ? (
+    <p className="mb-1.5 text-[11px] text-muted-foreground" data-testid={testid ? `${testid}-prev` : undefined}>
+      Previous: <span className="font-semibold text-foreground/80">{Array.isArray(previous) ? previous.join(" · ") : previous}</span>
+    </p>
+  ) : null;
   if (multi) {
     return (
       <Field label={label}>
+        {prevLine}
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" data-testid={testid}>
           {options.map((o) => {
             const active = isOn(o);
@@ -149,6 +163,7 @@ export const ChoiceChips = ({ label, options, value, onChange, testid, multi = f
   }
   return (
     <Field label={label}>
+      {prevLine}
       <div className="flex flex-wrap gap-2.5">
         {options.map((o) => {
           const active = isOn(o);

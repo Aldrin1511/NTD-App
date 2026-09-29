@@ -261,6 +261,7 @@ export function setVisitPosology(posology, name, patch, defaults = {}) {
       dosage: current.dosage ?? defaults.dosage ?? "",
       frequency: current.frequency ?? defaults.frequency ?? "",
       duration: current.duration ?? defaults.duration ?? "",
+      qualifier: current.qualifier ?? defaults.qualifier ?? "",
       ...current,
       ...patch,
     },

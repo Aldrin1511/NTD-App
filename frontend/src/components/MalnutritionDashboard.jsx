@@ -57,9 +57,22 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
 
   if (!episode) {
     return (
-      <AlertPanel level="info" title="No Malnutrition data yet" testid="mal-empty">
-        Add an encounter and choose Malnutrition to start this record.
-      </AlertPanel>
+      <div className="space-y-4" data-testid="mal-empty">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-secondary px-4 py-3">
+          <div>
+            <p className="font-semibold">Malnutrition record</p>
+            <p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">No visits yet</p>
+          </div>
+          {canEdit && onAddVisit && (
+            <Button className="h-10" onClick={onAddVisit} data-testid="mal-add-visit">
+              <Plus className="mr-1 h-4 w-4" /> Malnutrition visit
+            </Button>
+          )}
+        </div>
+        <AlertPanel level="info" title="No Malnutrition data yet" testid="mal-empty-msg">
+          Use <span className="font-medium text-foreground">Malnutrition visit</span> to start this record.
+        </AlertPanel>
+      </div>
     );
   }
 
@@ -148,9 +161,9 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
             {weeksVisited > 0 ? ` · ${weeksVisited}/12 weeks recorded` : ""}
           </p>
         </div>
-        {canEdit && !closed && (
-          <Button className="h-10" onClick={onAddVisit} data-testid="mal-add-visit">
-            <Plus className="mr-1 h-4 w-4" /> Add follow-up
+        {canEdit && onAddVisit && !closed && (
+          <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="mal-add-visit">
+            <Plus className="mr-1 h-4 w-4" /> Malnutrition visit
           </Button>
         )}
       </div>
@@ -210,9 +223,6 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
       </FeatureCard>
 
       <FeatureCard title="Progress" testid="mal-feat-progress">
-        <p className="mb-3 text-xs text-muted-foreground" data-testid="mal-progress-hint">
-          This table is a summary. To fill a week, click <span className="font-semibold text-foreground">+</span> on that week column (or use Add follow-up).
-        </p>
         <div className="grid gap-4 lg:grid-cols-2">
           <div>
             <p className="mb-2 text-xs font-semibold text-muted-foreground">Weight (kg)</p>
@@ -261,20 +271,8 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
                       )}
-                      {!c.visit && c.key !== "adm" && canEdit && !closed && admission && (
-                        <button
-                          type="button"
-                          className="text-primary"
-                          onClick={() => onAddVisit?.(c.w)}
-                          data-testid={`mal-add-week-${c.key}`}
-                          aria-label={`Add ${c.label}`}
-                          title={`Enter ${c.label}`}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </button>
-                      )}
                     </div>
-                    <div className="font-normal text-[10px]">{c.visit ? fmtDate(c.visit.date) : "Tap + to enter"}</div>
+                    <div className="font-normal text-[10px]">{c.visit ? fmtDate(c.visit.date) : "—"}</div>
                   </th>
                 ))}
               </tr>

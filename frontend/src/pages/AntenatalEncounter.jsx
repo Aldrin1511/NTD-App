@@ -66,12 +66,13 @@ const roundStep = (v, step) => {
   return Math.round(n);
 };
 
-const SliderStat = ({ field, value, onChange, testid }) => {
+const SliderStat = ({ field, value, onChange, previous, testid }) => {
   const has = value !== undefined && value !== "" && value !== null;
   const st = has ? vitalStatus(field, value) : "";
   const cur = has ? Number(value) : (field.normal ? (field.normal[0] + field.normal[1]) / 2 : (field.min + field.max) / 2);
   const [draft, setDraft] = useState(has ? String(value) : "");
   const [editing, setEditing] = useState(false);
+  const hasPrev = previous !== undefined && previous !== null && previous !== "";
 
   useEffect(() => {
     if (!editing) setDraft(has ? String(value) : "");
@@ -134,13 +135,24 @@ const SliderStat = ({ field, value, onChange, testid }) => {
         {field.normal && <span>normal {field.normal[0]}–{field.normal[1]}</span>}
         <span>{field.max}</span>
       </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">Type or drag · 1 decimal</p>
+      {hasPrev ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid={`${testid}-prev`}>
+          Previous: <span className="font-semibold text-foreground/80">{previous}{field.unit ? ` ${field.unit}` : ""}</span>
+        </p>
+      ) : (
+        <p className="mt-1 text-[10px] text-muted-foreground">Type or drag · 1 decimal</p>
+      )}
     </div>
   );
 };
 
-const ChoiceChips = ({ label, options, value, onChange, testid, alertOptions = [] }) => (
+const ChoiceChips = ({ label, options, value, onChange, testid, alertOptions = [], previous }) => (
   <Field label={label}>
+    {previous !== undefined && previous !== null && previous !== "" ? (
+      <p className="mb-1.5 text-[11px] text-muted-foreground" data-testid={testid ? `${testid}-prev` : undefined}>
+        Previous: <span className="font-semibold text-foreground/80">{previous}</span>
+      </p>
+    ) : null}
     <div className="flex flex-wrap gap-2.5">
       {options.map((o) => {
         const on = value === o;
@@ -222,7 +234,7 @@ export default function AntenatalEncounter() {
         result: "",
         analyte: "",
         location: "Bedside",
-        date: localISODate(),
+        date: "",
         sentToLab: false,
         completed: false,
       }));
@@ -277,6 +289,7 @@ export default function AntenatalEncounter() {
   const vaccineDrugs = useMemo(() => (settings.drugs || []).filter((x) => x.type === "Vaccine" || x.form === "Vaccine"), [settings.drugs]);
   const firstContact = existing?.date || d.caseDetails?.firstContact || localISODate();
 
+  const medicalKey = (d.history?.medical || []).join("|");
   const autoSuggestedRisks = useMemo(
     () => autoRiskFactors(d, p),
     // Intentionally narrow deps — same triggers as auto-add effect
@@ -287,7 +300,13 @@ export default function AntenatalEncounter() {
       d.vitals.mother.systolic,
       d.vitals.mother.diastolic,
       d.vitals.mother.weight,
+      d.vitals.mother.oedema,
+      d.vitals.mother.urineProtein,
       d.delivery.fetuses,
+      d.delivery.complication,
+      d.delivery.type,
+      d.delivery.mode,
+      medicalKey,
       p?.age,
       p?.ageYears,
     ]
@@ -328,7 +347,7 @@ export default function AntenatalEncounter() {
             result: "",
             analyte: "",
             location: "Bedside",
-            date: localISODate(),
+            date: "",
             sentToLab: false,
             completed: false,
           })),
@@ -350,6 +369,17 @@ export default function AntenatalEncounter() {
   const setMenstrual = (patch) => setD((s) => ({ ...s, history: { ...s.history, menstrual: { ...s.history.menstrual, ...patch } } }));
   const setMotherV = (k, v) => setD((s) => ({ ...s, vitals: { ...s.vitals, mother: { ...s.vitals.mother, [k]: v } } }));
   const setFetalV = (k, v) => setD((s) => ({ ...s, vitals: { ...s.vitals, fetal: { ...s.vitals.fetal, [k]: v } } }));
+  const priorVitals = useMemo(() => {
+    const prior = [...patientEncs]
+      .filter((e) => e.disease === ANTENATAL_ID && e.id !== existing?.id)
+      .filter((e) => {
+        const m = e.data?.vitals?.mother || {};
+        const f = e.data?.vitals?.fetal || {};
+        return Object.keys(m).some((k) => m[k] !== "" && m[k] != null) || Object.keys(f).some((k) => f[k] !== "" && f[k] != null);
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    return prior?.data?.vitals || { mother: {}, fetal: {} };
+  }, [patientEncs, existing?.id]);
   const updBabyExam = (i, k, v) =>
     setD((s) => ({
       ...s,
@@ -370,7 +400,7 @@ export default function AntenatalEncounter() {
     result: "",
     analyte: "",
     location: "Bedside",
-    date: localISODate(),
+    date: "",
     sentToLab: false,
     completed: false,
   });
@@ -464,7 +494,21 @@ export default function AntenatalEncounter() {
       dob: d.delivery.date || localISODate(),
       weight: b.weightKg ? Number(b.weightKg) : "",
       height: b.lengthCm ? Number(b.lengthCm) : "",
-      deliveryDetails: { ...b, motherId: p.id, motherName: p.name, deliveryDate: d.delivery.date, mode: d.delivery.type, place: d.delivery.outcome },
+      deliveryDetails: {
+        ...b,
+        motherId: p.id,
+        motherName: p.name,
+        deliveryDate: d.delivery.date,
+        date: d.delivery.date,
+        mode: d.delivery.type || d.delivery.mode,
+        type: d.delivery.type || d.delivery.mode,
+        place: d.delivery.outcome,
+        complication: d.delivery.complication,
+        fetuses: d.delivery.fetuses,
+        fetusLengths: d.delivery.fetusLengths,
+        familyPlanning: d.delivery.familyPlanning,
+        postpartum: d.delivery.postpartum || [],
+      },
     });
     updBaby(i, { registered: true, patientId: rec.id });
     toast.success(`${name} registered · ${rec.id}`);
@@ -596,7 +640,7 @@ export default function AntenatalEncounter() {
       done: (d.history.riskFactors || []).length > 0,
       body: (
         <MultiChips
-          label="Risk factors (auto from case/vitals + multi-select)"
+          label="Risk factors (auto from history / case / vitals + multi-select)"
           options={RISK_FACTOR_OPTIONS}
           value={d.history.riskFactors || []}
           onChange={setRiskFactors}
@@ -611,10 +655,29 @@ export default function AntenatalEncounter() {
       body: (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {MOTHER_VITALS.map((f) => <SliderStat key={f.k} field={f} value={d.vitals.mother[f.k]} onChange={(v) => setMotherV(f.k, v)} testid={`anc-mv-${f.k}`} />)}
+            {MOTHER_VITALS.map((f) => (
+              <SliderStat
+                key={f.k}
+                field={f}
+                value={d.vitals.mother[f.k]}
+                previous={priorVitals.mother?.[f.k]}
+                onChange={(v) => setMotherV(f.k, v)}
+                testid={`anc-mv-${f.k}`}
+              />
+            ))}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            {MOTHER_VITAL_CHOICES.map((c) => <ChoiceChips key={c.k} label={c.label} options={c.options} value={d.vitals.mother[c.k]} onChange={(v) => setMotherV(c.k, v)} testid={`anc-mv-${c.k}`} />)}
+            {MOTHER_VITAL_CHOICES.map((c) => (
+              <ChoiceChips
+                key={c.k}
+                label={c.label}
+                options={c.options}
+                value={d.vitals.mother[c.k]}
+                previous={priorVitals.mother?.[c.k]}
+                onChange={(v) => setMotherV(c.k, v)}
+                testid={`anc-mv-${c.k}`}
+              />
+            ))}
           </div>
         </div>
       ),
@@ -625,10 +688,29 @@ export default function AntenatalEncounter() {
       body: (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {FETAL_VITALS.map((f) => <SliderStat key={f.k} field={f} value={d.vitals.fetal[f.k]} onChange={(v) => setFetalV(f.k, v)} testid={`anc-fv-${f.k}`} />)}
+            {FETAL_VITALS.map((f) => (
+              <SliderStat
+                key={f.k}
+                field={f}
+                value={d.vitals.fetal[f.k]}
+                previous={priorVitals.fetal?.[f.k]}
+                onChange={(v) => setFetalV(f.k, v)}
+                testid={`anc-fv-${f.k}`}
+              />
+            ))}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            {FETAL_VITAL_CHOICES.map((c) => <ChoiceChips key={c.k} label={c.label} options={c.options} value={d.vitals.fetal[c.k]} onChange={(v) => setFetalV(c.k, v)} testid={`anc-fv-${c.k}`} />)}
+            {FETAL_VITAL_CHOICES.map((c) => (
+              <ChoiceChips
+                key={c.k}
+                label={c.label}
+                options={c.options}
+                value={d.vitals.fetal[c.k]}
+                previous={priorVitals.fetal?.[c.k]}
+                onChange={(v) => setFetalV(c.k, v)}
+                testid={`anc-fv-${c.k}`}
+              />
+            ))}
           </div>
         </div>
       ),
@@ -675,7 +757,7 @@ export default function AntenatalEncounter() {
                               label="Result"
                               options={def?.results || ["Normal", "Abnormal", "Pending"]}
                               value={row.result}
-                              onChange={(v) => updLab(i, { result: v, completed: !!v })}
+                              onChange={(v) => updLab(i, { result: v, completed: !!v, ...(v && !row.date ? { date: localISODate() } : {}) })}
                               testid={`anc-lab-result-${i}`}
                             />
                             <TextField
@@ -693,7 +775,7 @@ export default function AntenatalEncounter() {
                               testid={`anc-lab-location-${i}`}
                             />
                             <TextField
-                              label="Date"
+                              label="Completed date"
                               type="date"
                               value={row.date}
                               onChange={(e) => updLab(i, { date: e.target.value })}

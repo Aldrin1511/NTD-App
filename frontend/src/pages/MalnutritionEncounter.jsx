@@ -285,6 +285,7 @@ export default function MalnutritionEncounter() {
       worker: user?.name,
       type,
       diagnosis: caseDetails.admissionType || "",
+      treatment: (d.meds || []).join(" + "),
       outcome: isMalEpisodeClosed(outcomeStatus) ? outcomeStatus : "Active",
       data: {
         ...d,
@@ -333,15 +334,15 @@ export default function MalnutritionEncounter() {
               hint="Which follow-up week you are recording"
             />
           )}
-          <div className="grid gap-4 sm:grid-cols-2" data-testid="mal-case-edit">
-            <SelectField
+          <div className="space-y-4" data-testid="mal-case-edit">
+            <ChoiceRow
               label="Case type"
               options={CASE_TYPES}
               value={seededCase.caseType || ""}
               onChange={(v) => setCase({ caseType: v })}
               testid="mal-case-type"
             />
-            {(seededCase.caseType === "Transfer in") && (
+            {seededCase.caseType === "Transfer in" && (
               <TextField
                 label="Transferred from (facility)"
                 value={seededCase.fromFacility || ""}
@@ -349,7 +350,7 @@ export default function MalnutritionEncounter() {
                 testid="mal-from-facility"
               />
             )}
-            <SelectField
+            <ChoiceRow
               label="Admission type"
               options={ADMISSION_TYPES}
               value={seededCase.admissionType || ""}
@@ -364,32 +365,34 @@ export default function MalnutritionEncounter() {
                 testid="mal-admission-other"
               />
             )}
-            <TextField
-              label="Admission date"
-              type="date"
-              value={seededCase.admissionDate || localISODate()}
-              onChange={(e) => setCase({ admissionDate: e.target.value })}
-              testid="mal-admission-date"
-            />
-            <TextField
-              label="Weight during admission (kg)"
-              type="number"
-              step="0.1"
-              value={seededCase.admissionWeight || ""}
-              onChange={(e) => setCase({ admissionWeight: e.target.value })}
-              testid="mal-admission-weight"
-            />
-            <TextField
-              label="Targeted weight (kg)"
-              type="number"
-              step="0.1"
-              value={seededCase.targetWeight || ""}
-              onChange={(e) => setCase({ targetWeight: e.target.value })}
-              testid="mal-targeted-weight"
-            />
-            <TextField label="Admission age" value={ageMonthsToLabel(admissionVisit?.data?.ageMonths ?? ageMonths)} readOnly testid="mal-age" />
-            <TextField label="Gender" value={sex || "—"} readOnly testid="mal-gender" />
-            <TextField label="Case no. (this facility)" value={`#${seededCase.caseNo || caseNo}`} readOnly testid="mal-case-no" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                label="Admission date"
+                type="date"
+                value={seededCase.admissionDate || localISODate()}
+                onChange={(e) => setCase({ admissionDate: e.target.value })}
+                testid="mal-admission-date"
+              />
+              <TextField
+                label="Weight during admission (kg)"
+                type="number"
+                step="0.1"
+                value={seededCase.admissionWeight || ""}
+                onChange={(e) => setCase({ admissionWeight: e.target.value })}
+                testid="mal-admission-weight"
+              />
+              <TextField
+                label="Targeted weight (kg)"
+                type="number"
+                step="0.1"
+                value={seededCase.targetWeight || ""}
+                onChange={(e) => setCase({ targetWeight: e.target.value })}
+                testid="mal-targeted-weight"
+              />
+              <TextField label="Admission age" value={ageMonthsToLabel(admissionVisit?.data?.ageMonths ?? ageMonths)} readOnly testid="mal-age" />
+              <TextField label="Gender" value={sex || "—"} readOnly testid="mal-gender" />
+              <TextField label="Case no. (this facility)" value={`#${seededCase.caseNo || caseNo}`} readOnly testid="mal-case-no" />
+            </div>
           </div>
         </div>
       ),
@@ -459,7 +462,14 @@ export default function MalnutritionEncounter() {
             <p className="mb-2 font-head text-sm font-semibold text-primary">Anthropometry</p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {ANTHRO.map((f) => (
-                <SliderStat key={f.k} field={f} value={d[f.k]} onChange={(v) => set(f.k, v)} testid={`mal-${f.k}`} />
+                <SliderStat
+                  key={f.k}
+                  field={f}
+                  value={d[f.k]}
+                  previous={prevMonitoring?.[f.k]}
+                  onChange={(v) => set(f.k, v)}
+                  testid={`mal-${f.k}`}
+                />
               ))}
             </div>
             {d.visitType === "Admission" && d.caseDetails.admissionWeight && (
@@ -471,8 +481,8 @@ export default function MalnutritionEncounter() {
               <IndexBadge label="Height-for-age" r={idx.hfa} />
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <ChoiceChips label="Oedema" options={OEDEMA} value={d.oedema} onChange={(v) => set("oedema", v)} negativeOptions={["+", "++", "+++"]} testid="mal-oedema" />
-              <ChoiceChips label="Appetite test" options={APPETITE} value={d.appetite} onChange={(v) => set("appetite", v)} negativeOptions={["Fail"]} testid="mal-appetite" />
+              <ChoiceChips label="Oedema" options={OEDEMA} value={d.oedema} previous={prevMonitoring?.oedema} onChange={(v) => set("oedema", v)} negativeOptions={["+", "++", "+++"]} testid="mal-oedema" />
+              <ChoiceChips label="Appetite test" options={APPETITE} value={d.appetite} previous={prevMonitoring?.appetite} onChange={(v) => set("appetite", v)} negativeOptions={["Fail"]} testid="mal-appetite" />
             </div>
           </div>
 
@@ -504,8 +514,8 @@ export default function MalnutritionEncounter() {
           <div>
             <p className="mb-2 font-head text-sm font-semibold text-primary">Physical examination</p>
             <div className="grid gap-4 sm:grid-cols-2">
-              <ChoiceChips label="Respiratory rate (/min)" options={RR_BANDS} value={d.rr} onChange={(v) => set("rr", v)} negativeOptions={["40–49", "50+"]} testid="mal-rr" />
-              <ChoiceChips label="Temperature" options={TEMP_OPTS} value={d.temp} onChange={(v) => set("temp", v)} negativeOptions={["Febrile"]} testid="mal-temp" />
+              <ChoiceChips label="Respiratory rate (/min)" options={RR_BANDS} value={d.rr} previous={prevMonitoring?.rr} onChange={(v) => set("rr", v)} negativeOptions={["40–49", "50+"]} testid="mal-rr" />
+              <ChoiceChips label="Temperature" options={TEMP_OPTS} value={d.temp} previous={prevMonitoring?.temp} onChange={(v) => set("temp", v)} negativeOptions={["Febrile"]} testid="mal-temp" />
             </div>
           </div>
 

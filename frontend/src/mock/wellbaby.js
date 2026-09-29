@@ -10,7 +10,7 @@ export const CHIEF_COMPLAINTS = [
 ];
 
 export const ALLERGIES = [
-  "Penicillin", "Sulpha drugs", "Egg", "Cow's milk protein", "Peanut", "Aspirin", "Latex", "No known allergy",
+  "No known allergy", "Penicillin", "Sulpha drugs", "Egg", "Cow's milk protein", "Peanut", "Aspirin", "Latex",
 ];
 
 /** WHO gross motor milestones with achievement windows (months). */

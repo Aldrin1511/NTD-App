@@ -141,20 +141,71 @@ export const obstetricCountValue = (v) => {
   return "";
 };
 
-/** Clinical risk suggestions from case/vitals/patient age (does not include manual selections). */
+/** Clinical risk suggestions from history, case, vitals, delivery, and patient age. */
 export const autoRiskFactors = (data = {}, patient = {}) => {
   const out = new Set();
   const cd = data.caseDetails || {};
   const mother = data.vitals?.mother || {};
+  const medical = data.history?.medical || [];
+  const hasMedical = (name) => medical.includes(name);
+  const num = (v) => {
+    if (v === undefined || v === null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
 
+  // Obstetric history (case details)
   if (cd.neonatalDeath === "Yes" || Number(cd.neonatalDeath) > 0) out.add("Neonatal death");
   if (cd.stillBirth === "Yes" || Number(cd.stillBirth) > 0) out.add("Still Birth");
-  if (Number(mother.systolic) >= 140 || Number(mother.diastolic) >= 90) out.add("High Blood Pressure");
-  if (Number(mother.weight) < 45) out.add("Underweight");
-  if (Number(mother.weight) >= 90) out.add("Pre-pregnancy weight");
-  if (Number(data.delivery?.fetuses) === 3) out.add("Triplets");
-  else if (Number(data.delivery?.fetuses) >= 2) out.add("Twins");
 
+  // Mother vitals
+  const sys = num(mother.systolic);
+  const dia = num(mother.diastolic);
+  const wt = num(mother.weight);
+  if ((sys != null && sys >= 140) || (dia != null && dia >= 90)) out.add("High Blood Pressure");
+  if (wt != null && wt < 45) out.add("Underweight");
+  if (wt != null && wt >= 90) out.add("Pre-pregnancy weight");
+  if (["+", "++", "+++"].includes(mother.oedema) && ["+", "++", "+++"].includes(mother.urineProtein)) {
+    out.add("High Blood Pressure");
+  }
+
+  // Delivery
+  const fetuses = num(data.delivery?.fetuses);
+  if (fetuses === 3) out.add("Triplets");
+  else if (fetuses != null && fetuses >= 2) out.add("Twins");
+  if (data.delivery?.complication === "PPH") out.add("PPH");
+  if (data.delivery?.complication === "Vacuum" || data.delivery?.type === "Vacuum" || data.delivery?.mode === "Vacuum") {
+    out.add("Instrumental delivery");
+  }
+  if (data.delivery?.type === "Assisted (Vacuum/Forceps)" || data.delivery?.mode === "Assisted (Vacuum/Forceps)") {
+    out.add("Instrumental delivery");
+  }
+
+  // Medical history → risk factors
+  if (hasMedical("Diabetes")) out.add("Diabetes");
+  if (hasMedical("Psychiatric Problem")) out.add("Depression");
+  if (hasMedical("Overweight/Obesity")) out.add("Pre-pregnancy weight");
+  if (
+    medical.some((m) =>
+      [
+        "Thyroid Disorders",
+        "Heart Attack (Myocardial Infarction)",
+        "Stroke/Paralysis",
+        "Neurological Problems",
+        "Parkinson's",
+        "Traumatic Brain Injury",
+        "Hearing impairment",
+        "Visual impairment",
+        "Urinary Incontinence",
+        "Disability (if any)",
+        "High LDL Cholesterol/Hyperlipidemia",
+      ].includes(m),
+    )
+  ) {
+    out.add("Pre-existing health conditions");
+  }
+
+  // Patient age
   const age = Number(patient.ageYears ?? patient.age);
   if (Number.isFinite(age) && age >= 10) {
     if (age <= 17) out.add("Being 17 or younger");

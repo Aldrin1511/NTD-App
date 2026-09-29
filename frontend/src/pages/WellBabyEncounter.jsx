@@ -2,18 +2,24 @@ import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import { Field, TextField, AreaField, SelectField, AlertPanel, ItemActions } from "@/components/Fields";
-import { ConditionEntryShell, ChipMultiWithOther } from "@/components/EntryKit";
+import { Field, TextField, AreaField, SelectField, AlertPanel, ItemActions, CheckGrid } from "@/components/Fields";
+import { ConditionEntryShell, ChoiceChips } from "@/components/EntryKit";
 import { GrowthEntry } from "@/components/GrowthChart";
 import MilestoneChart from "@/components/MilestoneChart";
-import { dobFromAge } from "@/components/Capture";
-import { monthsBetween, ageMonthsToLabel } from "@/mock/growth";
+import { dobFromAge, formatAgeYMD } from "@/components/Capture";
+import { monthsBetween } from "@/mock/growth";
 import { localISODate } from "@/mock/specs";
 import {
   WELLBABY_ID, WELLBABY_NAME, CHIEF_COMPLAINTS, ALLERGIES, WELLBABY_DRUGS, WELLBABY_DRUG_META,
   WELLBABY_LAB_TESTS, immunizationDueFromDob, isVaccineOverdue, newWbEpisodeId,
   entryVisibleVaccines, entryDropdownVaccines,
 } from "@/mock/wellbaby";
+import {
+  ANTENATAL_ID,
+  DELIVERY_TYPES, DELIVERY_COMPLICATIONS, FETUS_COUNTS, FAMILY_PLANNING, POSTPARTUM_COMPLICATIONS,
+  DELIVERY_OUTCOMES, BABY_SEX, BABY_COMPLICATIONS, BABY_OUTCOMES, BABY_OUTCOME_ALERTS, YES_NO,
+  PHYSICAL_EXAM_FIELDS, babyName,
+} from "@/mock/antenatal";
 import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
 import AntenatalMedications from "@/components/AntenatalMedications";
 import { toast } from "sonner";
@@ -23,16 +29,188 @@ const emptyLabRow = (name) => ({
   result: "",
   analyte: "",
   location: "Bedside",
-  date: localISODate(),
+  date: "",
   sentToLab: false,
   completed: false,
 });
 
+const emptyBaby = (deliveryType = "") => ({
+  sex: "", weightKg: "", lengthCm: "", headCm: "", apgar1: "", apgar5: "", apgar10: "",
+  resuscitation: "", complications: [], outcome: "", deliveryType, registered: false,
+  physicalExam: {},
+});
+
+const syncBabiesToFetuses = (babies, count, deliveryType = "") => {
+  const n = Math.max(0, Number(count) || 0);
+  const next = [...(babies || [])];
+  while (next.length < n) next.push(emptyBaby(deliveryType));
+  return next.slice(0, n);
+};
+
+const babyFromFlat = (src = {}, deliveryType = "") => ({
+  ...emptyBaby(deliveryType),
+  sex: src.sex || "",
+  weightKg: src.weightKg || "",
+  lengthCm: src.lengthCm || "",
+  headCm: src.headCm || "",
+  apgar1: src.apgar1 || "",
+  apgar5: src.apgar5 || "",
+  apgar10: src.apgar10 || "",
+  resuscitation: src.resuscitation || "",
+  complications: src.complications || [],
+  outcome: DELIVERY_OUTCOMES.includes(src.outcome) ? "" : (src.outcome || ""),
+  deliveryType: src.deliveryType || src.type || src.mode || deliveryType || "",
+  physicalExam: src.physicalExam || {},
+  patientId: src.patientId || "",
+  registered: !!src.registered || !!src.patientId,
+});
+
 const empty = () => ({
-  delivery: {}, complaints: [], allergy: [], growth: { standard: "WHO", mode: "Percentile", measures: {} },
+  delivery: { babies: [], postpartum: [], fetusLengths: {} },
+  complaints: [], allergy: [], growth: { standard: "WHO", mode: "Percentile", measures: {} },
   immunization: {}, milestones: {}, notes: [""], drugs: [], posology: {}, medCourses: {},
   lab: WELLBABY_LAB_TESTS.map((t) => emptyLabRow(t.name)),
 });
+
+const babyHasContent = (b = {}) =>
+  !!(b.sex || b.weightKg || b.lengthCm || b.headCm || b.apgar1 || b.apgar5 || b.apgar10
+    || b.resuscitation || (b.complications || []).length || b.outcome || b.deliveryType
+    || Object.values(b.physicalExam || {}).some(Boolean));
+
+const deliveryHasContent = (del = {}) =>
+  !!(
+    del.deliveryDate || del.date || del.mode || del.type || del.place || del.complication
+    || del.fetuses || del.familyPlanning || (del.postpartum || []).length
+    || (del.outcome && DELIVERY_OUTCOMES.includes(del.outcome))
+    || (del.babies || []).some(babyHasContent)
+    || del.weightKg || del.lengthCm || del.headCm || del.apgar1 || del.apgar5 || del.apgar10
+    || del.sex || del.resuscitation || (del.complications || []).length || del.deliveryType
+    || Object.values(del.physicalExam || {}).some(Boolean)
+  );
+
+/** Latest prior Well Baby visit for this patient (excluding the encounter being edited). */
+const latestPriorWb = (encounters, patientId, excludeId) =>
+  [...encounters]
+    .filter((e) => e.patientId === patientId && e.disease === WELLBABY_ID && e.id !== excludeId)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+
+/** Normalize any legacy flat delivery + ANC mother delivery into ANC-shaped delivery. */
+const normalizeDelivery = (raw = {}, patient = {}) => {
+  const details = patient?.deliveryDetails || {};
+  const type = raw.type || raw.mode || details.type || details.mode || "";
+  const deliveryOutcome =
+    (DELIVERY_OUTCOMES.includes(raw.place) ? raw.place : "")
+    || (DELIVERY_OUTCOMES.includes(raw.outcome) ? raw.outcome : "")
+    || (DELIVERY_OUTCOMES.includes(details.place) ? details.place : "")
+    || "";
+  let babies = Array.isArray(raw.babies) ? raw.babies.map((b) => ({ ...emptyBaby(type), ...b })) : [];
+  if (!babies.length && (babyHasContent(raw) || babyHasContent(details))) {
+    babies = [babyFromFlat({ ...details, ...raw }, type)];
+  }
+  const fetuses = raw.fetuses || details.fetuses || (babies.length ? String(babies.length) : "1");
+  babies = syncBabiesToFetuses(babies.length ? babies : [babyFromFlat({ ...details, ...raw }, type)], fetuses, type);
+  // Ensure this patient's row is filled when matched by patientId / sex
+  if (babies.length && patient?.id) {
+    let idx = babies.findIndex((b) => b.patientId === patient.id);
+    if (idx < 0) {
+      idx = babies.findIndex((b) => !babyHasContent(b));
+      if (idx < 0) idx = 0;
+    }
+    const flat = babyFromFlat({ ...details, ...raw }, type);
+    const cur = babies[idx];
+    if (!babyHasContent(cur) && babyHasContent(flat)) {
+      babies[idx] = {
+        ...cur,
+        ...Object.fromEntries(Object.entries(flat).filter(([, v]) => (Array.isArray(v) ? v.length : v))),
+        patientId: patient.id,
+        sex: flat.sex || cur.sex || patient.sex || patient.gender || "",
+      };
+    } else if (!cur.sex) {
+      babies[idx] = { ...cur, sex: patient.sex || patient.gender || cur.sex || "", patientId: cur.patientId || patient.id };
+    }
+  }
+  return {
+    deliveryDate: raw.deliveryDate || raw.date || details.deliveryDate || details.date || "",
+    date: raw.date || raw.deliveryDate || details.date || details.deliveryDate || "",
+    mode: type,
+    type,
+    place: deliveryOutcome,
+    outcome: deliveryOutcome,
+    complication: raw.complication || details.complication || "",
+    fetuses,
+    fetusLengths: raw.fetusLengths || details.fetusLengths || {},
+    familyPlanning: raw.familyPlanning || details.familyPlanning || "",
+    postpartum: raw.postpartum || details.postpartum || [],
+    babies,
+    motherId: raw.motherId || details.motherId || patient?.bornFrom || "",
+    motherName: raw.motherName || details.motherName || "",
+  };
+};
+
+/** Pull mother ANC delivery + babies for this child. */
+const antenatalDeliverySeed = (encounters, patient) => {
+  const details = patient?.deliveryDetails || {};
+  const motherId = details.motherId || patient?.bornFrom;
+  let motherDel = {};
+  if (motherId) {
+    const enc = [...encounters]
+      .filter((e) => e.patientId === motherId && e.disease === ANTENATAL_ID && e.data?.delivery)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    motherDel = enc?.data?.delivery || {};
+  }
+  const merged = {
+    ...motherDel,
+    ...details,
+    date: details.deliveryDate || details.date || motherDel.date || "",
+    deliveryDate: details.deliveryDate || details.date || motherDel.date || "",
+    type: details.type || details.mode || motherDel.type || motherDel.mode || "",
+    mode: details.mode || details.type || motherDel.mode || motherDel.type || "",
+    place: details.place || motherDel.outcome || "",
+    outcome: details.place || motherDel.outcome || "",
+    complication: details.complication || motherDel.complication || "",
+    fetuses: details.fetuses || motherDel.fetuses || "",
+    fetusLengths: details.fetusLengths || motherDel.fetusLengths || {},
+    familyPlanning: details.familyPlanning || motherDel.familyPlanning || "",
+    postpartum: details.postpartum || motherDel.postpartum || [],
+    babies: (motherDel.babies || []).length ? motherDel.babies : undefined,
+    motherId: details.motherId || motherId || "",
+    motherName: details.motherName || "",
+  };
+  return normalizeDelivery(merged, patient);
+};
+
+/** Seed Delivery + Newborn: prior WB visit overrides ANC/mother delivery details. */
+const seedDelivery = (encounters, patient, existing) => {
+  const prior = latestPriorWb(encounters, patient?.id, existing?.id);
+  const fromAnc = antenatalDeliverySeed(encounters, patient);
+  const fromPrior = prior?.data?.delivery ? normalizeDelivery(prior.data.delivery, patient) : {};
+  const fromExisting = existing?.data?.delivery ? normalizeDelivery(existing.data.delivery, patient) : {};
+  if (deliveryHasContent(fromExisting)) {
+    return normalizeDelivery({ ...fromAnc, ...fromPrior, ...fromExisting, babies: fromExisting.babies?.length ? fromExisting.babies : (fromPrior.babies || fromAnc.babies) }, patient);
+  }
+  if (deliveryHasContent(fromPrior)) {
+    return normalizeDelivery({ ...fromAnc, ...fromPrior, babies: fromPrior.babies?.length ? fromPrior.babies : fromAnc.babies }, patient);
+  }
+  return fromAnc;
+};
+
+const NO_KNOWN_ALLERGY = "No known allergy";
+
+/** Seed allergy chips from prior WB visit when this visit has none yet. */
+const seedAllergy = (encounters, patientId, existing) => {
+  const fromExisting = Array.isArray(existing?.data?.allergy) ? existing.data.allergy.filter(Boolean) : [];
+  if (fromExisting.length) return fromExisting;
+  const prior = latestPriorWb(encounters, patientId, existing?.id);
+  return Array.isArray(prior?.data?.allergy) ? prior.data.allergy.filter(Boolean) : [];
+};
+
+/** Keep "No known allergy" mutually exclusive with specific allergies. */
+const nextAllergySelection = (next = []) => {
+  const list = [...new Set((next || []).filter(Boolean))];
+  if (!list.includes(NO_KNOWN_ALLERGY)) return list;
+  if (list[list.length - 1] === NO_KNOWN_ALLERGY) return [NO_KNOWN_ALLERGY];
+  return list.filter((a) => a !== NO_KNOWN_ALLERGY);
+};
 
 export default function WellBabyEncounter() {
   const { id } = useParams();
@@ -42,8 +220,18 @@ export default function WellBabyEncounter() {
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.id === params.get("enc") && e.disease === WELLBABY_ID);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
+  const priorWb = useMemo(() => latestPriorWb(encounters, id, existing?.id), [encounters, id, existing?.id]);
+  const priorGrowthMeasures = useMemo(() => {
+    const withGrowth = [...encounters]
+      .filter((e) => e.patientId === id && e.disease === WELLBABY_ID && e.id !== existing?.id)
+      .filter((e) => Object.values(e.data?.growth?.measures || {}).some((v) => v !== "" && v != null))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    return withGrowth?.data?.growth?.measures || {};
+  }, [encounters, id, existing?.id]);
   const [d, setD] = useState(() => {
     const base = { ...empty(), ...(existing?.data || {}) };
+    base.delivery = seedDelivery(encounters, p, existing);
+    base.allergy = seedAllergy(encounters, id, existing);
     if (!Array.isArray(base.lab)) base.lab = [];
     if (!base.lab.length) {
       base.lab = WELLBABY_LAB_TESTS.map((t) => emptyLabRow(t.name));
@@ -62,6 +250,7 @@ export default function WellBabyEncounter() {
 
   const dob = p?.dob || dobFromAge(p?.age, p?.createdAt);
   const visitDate = existing?.date || localISODate();
+  const ageLabel = formatAgeYMD(dob, visitDate) || "—";
   const ageMonths = monthsBetween(dob, visitDate);
   const schedule = (settings.immunizationSchedules || []).find((s) => s.condition === WELLBABY_ID) || { vaccines: [] };
   const vaccineDrugs = (settings.drugs || []).filter((x) => x.type === "Vaccine" || x.form === "Vaccine");
@@ -71,7 +260,43 @@ export default function WellBabyEncounter() {
 
   const set = (k, v) => setD((s) => ({ ...s, [k]: v }));
   const setDelivery = (patch) => setD((s) => ({ ...s, delivery: { ...s.delivery, ...patch } }));
-  const preFill = existing ? d.delivery : { ...(p.deliveryDetails || {}), ...d.delivery };
+  const delivery = d.delivery || {};
+  const babies = delivery.babies || [];
+  const fetusCount = Number(delivery.fetuses || 0);
+  const motherFromId = delivery.motherId ? patients.find((x) => x.id === delivery.motherId) : null;
+  const motherLabel = delivery.motherName || motherFromId?.name || "mother";
+  const setFetuses = (v) => setD((s) => ({
+    ...s,
+    delivery: {
+      ...s.delivery,
+      fetuses: v,
+      babies: syncBabiesToFetuses(s.delivery.babies, v, s.delivery.type || s.delivery.mode || ""),
+    },
+  }));
+  const updBaby = (i, patch) => setD((s) => ({
+    ...s,
+    delivery: {
+      ...s.delivery,
+      babies: (s.delivery.babies || []).map((b, j) => (j === i ? { ...b, ...patch } : b)),
+    },
+  }));
+  const updBabyExam = (i, k, v) =>
+    setD((s) => ({
+      ...s,
+      delivery: {
+        ...s.delivery,
+        babies: (s.delivery.babies || []).map((b, j) =>
+          (j === i ? { ...b, physicalExam: { ...(b.physicalExam || {}), [k]: v } } : b)),
+      },
+    }));
+  const carriedFromPrior = !existing && !!(priorWb && deliveryHasContent(priorWb.data?.delivery));
+  const carriedFromMother =
+    !existing
+    && !carriedFromPrior
+    && !!(
+      (p.deliveryDetails && deliveryHasContent(p.deliveryDetails))
+      || (p.bornFrom && deliveryHasContent(delivery))
+    );
 
   const toggleVaccine = (item) => setD((s) => { const cur = s.immunization[item.id]; return { ...s, immunization: { ...s.immunization, [item.id]: cur?.given ? { given: false } : { given: true, date: localISODate() } } }; });
   const setVaccineDate = (k, date) => setD((s) => ({ ...s, immunization: { ...s.immunization, [k]: { given: true, date } } }));
@@ -134,8 +359,9 @@ export default function WellBabyEncounter() {
     const episodeId = existing?.episodeId || patientEncs.filter((e) => e.disease === WELLBABY_ID)[0]?.episodeId || newWbEpisodeId();
     saveEncounter({
       id: existing?.id, patientId: p.id, episodeId, disease: WELLBABY_ID, facility, worker: user?.name, type: visitType,
-      diagnosis: ageMonths != null ? `Age ${ageMonthsToLabel(ageMonths)}` : "",
-      outcome: "", data: { ...d, delivery: preFill, ageMonths, growthAge: ageMonths },
+      diagnosis: ageLabel !== "—" ? `Age ${ageLabel}` : "",
+      treatment: (d.drugs || []).join(" + "),
+      outcome: "", data: { ...d, delivery, ageMonths, growthAge: ageMonths },
     });
     setSavedAt(new Date().toLocaleTimeString());
     if (close) navigate(`/patients/${p.id}?tab=wellbaby`);
@@ -144,25 +370,203 @@ export default function WellBabyEncounter() {
 
   const sections = [
     {
-      title: "Delivery & new born details",
-      done: Object.keys(preFill).length > 0,
+      title: "Delivery details",
+      done: !!(delivery.deliveryDate || delivery.date || delivery.mode || delivery.type || delivery.place || delivery.outcome || delivery.complication || delivery.fetuses || delivery.familyPlanning || (delivery.postpartum || []).length),
       body: (
-        <div className="space-y-3">
-          {p.deliveryDetails && <AlertPanel level="info" title="Auto-populated from delivery record" testid="wb-delivery-auto">Imported from the mother's Ante Natal delivery record. Edit if needed.</AlertPanel>}
+        <div className="space-y-5">
+          {(carriedFromPrior || carriedFromMother) && (
+            <AlertPanel
+              level="info"
+              title={carriedFromPrior ? "Carried forward from previous visit" : "Auto-populated from Ante Natal delivery"}
+              testid="wb-delivery-auto"
+            >
+              {carriedFromPrior
+                ? "Delivery and new born details were copied from the last Well Baby visit. Edit if needed."
+                : "Imported from the mother\u2019s Ante Natal delivery / new born record. Edit if needed."}
+            </AlertPanel>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <TextField label="Delivery date" type="date" value={preFill.deliveryDate || preFill.date || dob || ""} onChange={(e) => setDelivery({ deliveryDate: e.target.value })} testid="wb-del-date" />
-            <TextField label="Mode" value={preFill.mode || ""} onChange={(e) => setDelivery({ mode: e.target.value })} testid="wb-del-mode" />
-            <TextField label="Birth weight (kg)" type="number" value={preFill.weightKg || p.weight || ""} onChange={(e) => setDelivery({ weightKg: e.target.value })} testid="wb-del-weight" />
-            <TextField label="Birth length (cm)" type="number" value={preFill.lengthCm || ""} onChange={(e) => setDelivery({ lengthCm: e.target.value })} testid="wb-del-length" />
-            <TextField label="APGAR 1/5" value={`${preFill.apgar1 || "—"}/${preFill.apgar5 || "—"}`} readOnly />
-            <TextField label="Place of birth" value={preFill.place || ""} onChange={(e) => setDelivery({ place: e.target.value })} testid="wb-del-place" />
+            <TextField label="Delivery date" type="date" value={delivery.deliveryDate || delivery.date || dob || ""} onChange={(e) => setDelivery({ deliveryDate: e.target.value, date: e.target.value })} testid="wb-del-date" />
+            <SelectField
+              label="Delivery type"
+              options={DELIVERY_TYPES}
+              value={delivery.type || delivery.mode || ""}
+              onChange={(v) => setDelivery({ type: v, mode: v })}
+              testid="wb-del-type"
+            />
           </div>
+          <ChoiceChips
+            label="Delivery complication(s)"
+            options={DELIVERY_COMPLICATIONS}
+            value={delivery.complication || ""}
+            onChange={(v) => setDelivery({ complication: v })}
+            testid="wb-del-complication"
+          />
+          <ChoiceChips
+            label="No of Fetuses"
+            options={FETUS_COUNTS}
+            value={String(delivery.fetuses || "")}
+            onChange={setFetuses}
+            testid="wb-del-fetuses"
+          />
+          {fetusCount > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {Array.from({ length: fetusCount }, (_, i) => (
+                <TextField
+                  key={i}
+                  label={`Total length of delivery — fetus ${i + 1}`}
+                  value={delivery.fetusLengths?.[i] || ""}
+                  onChange={(e) => setDelivery({ fetusLengths: { ...(delivery.fetusLengths || {}), [i]: e.target.value } })}
+                  testid={`wb-del-length-${i}`}
+                  placeholder="e.g. 8 hrs"
+                />
+              ))}
+            </div>
+          )}
+          <ChoiceChips
+            label="Family planning"
+            options={FAMILY_PLANNING}
+            value={delivery.familyPlanning || ""}
+            onChange={(v) => setDelivery({ familyPlanning: v })}
+            testid="wb-del-fp"
+          />
+          <CheckGrid
+            label="Postpartum complication(s)"
+            options={POSTPARTUM_COMPLICATIONS}
+            value={delivery.postpartum || []}
+            onChange={(v) => setDelivery({ postpartum: v })}
+            testid="wb-del-postpartum"
+          />
+          <ChoiceChips
+            label="Delivery Outcome"
+            options={DELIVERY_OUTCOMES}
+            value={delivery.outcome || delivery.place || ""}
+            onChange={(v) => setDelivery({ outcome: v, place: v })}
+            testid="wb-del-outcome"
+          />
         </div>
       ),
     },
-    { title: "Chief complaints", done: d.complaints.length > 0, body: <ChipMultiWithOther label="Select complaints (or add other)" options={CHIEF_COMPLAINTS} value={d.complaints} onChange={(v) => set("complaints", v)} testid="wb-complaints" /> },
-    { title: "Allergy", done: d.allergy.length > 0, body: <ChipMultiWithOther label="Known allergies (or add other)" options={ALLERGIES} value={d.allergy} onChange={(v) => set("allergy", v)} testid="wb-allergy" placeholder="Add other allergy…" /> },
-    { title: "Growth chart", done: Object.values(d.growth.measures || {}).some(Boolean), body: <GrowthEntry sex={p.sex || p.gender} ageMonths={ageMonths} value={d.growth} onChange={(v) => set("growth", v)} testid="wb-growth" /> },
+    {
+      title: "New born details",
+      done: babies.length > 0 && babies.some(babyHasContent),
+      body: (
+        <div className="space-y-4">
+          <p className="font-head text-sm font-semibold text-primary">
+            New born(s){babies.length > 0 ? ` · ${babies.length}` : ""}
+          </p>
+          {fetusCount === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Set <span className="font-medium text-foreground">No of Fetuses</span> in Delivery details to show newborn forms.
+            </p>
+          )}
+          {babies.map((b, i) => (
+            <div key={i} className="rounded-md border border-border bg-white p-3 space-y-3" data-testid={`wb-baby-${i}`}>
+              <p className="text-sm font-semibold">{babyName(motherLabel, i, babies.length)}</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <SelectField
+                  label="Delivery type"
+                  options={DELIVERY_TYPES}
+                  value={b.deliveryType || delivery.type || delivery.mode || ""}
+                  onChange={(v) => updBaby(i, { deliveryType: v })}
+                  testid={`wb-baby-deltype-${i}`}
+                />
+                <SelectField
+                  label="Sex"
+                  options={BABY_SEX}
+                  value={b.sex || ""}
+                  onChange={(v) => updBaby(i, { sex: v })}
+                  testid={`wb-baby-sex-${i}`}
+                />
+                <TextField label="Birth Weight (kgs)" type="number" step="0.1" value={b.weightKg || ""} onChange={(e) => updBaby(i, { weightKg: e.target.value })} testid={`wb-baby-weight-${i}`} />
+                <TextField label="Birth Length (cms)" type="number" step="0.1" value={b.lengthCm || ""} onChange={(e) => updBaby(i, { lengthCm: e.target.value })} testid={`wb-baby-length-${i}`} />
+                <TextField label="Head Circumference (cms)" type="number" step="0.1" value={b.headCm || ""} onChange={(e) => updBaby(i, { headCm: e.target.value })} testid={`wb-baby-hc-${i}`} />
+                <TextField label="APGAR 1 min" type="number" value={b.apgar1 || ""} onChange={(e) => updBaby(i, { apgar1: e.target.value })} testid={`wb-baby-apgar1-${i}`} />
+                <TextField label="APGAR 5 min" type="number" value={b.apgar5 || ""} onChange={(e) => updBaby(i, { apgar5: e.target.value })} testid={`wb-baby-apgar5-${i}`} />
+                <TextField label="APGAR 10 min" type="number" value={b.apgar10 || ""} onChange={(e) => updBaby(i, { apgar10: e.target.value })} testid={`wb-baby-apgar10-${i}`} />
+              </div>
+              <ChoiceChips
+                label="Resuscitation"
+                options={YES_NO}
+                value={b.resuscitation || ""}
+                onChange={(v) => updBaby(i, { resuscitation: v })}
+                negativeOptions={["Yes"]}
+                testid={`wb-baby-resusc-${i}`}
+              />
+              <CheckGrid
+                label="Baby complications"
+                options={BABY_COMPLICATIONS}
+                value={b.complications || []}
+                onChange={(v) => updBaby(i, { complications: v })}
+                alertWhenSelected
+                testid={`wb-baby-comp-${i}`}
+              />
+              <ChoiceChips
+                label="Baby Outcome"
+                options={BABY_OUTCOMES}
+                value={b.outcome || ""}
+                onChange={(v) => updBaby(i, { outcome: v })}
+                negativeOptions={BABY_OUTCOME_ALERTS}
+                testid={`wb-baby-outcome-${i}`}
+              />
+              <div className="border-t border-border/60 pt-3" data-testid={`wb-baby-exam-${i}`}>
+                <p className="mb-3 font-head text-sm font-semibold text-primary">Physical examination</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {PHYSICAL_EXAM_FIELDS.filter((f) => !f.sex || f.sex === (b.sex || "")).map((f) => (
+                    <ChoiceChips
+                      key={f.k}
+                      label={f.label}
+                      options={f.options}
+                      value={(b.physicalExam || {})[f.k] || ""}
+                      onChange={(v) => updBabyExam(i, f.k, v)}
+                      negativeOptions={f.alert || []}
+                      testid={`wb-baby-${i}-pe-${f.k}`}
+                    />
+                  ))}
+                  {!b.sex && (
+                    <p className="sm:col-span-2 text-xs text-muted-foreground">
+                      Select sex above to show male/female-specific exam fields.
+                    </p>
+                  )}
+                </div>
+                {PHYSICAL_EXAM_FIELDS.some((f) => (!f.sex || f.sex === b.sex) && (f.alert || []).includes((b.physicalExam || {})[f.k])) && (
+                  <AlertPanel level="urgent" title="Concerning findings" testid={`wb-baby-exam-alert-${i}`}>
+                    Negative / abnormal answers are highlighted in red. Review and manage as needed.
+                  </AlertPanel>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ),
+    },
+    {
+      title: "Chief complaints",
+      done: d.complaints.length > 0,
+      body: (
+        <CheckGrid
+          label="Select complaints"
+          options={[...CHIEF_COMPLAINTS, ...d.complaints.filter((c) => !CHIEF_COMPLAINTS.includes(c))]}
+          value={d.complaints}
+          onChange={(v) => set("complaints", v)}
+          testid="wb-complaints"
+        />
+      ),
+    },
+    {
+      title: "Allergy",
+      done: d.allergy.length > 0,
+      body: (
+        <CheckGrid
+          label="Known allergies"
+          options={[...ALLERGIES, ...d.allergy.filter((a) => !ALLERGIES.includes(a))]}
+          value={d.allergy}
+          onChange={(v) => set("allergy", nextAllergySelection(v))}
+          testid="wb-allergy"
+        />
+      ),
+    },
+    { title: "Growth chart", done: Object.values(d.growth.measures || {}).some(Boolean), body: <GrowthEntry sex={p.sex || p.gender} ageMonths={ageMonths} ageLabel={ageLabel} value={d.growth} previousMeasures={priorGrowthMeasures} onChange={(v) => set("growth", v)} testid="wb-growth" /> },
     {
       title: "Immunization", done: Object.values(d.immunization).some((x) => x?.given),
       body: (
@@ -275,7 +679,7 @@ export default function WellBabyEncounter() {
                               label="Result"
                               options={def?.results || ["Reactive", "Non-reactive", "Indeterminate"]}
                               value={row.result}
-                              onChange={(v) => updLab(i, { result: v, completed: !!v })}
+                              onChange={(v) => updLab(i, { result: v, completed: !!v, ...(v && !row.date ? { date: localISODate() } : {}) })}
                               testid={`wb-lab-result-${i}`}
                             />
                             <TextField
@@ -293,7 +697,7 @@ export default function WellBabyEncounter() {
                               testid={`wb-lab-location-${i}`}
                             />
                             <TextField
-                              label="Date"
+                              label="Completed date"
                               type="date"
                               value={row.date}
                               onChange={(e) => updLab(i, { date: e.target.value })}
@@ -337,7 +741,7 @@ export default function WellBabyEncounter() {
   return (
     <ConditionEntryShell
       patient={p} patientEncs={patientEncs} sidebarDiseases={[{ id: WELLBABY_ID, name: WELLBABY_NAME }]}
-      title={`${WELLBABY_NAME} visit`} context={`${facility} · ${visitType} · ${ageMonthsToLabel(ageMonths)}`}
+      title={`${WELLBABY_NAME} visit`} context={`${facility} · ${visitType} · ${ageLabel}`}
       sections={sections} onSave={persist} savedAt={savedAt} focusSection={focusSection}
       backTo={() => navigate(`/patients/${p.id}?tab=wellbaby`)}
     />

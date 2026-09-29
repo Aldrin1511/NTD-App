@@ -25,12 +25,22 @@ export default function PatientSidebar({
     const s = String(v).trim();
     return s && s !== "—" ? s : "";
   };
+  const drugNamesOf = (e) =>
+    [
+      ...(e?.data?.topical || []),
+      ...(e?.data?.oral || []),
+      ...(e?.data?.drugs || []),
+      ...(e?.data?.meds || []),
+      ...(e?.data?.topicalAntibiotics || []),
+      ...(e?.data?.oralAntibiotics || []),
+    ]
+      .map((n) => String(n || "").trim())
+      .filter(Boolean);
   const lastWithTx = [...encounters]
     .sort((a, b) => b.date.localeCompare(a.date))
-    .find((e) => real(e.treatment) || (e.data?.topical || []).length || (e.data?.oral || []).length);
-  const lastTreatment =
-    real(lastWithTx?.treatment) ||
-    (lastWithTx?.disease === "scabies"
+    .find((e) => real(e.treatment) || drugNamesOf(e).length);
+  const diseaseSummary =
+    lastWithTx?.disease === "scabies"
       ? scabiesTreatmentSummary(lastWithTx?.data || {})
       : lastWithTx?.disease === "yaws"
         ? yawsTreatmentSummary(lastWithTx?.data || {})
@@ -40,8 +50,11 @@ export default function PatientSidebar({
             ? buruliTreatmentSummary(lastWithTx?.data || {})
             : lastWithTx?.disease === "leprosy"
               ? leprosyTreatmentSummary(lastWithTx?.data || {})
-              : "") ||
-    [...(lastWithTx?.data?.topical || []), ...(lastWithTx?.data?.oral || [])].join(" + ") ||
+              : "";
+  const lastTreatment =
+    real(lastWithTx?.treatment) ||
+    real(diseaseSummary) ||
+    [...new Set(drugNamesOf(lastWithTx))].join(" + ") ||
     "—";
   const diseaseNames = diseases
     .map((d) => (typeof d === "string" ? DISEASE_SPECS[d]?.name || d : d.name))

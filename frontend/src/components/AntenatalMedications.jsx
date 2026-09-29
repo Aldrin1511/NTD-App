@@ -43,6 +43,7 @@ function CompactPosology({ name, meta, posology, onExpand, testidPrefix }) {
   const dosage = ov.dosage || meta.dosage || "—";
   const frequency = ov.frequency || meta.frequency || "—";
   const duration = ov.duration || meta.duration || "—";
+  const qualifier = ov.qualifier || meta.qualifier || "";
   return (
     <button
       type="button"
@@ -54,6 +55,7 @@ function CompactPosology({ name, meta, posology, onExpand, testidPrefix }) {
       <p className="text-muted-foreground">
         {frequency}
         {duration && duration !== "—" ? ` · ${duration}` : ""}
+        {qualifier ? ` · ${qualifier}` : ""}
       </p>
     </button>
   );
@@ -209,27 +211,18 @@ export default function AntenatalMedications({
 export function medicationRows(visit, drugMeta = {}) {
   const x = visit?.data || {};
   const names = x.drugs || [];
-  const dateFallback = visit?.date || "";
-  const rows = [];
-  names.forEach((name) => {
+  return names.map((name) => {
     const meta = drugMeta[name] || {};
     const ov = (x.posology || {})[name] || {};
-    const courses = Array.isArray(x.medCourses?.[name]) ? x.medCourses[name] : [];
-    const stamps = courses.some((c) => c?.date)
-      ? courses.map((c) => c.date)
-      : [dateFallback];
-    stamps.forEach((stamp, i) => {
-      rows.push({
-        name: stamps.length > 1 ? `${name} (${stamps.length - i})` : name,
-        dosage: ov.dosage || meta.dosage || "—",
-        frequency: ov.frequency || meta.frequency || "—",
-        duration: ov.duration || meta.duration || "—",
-        date: stamp || dateFallback || "—",
-        advice: ov.advice || (meta.advice || []).join(" ") || "",
-      });
-    });
+    return {
+      name,
+      dosage: ov.dosage || meta.dosage || "—",
+      frequency: ov.frequency || meta.frequency || "—",
+      duration: ov.duration || meta.duration || "—",
+      qualifier: ov.qualifier || meta.qualifier || "—",
+      advice: ov.advice || (meta.advice || []).join(" ") || "",
+    };
   });
-  return rows;
 }
 
 export function ancMedicationRows(visit) {

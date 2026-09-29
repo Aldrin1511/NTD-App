@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Slider } from "@/components/ui/slider";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -6,8 +6,7 @@ import {
   STANDARDS, GROWTH_MODES, GROWTH_METRICS, metricApplies, compute, bmiFrom, referenceSeries,
   percentileLabel, monthsBetween, ageMonthsToLabel,
 } from "@/mock/growth";
-import { Activity, Check, Maximize2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Activity, Check, Maximize2 } from "lucide-react";
 
 const dot = { green: "bg-green-500", amber: "bg-amber-500", red: "bg-red-500", "": "bg-slate-300" };
 const txt = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-foreground" };
@@ -57,6 +56,104 @@ const fmtMeasure = (v) => {
 };
 
 const round1 = (n) => Math.round(Number(n) * 10) / 10;
+
+const roundStep = (v, step) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "";
+  if (step < 1) {
+    const p = Math.round(1 / step);
+    return Math.round(n * p) / p;
+  }
+  return Math.round(n);
+};
+
+/** One growth metric: typed input + slider (same pattern as vitals SliderStat). */
+const GrowthMetricCard = ({ metric: m, value, status, statusLine, previous, onChange, testid }) => {
+  const has = value !== undefined && value !== "" && value !== null;
+  const mid = (m.min + m.max) / 2;
+  const cur = has ? Number(value) : mid;
+  const [draft, setDraft] = useState(has ? String(value) : "");
+  const [editing, setEditing] = useState(false);
+  const hasPrev = previous !== undefined && previous !== null && previous !== "";
+
+  useEffect(() => {
+    if (!editing) setDraft(has ? String(value) : "");
+  }, [value, has, editing]);
+
+  const commit = (raw) => {
+    setEditing(false);
+    if (raw === "" || raw === "-" || raw === ".") {
+      onChange("");
+      setDraft("");
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      setDraft(has ? String(value) : "");
+      return;
+    }
+    const next = roundStep(Math.min(m.max, Math.max(m.min, n)), m.step);
+    onChange(next);
+    setDraft(String(next));
+  };
+
+  return (
+    <div className={`rounded-md border ${ring[status]} bg-white p-3`} data-testid={testid}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold text-muted-foreground">{m.label} ({m.unit})</span>
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            step={m.step}
+            min={m.min}
+            max={m.max}
+            className={`h-8 w-20 rounded border border-input bg-white px-2 text-right text-sm font-bold tabular-nums ${txt[status]}`}
+            value={editing ? draft : (has ? value : "")}
+            placeholder="—"
+            onFocus={(e) => {
+              setEditing(true);
+              setDraft(has ? String(value) : "");
+              requestAnimationFrame(() => {
+                try { e.target.select(); } catch { /* ignore */ }
+              });
+            }}
+            onChange={(e) => { setEditing(true); setDraft(e.target.value); }}
+            onBlur={(e) => commit(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            data-testid={`${testid}-input`}
+          />
+          <span className="text-xs font-medium text-muted-foreground">{m.unit}</span>
+        </div>
+      </div>
+      <Slider
+        className="mt-3"
+        min={m.min}
+        max={m.max}
+        step={m.step}
+        value={[has ? Number(value) : roundStep(cur, m.step)]}
+        onValueChange={([nv]) => {
+          const next = roundStep(nv, m.step);
+          onChange(next);
+          setDraft(String(next));
+          setEditing(false);
+        }}
+        data-testid={`${testid}-slider`}
+      />
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+        <span>{m.min}</span>
+        <span>{m.max}</span>
+      </div>
+      {statusLine}
+      {hasPrev ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid={`${testid}-prev`}>
+          Previous: <span className="font-semibold text-foreground/80">{fmtMeasure(previous)} {m.unit}</span>
+        </p>
+      ) : (
+        <p className="mt-1 text-[10px] text-muted-foreground">Type or drag</p>
+      )}
+    </div>
+  );
+};
 
 /** Age window for chart X-axis (months), shaped like clinical growth charts. */
 const ageWindowMonths = (metric, ageMos = []) => {
@@ -170,11 +267,14 @@ const MetricGraph = ({ metric, label, unit, data, mode, testid, selected, onSele
 };
 
 /** Entry: sliders for one visit's measurements with live percentile / SD / colour. */
-export const GrowthEntry = ({ sex, ageMonths, value = {}, onChange, testid = "growth" }) => {
+export const GrowthEntry = ({ sex, ageMonths, ageLabel, value = {}, previousMeasures = {}, onChange, testid = "growth" }) => {
   const standard = value.standard || "WHO";
   const mode = value.mode || "Percentile";
   const measures = value.measures || {};
-  const setMeasure = (k, v) => onChange({ ...value, standard, mode, measures: { ...measures, [k]: round1(v) } });
+  const setMeasure = (k, v) => {
+    const next = v === "" || v == null ? "" : round1(v);
+    onChange({ ...value, standard, mode, measures: { ...measures, [k]: next } });
+  };
   const setBmi = () => bmiFrom(measures.weight, measures.height);
 
   return (
@@ -182,28 +282,31 @@ export const GrowthEntry = ({ sex, ageMonths, value = {}, onChange, testid = "gr
       <div className="flex flex-wrap items-center gap-3">
         <div><p className="mb-1 text-[11px] font-semibold text-muted-foreground">Standard</p><Toggle options={STANDARDS} value={standard} onChange={(v) => onChange({ ...value, standard: v, mode, measures })} testid={`${testid}-standard`} /></div>
         <div><p className="mb-1 text-[11px] font-semibold text-muted-foreground">Show as</p><Toggle options={GROWTH_MODES} value={mode} onChange={(v) => onChange({ ...value, standard, mode: v, measures })} testid={`${testid}-mode`} /></div>
-        <div className="ml-auto text-right"><p className="text-[11px] font-semibold text-muted-foreground">Age at visit</p><p className="font-bold">{ageMonthsToLabel(ageMonths)}</p></div>
+        <div className="ml-auto text-right"><p className="text-[11px] font-semibold text-muted-foreground">Age at visit</p><p className="font-bold">{ageLabel || ageMonthsToLabel(ageMonths)}</p></div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {GROWTH_METRICS.filter((m) => !m.derived && metricApplies(m.k, ageMonths)).map((m) => {
           const v = measures[m.k];
           const r = compute({ metric: m.k, value: v, ageMonths, sex, standard });
           const has = v !== undefined && v !== "" && v !== null;
-          const cur = has ? Number(v) : (m.min + m.max) / 2;
+          const statusLine = has && r.z != null ? (
+            <p className="mt-2 text-xs font-semibold">
+              <span className={`mr-1 inline-block h-2 w-2 rounded-full align-middle ${dot[r.status]}`} />
+              {mode === "SD" ? `${r.z > 0 ? "+" : ""}${Number(r.z).toFixed(1)} SD` : `${percentileLabel(r.percentile)} pct`}{" "}
+              <span className="font-normal text-muted-foreground">(median {fmtMeasure(r.median)}{m.unit})</span>
+            </p>
+          ) : null;
           return (
-            <div key={m.k} className={`rounded-md border ${ring[r.status]} bg-white p-3`} data-testid={`${testid}-${m.k}`}>
-              <div className="flex items-baseline justify-between">
-                <span className="text-xs font-semibold text-muted-foreground">{m.label} ({m.unit})</span>
-                <span className={`text-lg font-bold tabular-nums ${txt[r.status]}`}>{has ? fmtMeasure(v) : "—"}<span className="ml-1 text-xs font-medium text-muted-foreground">{m.unit}</span></span>
-              </div>
-              <Slider className="mt-3" min={m.min} max={m.max} step={m.step} value={[cur]} onValueChange={([nv]) => setMeasure(m.k, Math.round(nv / m.step) * m.step)} data-testid={`${testid}-${m.k}-slider`} />
-              {has && r.z != null && (
-                <p className="mt-2 text-xs font-semibold">
-                  <span className={`inline-block h-2 w-2 rounded-full ${dot[r.status]} mr-1 align-middle`} />
-                  {mode === "SD" ? `${r.z > 0 ? "+" : ""}${Number(r.z).toFixed(1)} SD` : `${percentileLabel(r.percentile)} pct`} <span className="font-normal text-muted-foreground">(median {fmtMeasure(r.median)}{m.unit})</span>
-                </p>
-              )}
-            </div>
+            <GrowthMetricCard
+              key={m.k}
+              metric={m}
+              value={v}
+              status={r.status}
+              statusLine={statusLine}
+              previous={previousMeasures?.[m.k]}
+              onChange={(nv) => setMeasure(m.k, nv === "" ? "" : nv)}
+              testid={`${testid}-${m.k}`}
+            />
           );
         })}
       </div>
@@ -308,22 +411,39 @@ export const GrowthReview = ({ sex, dob, entries = [], testid = "growth-review" 
 
         <Dialog open={!!focusMetric} onOpenChange={(o) => { if (!o) setFocusMetric(null); }}>
           <DialogContent className="max-h-[95vh] w-[min(96vw,72rem)] max-w-none overflow-y-auto p-4 sm:p-6" data-testid={`${testid}-graph-fullscreen`}>
-            <DialogHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pr-8">
+            <DialogHeader className="space-y-0 pr-8">
               <DialogTitle className="font-head text-lg">
                 {focusParam?.name || focusMetric}
                 {focusParam?.unit ? ` (${focusParam.unit})` : ""} · full screen
               </DialogTitle>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 shrink-0"
-                onClick={() => setFocusMetric(null)}
-                data-testid={`${testid}-graph-close`}
-              >
-                <X className="mr-1 h-4 w-4" /> Close
-              </Button>
             </DialogHeader>
+            <div className="flex flex-wrap gap-2" data-testid={`${testid}-graph-fs-chips`}>
+              {paramRows.map((p) => {
+                const on = focusMetric === p.k;
+                const hasData = rows.some((r) => r.metric === p.k);
+                return (
+                  <button
+                    key={p.k}
+                    type="button"
+                    onClick={() => {
+                      setFocusMetric(p.k);
+                      setSelected((prev) => (prev.includes(p.k) ? prev : [...prev, p.k]));
+                    }}
+                    data-testid={`${testid}-graph-fs-chip-${p.k}`}
+                    className={`min-h-9 rounded-full border px-3.5 text-sm font-semibold transition-colors ${
+                      on
+                        ? "border-primary bg-primary text-white"
+                        : hasData
+                          ? "border-border bg-white text-foreground hover:bg-muted"
+                          : "border-border/60 bg-muted/40 text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {p.name}
+                    {p.unit ? ` (${p.unit})` : ""}
+                  </button>
+                );
+              })}
+            </div>
             {focusMetric && (
               <MetricGraph
                 metric={focusMetric}

@@ -577,7 +577,6 @@ const fmtTabs = (mg, tabs) => formatDosePhysical(mg, tabs);
 
 const medicationRows = (e, spec, patient) => {
   const x = e.data || {};
-  const date = fmtDate(x.treatmentDate || e.date);
   const weight = Number(x.caseDetails?.weight || patient?.weight || 0);
   const months = ageInMonths(patient || {});
   const years = months != null ? months / 12 : Number(patient?.age);
@@ -587,23 +586,16 @@ const medicationRows = (e, spec, patient) => {
   const used = new Set();
   const rows = [];
 
-  const add = (row, names = [], courseKey) => {
+  const add = (row, names = []) => {
     (names.length ? names : [row.name]).forEach((n) => used.add(n));
-    const key = courseKey || row.name;
-    const list = Array.isArray(x.medCourses?.[key]) ? newestFirst(x.medCourses[key]) : [];
-    const stamps = list.some((c) => c?.date)
-      ? list.map((c, i) => ({ stamp: c?.date ? fmtDate(c.date) : date || "—", n: list.length - i }))
-      : [{ stamp: row.date || date || "—", n: 1 }];
-    stamps.forEach(({ stamp, n }) => {
-      const ov = hideVisitPosology(row.name) ? {} : ((x.posology || {})[row.name] || {});
-      rows.push({
-        name: stamps.length > 1 ? `${row.name} (${n})` : row.name,
-        dosage: ov.dosage || row.dosage || "—",
-        date: stamp,
-        frequency: ov.frequency || row.frequency || "—",
-        duration: ov.duration || row.duration || "—",
-        advice: ov.advice || row.advice || "",
-      });
+    const ov = hideVisitPosology(row.name) ? {} : ((x.posology || {})[row.name] || {});
+    rows.push({
+      name: row.name,
+      dosage: ov.dosage || row.dosage || "—",
+      frequency: ov.frequency || row.frequency || "—",
+      duration: ov.duration || row.duration || "—",
+      qualifier: ov.qualifier || row.qualifier || "—",
+      advice: ov.advice || row.advice || "",
     });
   };
 
@@ -777,7 +769,7 @@ const medicationRows = (e, spec, patient) => {
             dosage,
             frequency,
             duration,
-          }, [LEPROSY_DRUGS.mdt], LEPROSY_DRUGS.mdt);
+          }, [LEPROSY_DRUGS.mdt]);
         });
       } else {
         add({ name: LEPROSY_DRUGS.mdt, dosage: "Blister pack", frequency: "—", duration }, [LEPROSY_DRUGS.mdt]);
@@ -787,20 +779,16 @@ const medicationRows = (e, spec, patient) => {
       const sch = prednisoloneSchedule();
       const key = LEPROSY_DRUGS.prednisolone;
       used.add(key);
-      const list = Array.isArray(x.medCourses?.[key]) ? newestFirst(x.medCourses[key]) : [];
-      const stamps = list.some((c) => c?.date)
-        ? list.map((c, i) => ({ stamp: c?.date ? fmtDate(c.date) : date || "—", n: list.length - i }))
-        : [{ stamp: date || "—", n: 1 }];
-      stamps.forEach(({ stamp }) => {
-        sch.phases.forEach((p, i) => {
-          rows.push({
-            name: i === 0 ? LEPROSY_DRUGS.prednisolone : "",
-            dosage: `${p.mgPerDose} mg`,
-            date: stamp,
-            frequency: p.dosesPerDay > 1 ? "Twice daily" : "Daily",
-            duration: `${p.weeks} weeks`,
-            advice: "",
-          });
+      const ov = hideVisitPosology(key) ? {} : ((x.posology || {})[key] || {});
+      const qualifier = ov.qualifier || "—";
+      sch.phases.forEach((p, i) => {
+        rows.push({
+          name: i === 0 ? LEPROSY_DRUGS.prednisolone : "",
+          dosage: `${p.mgPerDose} mg`,
+          frequency: p.dosesPerDay > 1 ? "Twice daily" : "Daily",
+          duration: `${p.weeks} weeks`,
+          qualifier: i === 0 ? qualifier : "",
+          advice: "",
         });
       });
     }
@@ -1043,7 +1031,7 @@ const MedsSummary = ({ rows }) => {
               <th className="py-2 pr-3 font-semibold">Dosage</th>
               <th className="py-2 pr-3 font-semibold">Frequency</th>
               <th className="py-2 pr-3 font-semibold">Duration</th>
-              <th className="py-2 font-semibold">Date</th>
+              <th className="py-2 font-semibold">Qualifier</th>
             </tr>
           </thead>
           <tbody>
@@ -1054,7 +1042,7 @@ const MedsSummary = ({ rows }) => {
                   <td className="py-2 pr-3">{row.dosage}</td>
                   <td className="py-2 pr-3">{row.frequency}</td>
                   <td className="py-2 pr-3">{row.duration}</td>
-                  <td className="py-2 whitespace-nowrap">{row.date}</td>
+                  <td className="py-2">{row.qualifier || "—"}</td>
                 </tr>
                 {row.advice ? (
                   <tr className="border-b border-border">
@@ -1413,13 +1401,7 @@ export default function PatientRecord() {
               encounters={encs}
               canEdit={canEdit}
               onEdit={(v) => navigate(`/patients/${p.id}/malnutrition?enc=${encodeURIComponent(v.id)}`)}
-              onAddVisit={(week) => {
-                if (week != null && week !== "") {
-                  navigate(`/patients/${p.id}/malnutrition?week=${encodeURIComponent(week)}`);
-                  return;
-                }
-                setEnc({ ...enc, show: true, disease: MAL_ID });
-              }}
+              onAddVisit={() => setEnc({ ...enc, show: true, disease: MAL_ID })}
             />
           )}
 

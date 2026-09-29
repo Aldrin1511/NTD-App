@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Field, SelectField, TextField, DrugCourseBlock, withDrugCourse } from "@/components/Fields";
+import { Field, SelectField, TextField, withDrugCourse } from "@/components/Fields";
 import { DRUG_FREQUENCIES } from "@/mock/data";
 import {
   catalogueForDisease,
@@ -108,6 +108,7 @@ export function VisitPosology({
   const dosage = override.dosage ?? defaults.dosage ?? "";
   const frequency = override.frequency ?? defaults.frequency ?? "";
   const duration = override.duration ?? defaults.duration ?? "";
+  const qualifier = override.qualifier ?? defaults.qualifier ?? "";
   const freqOptions = [...new Set([frequency, defaults.frequency, ...DRUG_FREQUENCIES].filter(Boolean))];
   const slug = slugDrug(name);
   const patch = (next) => {
@@ -133,7 +134,7 @@ export function VisitPosology({
           </Button>
         )}
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <TextField
           label="Dosage"
           testid={`visit-posology-dosage-${slug}`}
@@ -154,6 +155,13 @@ export function VisitPosology({
           value={duration}
           placeholder={defaults.duration || "Duration"}
           onChange={(e) => patch({ duration: e.target.value })}
+        />
+        <TextField
+          label="Qualifier"
+          testid={`visit-posology-qualifier-${slug}`}
+          value={qualifier}
+          placeholder={defaults.qualifier || "Qualifier"}
+          onChange={(e) => patch({ qualifier: e.target.value })}
         />
       </div>
     </div>
@@ -178,7 +186,6 @@ export function DrugVisitFields({
       {!hideVisitPosology(name) && (
         <VisitPosology name={name} defaults={merged} posology={posology} onChange={onChange} />
       )}
-      <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
     </>
   );
 }
@@ -237,7 +244,6 @@ export function ExtraSelectedDrugs({
                   onChange={onChange}
                 />
               )}
-              <DrugCourseBlock name={name} medCourses={medCourses} onChange={onChange} />
             </div>
           </div>
         );
