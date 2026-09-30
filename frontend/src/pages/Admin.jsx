@@ -682,12 +682,16 @@ const SchoolsMaster = ({ s }) => {
   const districts = f.province ? Object.keys(GEO[f.province] || {}) : [];
   const villages = f.province && f.district ? GEO[f.province]?.[f.district] || [] : [];
 
-  const create = () => {
+  const create = async () => {
     if (!f.name || !f.province) return toast.error("School name and province are required");
-    s.addSchool(f);
-    setOpen(false);
-    setF({ name: "", province: "", district: "", village: "" });
-    toast.success("School added");
+    try {
+      await s.addSchool(f);
+      setOpen(false);
+      setF({ name: "", province: "", district: "", village: "" });
+      toast.success("School added");
+    } catch (err) {
+      toast.error(err?.message || "Failed to add school");
+    }
   };
 
   return (
@@ -726,9 +730,13 @@ const SchoolsMaster = ({ s }) => {
                       size="icon"
                       className="h-10 w-10 text-red-600"
                       data-testid={`remove-school-${x.id}`}
-                      onClick={() => {
-                        s.removeSchool(x.id);
-                        toast.success("School removed");
+                      onClick={async () => {
+                        try {
+                          await s.removeSchool(x.id);
+                          toast.success("School removed");
+                        } catch (err) {
+                          toast.error(err?.message || "Failed to remove school");
+                        }
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -766,12 +774,16 @@ const DonorsMaster = ({ s }) => {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
 
-  const create = () => {
+  const create = async () => {
     if (!name.trim()) return toast.error("Donor name is required");
-    s.addDonor({ name: name.trim() });
-    setOpen(false);
-    setName("");
-    toast.success("Donor added");
+    try {
+      await s.addDonor({ name: name.trim() });
+      setOpen(false);
+      setName("");
+      toast.success("Donor added");
+    } catch (err) {
+      toast.error(err?.message || "Failed to add donor");
+    }
   };
 
   return (
@@ -797,9 +809,13 @@ const DonorsMaster = ({ s }) => {
                 size="icon"
                 className="h-9 w-9 text-red-600"
                 data-testid={`remove-donor-${x.id}`}
-                onClick={() => {
-                  s.removeDonor(x.id);
-                  toast.success("Donor removed");
+                onClick={async () => {
+                  try {
+                    await s.removeDonor(x.id);
+                    toast.success("Donor removed");
+                  } catch (err) {
+                    toast.error(err?.message || "Failed to remove donor");
+                  }
                 }}
               >
                 <Trash2 className="h-4 w-4" />

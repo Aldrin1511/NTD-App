@@ -332,12 +332,12 @@ export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, tit
           {preface}
           {sections.map((s, i) => (
             <section key={i} className="rounded-lg border border-border bg-white" data-testid={`cond-section-${i + 1}`}>
-              <button type="button" data-testid={`cond-section-toggle-${i + 1}`} onClick={() => setOpen((o) => ({ ...o, [i]: o[i] === false }))} className="flex w-full items-center gap-3 px-5 py-4 text-left">
-                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md text-sm font-bold ${s.done ? "bg-green-50 text-green-700" : "bg-secondary text-primary"}`}>{s.done ? <CircleCheck className="h-5 w-5" /> : i + 1}</span>
-                <span className="flex-1"><span className="block font-head text-lg font-semibold tracking-tight">{s.title}</span><span className="block text-xs text-muted-foreground">{s.done ? "Captured" : "Not started"}</span></span>
+              <button type="button" data-testid={`cond-section-toggle-${i + 1}`} onClick={() => setOpen((o) => ({ ...o, [i]: o[i] === false }))} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-sm font-bold ${s.done ? "bg-green-50 text-green-700" : "bg-secondary text-primary"}`}>{s.done ? <CircleCheck className="h-4 w-4" /> : i + 1}</span>
+                <span className="flex-1"><span className="block font-head text-base font-semibold tracking-tight sm:text-lg">{s.title}</span><span className="block text-xs text-muted-foreground">{s.done ? "Captured" : "Not started"}</span></span>
                 <ChevronDown className={`h-5 w-5 shrink-0 text-muted-foreground transition-transform ${open[i] !== false ? "rotate-180" : ""}`} />
               </button>
-              {open[i] !== false && <div className="border-t border-border p-5">{s.body}</div>}
+              {open[i] !== false && <div className="border-t border-border px-4 py-3 sm:px-5 sm:py-4">{s.body}</div>}
             </section>
           ))}
         </div>

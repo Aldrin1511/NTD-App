@@ -1,8 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
-import { DEFAULT_SCHOOLS, DEFAULT_DONORS } from "@/mock/schoolhealth";
-import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, upsertPatientDiseaseStatus, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs } from "@/lib/hmisApi";
+import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, upsertPatientDiseaseStatus, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs, fetchSchoolHealthSchools, createSchoolHealthSchool, deleteSchoolHealthSchool, fetchSchoolHealthDonors, createSchoolHealthDonor, deleteSchoolHealthDonor, fetchSchoolHealthVisits, createSchoolHealthVisit, updateSchoolHealthVisit, deleteSchoolHealthVisit, saveSchoolHealthChild, deleteSchoolHealthChild, saveSchoolHealthReport, fetchSchoolHealthVisit } from "@/lib/hmisApi";
 import { applyNtdFormConfigs } from "@/lib/ntdFormConfig";
 import {
   SUSPECT_SYMPTOMS,
@@ -186,8 +185,8 @@ const initial = () => ({
     { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "STAT", durationUnit: "BOLUS", drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
     { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "STAT", duration: 1, durationUnit: "Day(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
-  schools: DEFAULT_SCHOOLS,
-  donors: DEFAULT_DONORS,
+  schools: [],
+  donors: [],
   schoolHealth: [],
   currentUserId: null,
   branding: {
@@ -338,6 +337,22 @@ export function StoreProvider({ children }) {
               patients: patients.length ? patients : s.patients,
             };
           });
+          try {
+            const [schools, donors, visits] = await Promise.all([
+              fetchSchoolHealthSchools(),
+              fetchSchoolHealthDonors(),
+              fetchSchoolHealthVisits(),
+            ]);
+            if (!cancelled) {
+              patch(() => ({
+                schools: Array.isArray(schools) ? schools : [],
+                donors: Array.isArray(donors) ? donors : [],
+                schoolHealth: Array.isArray(visits) ? visits : [],
+              }));
+            }
+          } catch (err) {
+            console.warn("session bootstrap school health failed", err);
+          }
         }
       } catch (err) {
         console.warn("session bootstrap failed", err);
@@ -545,6 +560,20 @@ export function StoreProvider({ children }) {
               patients,
             }));
           }
+          try {
+            const [schools, donors, visits] = await Promise.all([
+              fetchSchoolHealthSchools(),
+              fetchSchoolHealthDonors(),
+              fetchSchoolHealthVisits(),
+            ]);
+            patch(() => ({
+              schools: Array.isArray(schools) ? schools : [],
+              donors: Array.isArray(donors) ? donors : [],
+              schoolHealth: Array.isArray(visits) ? visits : [],
+            }));
+          } catch (err) {
+            console.warn("load school health after login failed", err);
+          }
           return { ...localUser, authSession: session };
         } catch (err) {
           // No local demo accounts — programme credentials required
@@ -583,41 +612,156 @@ export function StoreProvider({ children }) {
       // ---- Masters: per-condition feature config ----
       setFeatureConfig: (condition, features) =>
         patch((s) => ({ settings: { ...s.settings, featureConfig: { ...(s.settings.featureConfig || {}), [condition]: features } } })),
-      // ---- School Health ----
-      addSchool: (school) =>
-        patch((s) => {
-          const next = (s.schools || []).reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, "")) || 0), 0) + 1;
-          return { schools: [...(s.schools || []), { id: `SCH-${String(next).padStart(3, "0")}`, ...school }] };
-        }),
-      removeSchool: (id) => patch((s) => ({ schools: (s.schools || []).filter((x) => x.id !== id) })),
-      addDonor: (donor) =>
-        patch((s) => {
-          const next = (s.donors || []).reduce((m, x) => Math.max(m, Number(String(x.id).replace(/\D/g, "")) || 0), 0) + 1;
-          return { donors: [...(s.donors || []), { id: `DON-${String(next).padStart(3, "0")}`, ...donor }] };
-        }),
-      removeDonor: (id) => patch((s) => ({ donors: (s.donors || []).filter((x) => x.id !== id) })),
-      addSchoolVisit: (v) => {
-        const rec = { id: `SCH-${String(Math.floor(Math.random() * 900000) + 100000)}`, createdBy: state.currentUserId, worker: state.users.find((u) => u.id === state.currentUserId)?.name, children: [], report: null, status: v.status || "Planned", ...v };
-        const nextPending = queuedCount(state) + 1;
-        patch((s) => ({ schoolHealth: [rec, ...s.schoolHealth], pendingSync: nextPending }));
-        return rec;
+      // ---- School Health (portal-be → HMIS) ----
+      loadSchoolHealth: async () => {
+        if (!authSession?.facilityId) return;
+        try {
+          const [schools, donors, visits] = await Promise.all([
+            fetchSchoolHealthSchools(),
+            fetchSchoolHealthDonors(),
+            fetchSchoolHealthVisits(),
+          ]);
+          patch(() => ({
+            schools: Array.isArray(schools) ? schools : [],
+            donors: Array.isArray(donors) ? donors : [],
+            schoolHealth: Array.isArray(visits) ? visits : [],
+          }));
+        } catch (err) {
+          console.warn("loadSchoolHealth failed", err);
+        }
       },
-      updateSchoolVisit: (id, changes) =>
-        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === id ? { ...v, ...changes } : v)) })),
-      removeSchoolVisit: (id) => patch((s) => ({ schoolHealth: s.schoolHealth.filter((v) => v.id !== id) })),
-      saveSchoolChild: (visitId, child) =>
+      addSchool: async (school) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        const created = await createSchoolHealthSchool(school);
+        patch((s) => ({ schools: [...(s.schools || []), created] }));
+        return created;
+      },
+      removeSchool: async (id) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        await deleteSchoolHealthSchool(id);
+        patch((s) => ({ schools: (s.schools || []).filter((x) => x.id !== id) }));
+      },
+      addDonor: async (donor) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        const created = await createSchoolHealthDonor(donor);
+        patch((s) => ({ donors: [...(s.donors || []), created] }));
+        return created;
+      },
+      removeDonor: async (id) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        await deleteSchoolHealthDonor(id);
+        patch((s) => ({ donors: (s.donors || []).filter((x) => x.id !== id) }));
+      },
+      addSchoolVisit: async (v) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        const worker =
+          v.worker ||
+          state.users.find((u) => u.id === state.currentUserId)?.name ||
+          "";
+        const schoolMaster = (state.schools || []).find(
+          (s) => s.name === v.school || s.id === v.schoolId
+        );
+        const donorMaster = (state.donors || []).find(
+          (d) => d.name === v.donor || d.id === v.donorId
+        );
+        const created = await createSchoolHealthVisit({
+          date: v.date,
+          formType: v.formType,
+          province: v.province,
+          district: v.district,
+          village: v.village,
+          schoolId: v.schoolId || schoolMaster?.id,
+          school: v.school || schoolMaster?.name,
+          donorId: v.donorId || donorMaster?.id,
+          donor: v.donor || donorMaster?.name,
+          workerDisplayName: worker,
+          status: v.status || "New",
+        });
+        patch((s) => ({ schoolHealth: [created, ...(s.schoolHealth || [])] }));
+        return created;
+      },
+      updateSchoolVisit: async (id, changes) => {
+        if (!authSession?.facilityId) {
+          patch((s) => ({
+            schoolHealth: s.schoolHealth.map((v) => (v.id === id ? { ...v, ...changes } : v)),
+          }));
+          return;
+        }
+        const updated = await updateSchoolHealthVisit(id, changes);
+        patch((s) => ({
+          schoolHealth: s.schoolHealth.map((v) => (v.id === id ? { ...v, ...updated } : v)),
+        }));
+        return updated;
+      },
+      removeSchoolVisit: async (id) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        await deleteSchoolHealthVisit(id);
+        patch((s) => ({ schoolHealth: s.schoolHealth.filter((v) => v.id !== id) }));
+      },
+      refreshSchoolVisit: async (visitId) => {
+        if (!authSession?.facilityId || !visitId) return null;
+        const visit = await fetchSchoolHealthVisit(visitId);
+        patch((s) => ({
+          schoolHealth: s.schoolHealth.some((v) => v.id === visitId)
+            ? s.schoolHealth.map((v) => (v.id === visitId ? visit : v))
+            : [visit, ...s.schoolHealth],
+        }));
+        return visit;
+      },
+      saveSchoolChild: async (visitId, child) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        const saved = await saveSchoolHealthChild(visitId, child);
         patch((s) => ({
           schoolHealth: s.schoolHealth.map((v) => {
             if (v.id !== visitId) return v;
             const children = v.children || [];
-            if (child.id) return { ...v, children: children.map((c) => (c.id === child.id ? { ...c, ...child } : c)) };
-            return { ...v, children: [...children, { ...child, id: `CH-${Date.now()}` }] };
+            if (child.id) {
+              return {
+                ...v,
+                children: children.map((c) => (c.id === child.id ? { ...c, ...saved } : c)),
+                status: "In Progress",
+              };
+            }
+            return { ...v, children: [...children, saved], status: "In Progress" };
           }),
-        })),
-      removeSchoolChild: (visitId, childId) =>
-        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, children: (v.children || []).filter((c) => c.id !== childId) } : v)) })),
-      saveSchoolReport: (visitId, report) =>
-        patch((s) => ({ schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, report } : v)) })),
+        }));
+        try {
+          const fresh = await fetchSchoolHealthVisit(visitId);
+          patch((s) => ({
+            schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? fresh : v)),
+          }));
+        } catch (_) {
+          /* keep optimistic */
+        }
+        return saved;
+      },
+      removeSchoolChild: async (visitId, childId) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        await deleteSchoolHealthChild(visitId, childId);
+        patch((s) => ({
+          schoolHealth: s.schoolHealth.map((v) =>
+            v.id === visitId
+              ? { ...v, children: (v.children || []).filter((c) => c.id !== childId) }
+              : v
+          ),
+        }));
+        try {
+          const fresh = await fetchSchoolHealthVisit(visitId);
+          patch((s) => ({
+            schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? fresh : v)),
+          }));
+        } catch (_) {
+          /* keep optimistic */
+        }
+      },
+      saveSchoolReport: async (visitId, report) => {
+        if (!authSession?.facilityId) throw new Error("Not authenticated");
+        const updated = await saveSchoolHealthReport(visitId, report);
+        patch((s) => ({
+          schoolHealth: s.schoolHealth.map((v) => (v.id === visitId ? { ...v, ...updated } : v)),
+        }));
+        return updated;
+      },
       addSymptom: (text) =>
         patch((s) => ({
           settings: { ...s.settings, symptoms: s.settings.symptoms.includes(text) ? s.settings.symptoms : [...s.settings.symptoms, text] },

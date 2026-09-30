@@ -327,15 +327,25 @@ export default function AntenatalEncounter() {
     ]
   );
 
-  // Auto-add clinical risk suggestions; never re-add items the user cleared
+  // Auto-add clinical risk suggestions from history / case / vitals.
+  // While a clinical source is active, keep the matching risk selected (amber via autoOptions).
+  // Clearing a risk only sticks after the source condition is also cleared.
   useEffect(() => {
     const suggested = autoSuggestedRisks;
     setD((s) => {
       const cur = s.history?.riskFactors || [];
       const dismissed = s.history?.riskFactorsDismissed || [];
-      const toAdd = suggested.filter((x) => !cur.includes(x) && !dismissed.includes(x));
-      if (!toAdd.length) return s;
-      return { ...s, history: { ...s.history, riskFactors: [...cur, ...toAdd] } };
+      const toAdd = suggested.filter((x) => !cur.includes(x));
+      const nextDismissed = dismissed.filter((x) => !suggested.includes(x));
+      if (!toAdd.length && nextDismissed.length === dismissed.length) return s;
+      return {
+        ...s,
+        history: {
+          ...s.history,
+          riskFactors: toAdd.length ? [...cur, ...toAdd] : cur,
+          riskFactorsDismissed: nextDismissed,
+        },
+      };
     });
   }, [autoSuggestedRisks]);
 
@@ -601,16 +611,18 @@ export default function AntenatalEncounter() {
         ...b,
         motherId: p.id,
         motherName: p.name,
-        deliveryDate: d.delivery.date,
-        date: d.delivery.date,
+        deliveryDate: d.delivery.date || d.delivery.deliveryDate,
+        date: d.delivery.date || d.delivery.deliveryDate,
         mode: d.delivery.type || d.delivery.mode,
         type: d.delivery.type || d.delivery.mode,
-        place: d.delivery.outcome,
+        place: d.delivery.outcome || d.delivery.place,
+        outcome: d.delivery.outcome || d.delivery.place,
         complication: d.delivery.complication,
         fetuses: d.delivery.fetuses,
         fetusLengths: d.delivery.fetusLengths,
         familyPlanning: d.delivery.familyPlanning,
         postpartum: d.delivery.postpartum || [],
+        babies: d.delivery.babies || [],
       },
     });
     updBaby(i, { registered: true, patientId: rec.id });
@@ -699,6 +711,7 @@ export default function AntenatalEncounter() {
               <TextField
                 label="Final EDD (clinician)"
                 type="date"
+                allowEmpty
                 testid="anc-final-edd"
                 value={d.caseDetails.finalEdd || ""}
                 onChange={(e) => setCase({ finalEdd: e.target.value, finalSource: "Manual" })}
@@ -959,7 +972,7 @@ export default function AntenatalEncounter() {
               <div className="mt-2 grid gap-3 sm:grid-cols-3">
                 <SelectField label="Scan" options={RADIOLOGY_SCANS} value={row.scan} onChange={(v) => updRad(i, { scan: v })} testid={`anc-rad-scan-${i}`} />
                 <TextField label="Scan Date" type="date" value={row.date} onChange={(e) => updRad(i, { date: e.target.value })} testid={`anc-rad-date-${i}`} />
-                <TextField label="EDD" type="date" value={row.edd || ""} onChange={(e) => updRad(i, { edd: e.target.value })} testid={`anc-rad-edd-${i}`} hint="Feeds Case details scan dating" />
+                <TextField label="EDD" type="date" allowEmpty value={row.edd || ""} onChange={(e) => updRad(i, { edd: e.target.value })} testid={`anc-rad-edd-${i}`} hint="Feeds Case details scan dating" />
               </div>
               <AreaField label="Comments" rows={3} value={row.comments || row.findings || ""} onChange={(e) => updRad(i, { comments: e.target.value, findings: e.target.value })} testid={`anc-rad-comments-${i}`} />
             </div>

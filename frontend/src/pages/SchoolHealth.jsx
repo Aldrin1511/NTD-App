@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
@@ -105,25 +105,33 @@ export default function SchoolHealth() {
     } else setV((s) => ({ ...s, school: name }));
   };
 
-  const create = () => {
+  const create = async () => {
     if (!v.province || !v.school) return toast.error("Province and School are required");
     if (!v.formType) return toast.error("Form type is required");
-    const rec = addSchoolVisit({
-      ...v,
-      worker: user?.name || "",
-      status: "New",
-    });
-    setDlg(false);
-    setV({
-      date: localISODate(),
-      formType: SCHOOL_FORM_TYPES[0],
-      province: "",
-      district: "",
-      village: "",
-      school: "",
-      donor: "",
-    });
-    navigate(`/school-health/${rec.id}`);
+    try {
+      const schoolMaster = (schools || []).find((s) => s.name === v.school);
+      const donorMaster = (donors || []).find((d) => d.name === v.donor);
+      const rec = await addSchoolVisit({
+        ...v,
+        schoolId: schoolMaster?.id,
+        donorId: donorMaster?.id,
+        worker: user?.name || "",
+        status: "New",
+      });
+      setDlg(false);
+      setV({
+        date: localISODate(),
+        formType: SCHOOL_FORM_TYPES[0],
+        province: "",
+        district: "",
+        village: "",
+        school: "",
+        donor: "",
+      });
+      navigate(`/school-health/${rec.id}`);
+    } catch (err) {
+      toast.error(err?.message || "Failed to create visit");
+    }
   };
 
   return (
@@ -252,7 +260,7 @@ export function SchoolHealthVisit() {
   const navigate = useNavigate();
   const {
     schoolHealth, saveSchoolChild, removeSchoolChild, saveSchoolReport,
-    updateSchoolVisit, user, users, online,
+    updateSchoolVisit, user, users, online, refreshSchoolVisit,
   } = useStore();
   const visit = schoolHealth.find((v) => v.id === visitId);
   const canEdit = user?.canEdit;
@@ -264,6 +272,11 @@ export function SchoolHealthVisit() {
   const [photos, setPhotos] = useState([]);
   const [conductedQ, setConductedQ] = useState("");
   const [offlineInfo, setOfflineInfo] = useState(null);
+
+  useEffect(() => {
+    if (!visitId || !refreshSchoolVisit) return;
+    refreshSchoolVisit(visitId).catch(() => {});
+  }, [visitId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dirtyKey = child ? `${child.id || "new"}-${visitId}` : "idle";
   const { dirty, markSaved } = useFormDirty(child || {}, dirtyKey);
@@ -331,13 +344,21 @@ export function SchoolHealthVisit() {
     else setChild(null);
   };
 
-  const saveChild = () => {
+  const saveChild = async () => {
     if (!child.firstName) return toast.error("First name is required");
-    saveSchoolChild(visit.id, child);
-    markSaved(child);
-    toast.success(online ? "Child saved" : "Child saved · queued until online");
-    setChild(null);
-    setDiscardOpen(false);
+    try {
+      await saveSchoolChild(visit.id, {
+        ...child,
+        offlineEntered: !online,
+        offlineAt: !online ? new Date().toISOString() : child.offlineAt || "",
+      });
+      markSaved(child);
+      toast.success(online ? "Child saved" : "Child saved · queued until online");
+      setChild(null);
+      setDiscardOpen(false);
+    } catch (err) {
+      toast.error(err?.message || "Failed to save child");
+    }
   };
 
   const openReport = () => {
@@ -348,19 +369,21 @@ export function SchoolHealthVisit() {
     setReportMode(true);
   };
 
-  const saveRep = (complete = false) => {
+  const saveRep = async (complete = false) => {
     const t = visitImmunTotals(visit);
-    saveSchoolReport(visit.id, {
-      summary,
-      conductedBy,
-      photos,
-      completed: complete || visit.report?.completed || false,
-      totals: t,
-      generatedBy: user?.name,
-      generatedAt: localISODate(),
-    });
-    toast.success(complete ? "Report completed" : "Report saved");
-    if (complete) setReportMode(false);
+    try {
+      await saveSchoolReport(visit.id, {
+        summary,
+        conductedBy,
+        photos,
+        completed: complete || visit.report?.completed || false,
+        totals: t,
+      });
+      toast.success(complete ? "Report completed" : "Report saved");
+      if (complete) setReportMode(false);
+    } catch (err) {
+      toast.error(err?.message || "Failed to save report");
+    }
   };
 
   if (reportMode) {
@@ -584,7 +607,19 @@ export function SchoolHealthVisit() {
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" onClick={() => openChild(c)} data-testid={`shv-edit-child-${c.id}`}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600" onClick={() => removeSchoolChild(visit.id, c.id)} data-testid={`shv-remove-child-${c.id}`}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-600"
+                          onClick={async () => {
+                            try {
+                              await removeSchoolChild(visit.id, c.id);
+                            } catch (err) {
+                              toast.error(err?.message || "Failed to remove child");
+                            }
+                          }}
+                          data-testid={`shv-remove-child-${c.id}`}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </>

@@ -485,3 +485,88 @@ export async function updateHmisPatient(patientId, formState) {
     throw new Error(apiError(err, "Failed to update patient"));
   }
 }
+
+/* -------------------- School Health (portal-be → HMIS) -------------------- */
+
+function shData(res, fallback) {
+  if (!res.data?.status) throw new Error(res.data?.message || fallback);
+  return res.data.data;
+}
+
+export async function fetchSchoolHealthSchools() {
+  const res = await http.get("/api/school-health/schools");
+  return shData(res, "Failed to load schools") || [];
+}
+
+export async function createSchoolHealthSchool(body) {
+  const res = await http.post("/api/school-health/schools", body);
+  return shData(res, "Failed to create school");
+}
+
+export async function deleteSchoolHealthSchool(schoolId) {
+  const res = await http.delete(`/api/school-health/schools/${encodeURIComponent(schoolId)}`);
+  return shData(res, "Failed to remove school");
+}
+
+export async function fetchSchoolHealthDonors() {
+  const res = await http.get("/api/school-health/donors");
+  return shData(res, "Failed to load donors") || [];
+}
+
+export async function createSchoolHealthDonor(body) {
+  const res = await http.post("/api/school-health/donors", body);
+  return shData(res, "Failed to create donor");
+}
+
+export async function deleteSchoolHealthDonor(donorId) {
+  const res = await http.delete(`/api/school-health/donors/${encodeURIComponent(donorId)}`);
+  return shData(res, "Failed to remove donor");
+}
+
+export async function fetchSchoolHealthVisits(params = {}) {
+  const res = await http.get("/api/school-health/visits", { params });
+  return shData(res, "Failed to load school health visits") || [];
+}
+
+export async function fetchSchoolHealthVisit(visitId) {
+  const res = await http.get(`/api/school-health/visits/${encodeURIComponent(visitId)}`);
+  return shData(res, "Failed to load school health visit");
+}
+
+export async function createSchoolHealthVisit(body) {
+  const res = await http.post("/api/school-health/visits", body);
+  return shData(res, "Failed to create school health visit");
+}
+
+export async function updateSchoolHealthVisit(visitId, body) {
+  const res = await http.patch(`/api/school-health/visits/${encodeURIComponent(visitId)}`, body);
+  return shData(res, "Failed to update school health visit");
+}
+
+export async function deleteSchoolHealthVisit(visitId) {
+  const res = await http.delete(`/api/school-health/visits/${encodeURIComponent(visitId)}`);
+  return shData(res, "Failed to remove school health visit");
+}
+
+export async function saveSchoolHealthChild(visitId, child) {
+  const res = await http.post(
+    `/api/school-health/visits/${encodeURIComponent(visitId)}/children`,
+    child
+  );
+  return shData(res, "Failed to save child");
+}
+
+export async function deleteSchoolHealthChild(visitId, childId) {
+  const res = await http.delete(
+    `/api/school-health/visits/${encodeURIComponent(visitId)}/children/${encodeURIComponent(childId)}`
+  );
+  return shData(res, "Failed to remove child");
+}
+
+export async function saveSchoolHealthReport(visitId, report) {
+  const res = await http.put(
+    `/api/school-health/visits/${encodeURIComponent(visitId)}/report`,
+    report
+  );
+  return shData(res, "Failed to save report");
+}

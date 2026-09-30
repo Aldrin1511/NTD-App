@@ -194,7 +194,7 @@ export const ChoiceRow = ({ label, options, value, onChange, testid, hint, requi
             type="button"
             data-testid={`${testid}-${slug(o)}`}
             onClick={() => onChange(active ? "" : o)}
-            className={`h-12 rounded-md border px-4 text-sm font-semibold transition-colors ${
+            className={`h-10 rounded-md border px-3.5 text-sm font-semibold transition-colors ${
               active
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-white text-foreground hover:bg-muted"
@@ -208,31 +208,50 @@ export const ChoiceRow = ({ label, options, value, onChange, testid, hint, requi
   </Field>
 );
 
-export const CheckGrid = ({ label, options, value = [], onChange, testid, cols = "sm:grid-cols-2 lg:grid-cols-3" }) => {
+export const CheckGrid = ({
+  label,
+  options,
+  value = [],
+  onChange,
+  testid,
+  cols = "sm:grid-cols-2 lg:grid-cols-3",
+  autoOptions = [],
+  alertWhenSelected = false,
+}) => {
   const toggle = (o) => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
+  const autoSet = new Set(Array.isArray(autoOptions) ? autoOptions : []);
   return (
     <Field label={label}>
       <div className={`grid gap-2 ${cols}`}>
         {options.map((o) => {
           const active = value.includes(o);
+          const fromAuto = autoSet.has(o);
+          let chipCls = "border-border bg-white hover:bg-muted";
+          let boxCls = "border-input bg-white";
+          if (active && fromAuto) {
+            chipCls = "border-amber-500 bg-amber-50 text-amber-950";
+            boxCls = "border-amber-600 bg-amber-600 text-white";
+          } else if (active && alertWhenSelected) {
+            chipCls = "border-red-500 bg-red-50 text-red-900";
+            boxCls = "border-red-600 bg-red-600 text-white";
+          } else if (active) {
+            chipCls = "border-primary bg-secondary text-secondary-foreground";
+            boxCls = "border-primary bg-primary text-white";
+          }
           return (
             <button
               key={o}
               type="button"
               data-testid={`${testid}-${slug(o)}`}
+              data-auto={fromAuto ? "true" : undefined}
+              title={fromAuto ? "Auto from history / case / vitals" : undefined}
               onClick={() => toggle(o)}
-              className={`flex min-h-12 items-center gap-3 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors ${
-                active ? "border-primary bg-secondary text-secondary-foreground" : "border-border bg-white hover:bg-muted"
-              }`}
+              className={`flex min-h-12 items-center gap-3 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors ${chipCls}`}
             >
-              <span
-                className={`grid h-6 w-6 shrink-0 place-items-center rounded border ${
-                  active ? "border-primary bg-primary text-white" : "border-input bg-white"
-                }`}
-              >
+              <span className={`grid h-6 w-6 shrink-0 place-items-center rounded border ${boxCls}`}>
                 {active && <Check className="h-4 w-4" />}
               </span>
-              {o}
+              <span className="min-w-0 flex-1">{o}</span>
             </button>
           );
         })}

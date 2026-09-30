@@ -366,7 +366,7 @@ export default function MalnutritionEncounter() {
       title: "Case details",
       done: !!d.caseDetails.caseType || !!seededCase.caseType || d.visitType === "Follow-up",
       body: (
-        <div className="space-y-4">
+        <div className="space-y-3">
           <p className="text-sm text-muted-foreground" data-testid="mal-auto-visit-type">
             Visit type: <span className="font-semibold text-foreground">{d.visitType}</span>
             {d.visitType === "Follow-up" ? ` · Week ${d.week || "—"} (subsequent encounter)` : " (upon admission)"}
@@ -383,14 +383,23 @@ export default function MalnutritionEncounter() {
               hint="Which follow-up week you are recording"
             />
           )}
-          <div className="space-y-4" data-testid="mal-case-edit">
-            <ChoiceRow
-              label="Case type"
-              options={CASE_TYPES}
-              value={seededCase.caseType || ""}
-              onChange={(v) => setCase({ caseType: v })}
-              testid="mal-case-type"
-            />
+          <div className="space-y-3" data-testid="mal-case-edit">
+            <div className="grid gap-3 lg:grid-cols-2">
+              <ChoiceRow
+                label="Case type"
+                options={CASE_TYPES}
+                value={seededCase.caseType || ""}
+                onChange={(v) => setCase({ caseType: v })}
+                testid="mal-case-type"
+              />
+              <ChoiceRow
+                label="Admission type"
+                options={ADMISSION_TYPES}
+                value={seededCase.admissionType || ""}
+                onChange={(v) => setCase({ admissionType: v })}
+                testid="mal-admission-type"
+              />
+            </div>
             {seededCase.caseType === "Transfer in" && (
               <TextField
                 label="Transferred from (facility)"
@@ -399,13 +408,6 @@ export default function MalnutritionEncounter() {
                 testid="mal-from-facility"
               />
             )}
-            <ChoiceRow
-              label="Admission type"
-              options={ADMISSION_TYPES}
-              value={seededCase.admissionType || ""}
-              onChange={(v) => setCase({ admissionType: v })}
-              testid="mal-admission-type"
-            />
             {seededCase.admissionType === "Others" && (
               <TextField
                 label="Specify"
@@ -414,7 +416,7 @@ export default function MalnutritionEncounter() {
                 testid="mal-admission-other"
               />
             )}
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <TextField
                 label="Admission date"
                 type="date"
@@ -659,10 +661,10 @@ export default function MalnutritionEncounter() {
       preface={
         <>
           <div
-            className="rounded-lg border-2 border-primary bg-secondary px-4 py-3"
+            className="rounded-lg border border-primary/40 bg-secondary px-3.5 py-2.5"
             data-testid="mal-entering-week"
           >
-            <p className="text-base font-bold text-primary">
+            <p className="text-sm font-bold text-primary">
               {isAdmissionVisit ? "Entering: Admission" : `Entering: Follow-up · Week ${d.week || "—"}`}
             </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -672,7 +674,7 @@ export default function MalnutritionEncounter() {
             </p>
           </div>
           {grade.level ? (
-            <div className={`rounded-lg border px-4 py-3 ${alertCls[grade.level]}`} data-testid="mal-risk-banner">
+            <div className={`rounded-lg border px-3.5 py-2.5 ${alertCls[grade.level]}`} data-testid="mal-risk-banner">
               <p className="text-sm font-bold">
                 Risk status · {grade.label} grading · {grade.type || seededCase.admissionType}
               </p>

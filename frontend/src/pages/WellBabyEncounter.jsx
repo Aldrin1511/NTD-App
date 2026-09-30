@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,60 @@ const deliveryHasContent = (del = {}) =>
     || Object.values(del.physicalExam || {}).some(Boolean)
   );
 
+const isBlankVal = (v) =>
+  v == null
+  || v === ""
+  || (Array.isArray(v) && v.length === 0)
+  || (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0);
+
+/** Overlay only non-blank values so empty WB fields do not wipe ANC/newborn seed. */
+const overlayFilled = (base = {}, overlay = {}) => {
+  const out = { ...base };
+  Object.entries(overlay || {}).forEach(([k, v]) => {
+    if (k === "babies") {
+      const baseBabies = Array.isArray(base.babies) ? base.babies : [];
+      const overBabies = Array.isArray(v) ? v : [];
+      if (!overBabies.length) return;
+      if (!baseBabies.length) {
+        out.babies = overBabies;
+        return;
+      }
+      const n = Math.max(baseBabies.length, overBabies.length);
+      out.babies = Array.from({ length: n }, (_, i) => {
+        const b = baseBabies[i] || {};
+        const o = overBabies[i] || {};
+        const merged = { ...b };
+        Object.entries(o).forEach(([bk, bv]) => {
+          if (bk === "physicalExam") {
+            merged.physicalExam = { ...(b.physicalExam || {}) };
+            Object.entries(bv || {}).forEach(([ek, ev]) => {
+              if (!isBlankVal(ev)) merged.physicalExam[ek] = ev;
+            });
+            return;
+          }
+          if (!isBlankVal(bv)) merged[bk] = bv;
+        });
+        return merged;
+      });
+      return;
+    }
+    if (k === "fetusLengths") {
+      if (isBlankVal(v)) return;
+      out.fetusLengths = { ...(base.fetusLengths || {}) };
+      Object.entries(v || {}).forEach(([fk, fv]) => {
+        if (!isBlankVal(fv)) out.fetusLengths[fk] = fv;
+      });
+      return;
+    }
+    if (k === "postpartum") {
+      if (Array.isArray(v) && v.length) out.postpartum = v;
+      return;
+    }
+    if (!isBlankVal(v)) out[k] = v;
+  });
+  return out;
+};
+
 /** Latest prior Well Baby visit for this patient (excluding the encounter being edited). */
 const latestPriorWb = (encounters, patientId, excludeId) =>
   [...encounters]
@@ -108,8 +162,18 @@ const normalizeDelivery = (raw = {}, patient = {}) => {
   if (!babies.length && (babyHasContent(raw) || babyHasContent(details))) {
     babies = [babyFromFlat({ ...details, ...raw }, type)];
   }
-  const fetuses = raw.fetuses || details.fetuses || (babies.length ? String(babies.length) : "1");
-  babies = syncBabiesToFetuses(babies.length ? babies : [babyFromFlat({ ...details, ...raw }, type)], fetuses, type);
+  const explicitFetuses =
+    (raw.fetuses != null && raw.fetuses !== "" ? String(raw.fetuses) : "")
+    || (details.fetuses != null && details.fetuses !== "" ? String(details.fetuses) : "")
+    || (babies.some(babyHasContent) ? String(Math.max(babies.length, 1)) : "");
+  const fetuses = explicitFetuses;
+  if (fetuses) {
+    babies = syncBabiesToFetuses(
+      babies.length ? babies : [emptyBaby(type)],
+      fetuses,
+      type
+    );
+  }
   // Ensure this patient's row is filled when matched by patientId / sex
   if (babies.length && patient?.id) {
     let idx = babies.findIndex((b) => b.patientId === patient.id);
@@ -148,51 +212,57 @@ const normalizeDelivery = (raw = {}, patient = {}) => {
   };
 };
 
-/** Pull mother ANC delivery + babies for this child. */
+/** Latest ANC delivery for a patient id (mother or self). */
+const latestAncDelivery = (encounters, patientId) => {
+  if (!patientId) return {};
+  const enc = [...encounters]
+    .filter((e) => e.patientId === patientId && e.disease === ANTENATAL_ID && e.data?.delivery)
+    .filter((e) => deliveryHasContent(e.data.delivery))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  return enc?.data?.delivery || {};
+};
+
+/** Pull ANC delivery + newborn: registered baby's mother ANC, else this patient's own ANC. */
 const antenatalDeliverySeed = (encounters, patient) => {
   const details = patient?.deliveryDetails || {};
-  const motherId = details.motherId || patient?.bornFrom;
-  let motherDel = {};
-  if (motherId) {
-    const enc = [...encounters]
-      .filter((e) => e.patientId === motherId && e.disease === ANTENATAL_ID && e.data?.delivery)
-      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-    motherDel = enc?.data?.delivery || {};
-  }
-  const merged = {
-    ...motherDel,
-    ...details,
-    date: details.deliveryDate || details.date || motherDel.date || "",
-    deliveryDate: details.deliveryDate || details.date || motherDel.date || "",
-    type: details.type || details.mode || motherDel.type || motherDel.mode || "",
-    mode: details.mode || details.type || motherDel.mode || motherDel.type || "",
-    place: details.place || motherDel.outcome || "",
-    outcome: details.place || motherDel.outcome || "",
-    complication: details.complication || motherDel.complication || "",
-    fetuses: details.fetuses || motherDel.fetuses || "",
-    fetusLengths: details.fetusLengths || motherDel.fetusLengths || {},
-    familyPlanning: details.familyPlanning || motherDel.familyPlanning || "",
-    postpartum: details.postpartum || motherDel.postpartum || [],
-    babies: (motherDel.babies || []).length ? motherDel.babies : undefined,
+  const motherId = details.motherId || patient?.bornFrom || "";
+  const motherDel = motherId ? latestAncDelivery(encounters, motherId) : {};
+  const ownDel = latestAncDelivery(encounters, patient?.id);
+  // Registered baby → mother ANC is primary; mother opening Well Baby → own ANC.
+  // Prefer filled values only so empty mother/own rows do not wipe the other.
+  const sourceDel = motherId
+    ? overlayFilled(ownDel, motherDel)
+    : overlayFilled(motherDel, ownDel);
+
+  const detailOverlay = {
+    date: details.deliveryDate || details.date || "",
+    deliveryDate: details.deliveryDate || details.date || "",
+    type: details.type || details.mode || "",
+    mode: details.mode || details.type || "",
+    place: details.place || "",
+    outcome: details.place || "",
+    complication: details.complication || "",
+    fetuses: details.fetuses || "",
+    fetusLengths: details.fetusLengths || {},
+    familyPlanning: details.familyPlanning || "",
+    postpartum: details.postpartum || [],
+    babies: (Array.isArray(details.babies) && details.babies.length) ? details.babies : undefined,
     motherId: details.motherId || motherId || "",
     motherName: details.motherName || "",
   };
-  return normalizeDelivery(merged, patient);
+  return normalizeDelivery(overlayFilled(sourceDel, detailOverlay), patient);
 };
 
-/** Seed Delivery + Newborn: prior WB visit overrides ANC/mother delivery details. */
+/** Seed Delivery + Newborn: prior WB / existing filled fields win; ANC fills the gaps. */
 const seedDelivery = (encounters, patient, existing) => {
   const prior = latestPriorWb(encounters, patient?.id, existing?.id);
   const fromAnc = antenatalDeliverySeed(encounters, patient);
   const fromPrior = prior?.data?.delivery ? normalizeDelivery(prior.data.delivery, patient) : {};
   const fromExisting = existing?.data?.delivery ? normalizeDelivery(existing.data.delivery, patient) : {};
-  if (deliveryHasContent(fromExisting)) {
-    return normalizeDelivery({ ...fromAnc, ...fromPrior, ...fromExisting, babies: fromExisting.babies?.length ? fromExisting.babies : (fromPrior.babies || fromAnc.babies) }, patient);
-  }
-  if (deliveryHasContent(fromPrior)) {
-    return normalizeDelivery({ ...fromAnc, ...fromPrior, babies: fromPrior.babies?.length ? fromPrior.babies : fromAnc.babies }, patient);
-  }
-  return fromAnc;
+  return normalizeDelivery(
+    overlayFilled(overlayFilled(fromAnc, fromPrior), fromExisting),
+    patient,
+  );
 };
 
 const NO_KNOWN_ALLERGY = "No known allergy";
@@ -216,25 +286,21 @@ const nextAllergySelection = (next = []) => {
 /** Normalize WB form shape (init + PHI hydrate). */
 const normalizeWbForm = (partial = {}, { encounters = [], patient = null, patientId = "", existing = null, seedDeliveryAllergy = true } = {}) => {
   const base = { ...empty(), ...partial };
+  // Always seed from ANC/prior, then overlay any filled values from this visit / PHI
+  const seeded = seedDelivery(encounters, patient, existing);
+  if (deliveryHasContent(partial.delivery || {})) {
+    base.delivery = normalizeDelivery(overlayFilled(seeded, partial.delivery), patient || {});
+  } else {
+    base.delivery = seeded;
+  }
   if (seedDeliveryAllergy) {
-    base.delivery = seedDelivery(encounters, patient, existing
-      ? { ...existing, data: { ...(existing.data || {}), delivery: partial.delivery || existing.data?.delivery } }
-      : existing);
     base.allergy = Array.isArray(partial.allergy) && partial.allergy.length
       ? nextAllergySelection(partial.allergy)
       : seedAllergy(encounters, patientId, existing);
+  } else if (Array.isArray(partial.allergy) && partial.allergy.length) {
+    base.allergy = nextAllergySelection(partial.allergy);
   } else {
-    // PHI hydrate: prefer loaded delivery/allergy when present; else keep ANC/prior seeds
-    if (deliveryHasContent(partial.delivery || {})) {
-      base.delivery = normalizeDelivery(partial.delivery, patient || {});
-    } else {
-      base.delivery = seedDelivery(encounters, patient, existing);
-    }
-    if (Array.isArray(partial.allergy) && partial.allergy.length) {
-      base.allergy = nextAllergySelection(partial.allergy);
-    } else {
-      base.allergy = seedAllergy(encounters, patientId, existing);
-    }
+    base.allergy = seedAllergy(encounters, patientId, existing);
   }
   if (!Array.isArray(base.lab)) base.lab = [];
   if (!base.lab.length) {
@@ -256,7 +322,7 @@ export default function WellBabyEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, online, ensureCatalogueDrug } = useStore();
+  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, online, ensureCatalogueDrug, syncPatientVisitPhi } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.disease === WELLBABY_ID && (e.id === params.get("enc") || e.visitId === params.get("enc")));
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
@@ -279,6 +345,7 @@ export default function WellBabyEncounter() {
   );
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
   const [revealedVacIds, setRevealedVacIds] = useState([]);
+  const [ancSeedApplied, setAncSeedApplied] = useState(false);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "Well baby visit";
 
@@ -310,6 +377,54 @@ export default function WellBabyEncounter() {
     setD,
     setSavedAt,
   });
+
+  const motherLinkId = p?.deliveryDetails?.motherId || p?.bornFrom || "";
+
+  // Load mother's ANC PHI so delivery/newborn can seed when opening WB on a registered baby
+  useEffect(() => {
+    if (!online || !motherLinkId || typeof syncPatientVisitPhi !== "function") return;
+    const motherHasAnc = encounters.some(
+      (e) => e.patientId === motherLinkId && e.disease === ANTENATAL_ID && deliveryHasContent(e.data?.delivery),
+    );
+    if (motherHasAnc) return;
+    syncPatientVisitPhi(motherLinkId).catch(() => {});
+  }, [online, motherLinkId, syncPatientVisitPhi]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Also hydrate this patient's own ANC when opening WB on the mother
+  useEffect(() => {
+    if (!online || !p?.id || typeof syncPatientVisitPhi !== "function") return;
+    if (motherLinkId) return;
+    const ownHasAnc = encounters.some(
+      (e) => e.patientId === p.id && e.disease === ANTENATAL_ID && deliveryHasContent(e.data?.delivery),
+    );
+    if (ownHasAnc) return;
+    const hasAncVisit = encounters.some((e) => e.patientId === p.id && e.disease === ANTENATAL_ID);
+    if (!hasAncVisit) return;
+    syncPatientVisitPhi(p.id).catch(() => {});
+  }, [online, p?.id, motherLinkId, syncPatientVisitPhi]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const seededFromAnc = useMemo(
+    () => deliveryHasContent(antenatalDeliverySeed(encounters, p)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [encounters, p?.id, p?.bornFrom, p?.deliveryDetails]
+  );
+
+  // Fill empty delivery/newborn fields from ANC (do not wipe values already entered on WB)
+  useEffect(() => {
+    if (!p) return;
+    const fromAnc = antenatalDeliverySeed(encounters, p);
+    if (!deliveryHasContent(fromAnc)) return;
+    const priorDel = latestPriorWb(encounters, p.id, existing?.id)?.data?.delivery || {};
+    setD((s) => {
+      const next = normalizeDelivery(
+        overlayFilled(overlayFilled(fromAnc, priorDel), s.delivery || {}),
+        p,
+      );
+      if (JSON.stringify(s.delivery || {}) === JSON.stringify(next)) return s;
+      setAncSeedApplied(true);
+      return { ...s, delivery: next };
+    });
+  }, [encounters, p?.id, p?.bornFrom, p?.deliveryDetails, existing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!p) return <div className="p-8">Patient not found. <Button onClick={() => navigate("/patients")}>Back</Button></div>;
 
@@ -359,12 +474,10 @@ export default function WellBabyEncounter() {
   };
   const carriedFromPrior = !existing && !!(priorWb && deliveryHasContent(priorWb.data?.delivery));
   const carriedFromMother =
-    !existing
-    && !carriedFromPrior
-    && !!(
-      (p.deliveryDetails && deliveryHasContent(p.deliveryDetails))
-      || (p.bornFrom && deliveryHasContent(delivery))
-    );
+    !carriedFromPrior
+    && seededFromAnc
+    && deliveryHasContent(delivery)
+    && (ancSeedApplied || !existing);
 
   const toggleVaccine = (item) => {
     const prev = d.immunization || {};
@@ -516,16 +629,23 @@ export default function WellBabyEncounter() {
           {(carriedFromPrior || carriedFromMother) && (
             <AlertPanel
               level="info"
-              title={carriedFromPrior ? "Carried forward from previous visit" : "Auto-populated from Ante Natal delivery"}
+              title={carriedFromPrior ? "Carried forward from previous visit" : "Auto-populated from Ante Natal"}
               testid="wb-delivery-auto"
             >
               {carriedFromPrior
                 ? "Delivery and new born details were copied from the last Well Baby visit. Edit if needed."
-                : "Imported from the mother\u2019s Ante Natal delivery / new born record. Edit if needed."}
+                : "Imported from Ante Natal delivery / new born details. Edit if needed."}
             </AlertPanel>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <TextField label="Delivery date" type="date" value={delivery.deliveryDate || delivery.date || dob || ""} onChange={(e) => setDelivery({ deliveryDate: e.target.value, date: e.target.value })} testid="wb-del-date" />
+            <TextField
+              label="Delivery date"
+              type="date"
+              allowEmpty
+              value={delivery.deliveryDate || delivery.date || ""}
+              onChange={(e) => setDelivery({ deliveryDate: e.target.value, date: e.target.value })}
+              testid="wb-del-date"
+            />
             <SelectField
               label="Delivery type"
               options={DELIVERY_TYPES}
