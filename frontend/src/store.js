@@ -161,6 +161,7 @@ function normalizeApiPatient(row) {
     lastEncounter: row.lastEncounter || "",
     status: row.status || "",
     phone: row.phone || "",
+    photo: typeof row.photo === "string" ? row.photo : "",
     village: row.village || "",
     district: row.district || "",
     province: row.province || "",

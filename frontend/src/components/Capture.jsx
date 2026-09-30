@@ -309,22 +309,31 @@ export const fingerprintSummary = (value) => {
   return `${keys.length} finger${keys.length === 1 ? "" : "s"}`;
 };
 
-export const Avatar = ({ patient, size = "h-12 w-12", testid }) =>
-  patient.photo ? (
-    <img
-      src={patient.photo}
-      alt={patient.name}
-      data-testid={testid}
-      className={`${size} shrink-0 rounded-md border border-border object-cover`}
-    />
-  ) : (
+export const Avatar = ({ patient, size = "h-12 w-12", testid }) => {
+  const name = String(patient?.name || "").trim();
+  const photo = typeof patient?.photo === "string" ? patient.photo.trim() : "";
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt={name || "Patient"}
+        data-testid={testid}
+        className={`${size} shrink-0 rounded-md border border-border object-cover`}
+      />
+    );
+  }
+  const initials = name
+    ? name.split(/\s+/).map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    : "?";
+  return (
     <span
       data-testid={testid}
       className={`${size} grid shrink-0 place-items-center rounded-md bg-secondary font-head text-base font-bold text-primary`}
     >
-      {patient.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+      {initials}
     </span>
   );
+};
 
 export const isLostToFollowUp = (patient, encounters, settings) => {
   if (!patient.treatmentEnd || patient.outcome) return false;

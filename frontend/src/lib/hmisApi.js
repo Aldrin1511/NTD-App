@@ -436,11 +436,16 @@ export async function searchDrugInventory(q) {
 
 /**
  * Map payload in NTD, then POST to BFF → tri-hmis POST /patient.
+ * Photo is NTD/Mongo-only (sibling field; stripped before HMIS).
  */
 export async function createHmisPatient(formState) {
   const body = mapNtdPatientToHmis(formState);
+  const photo = typeof formState?.photo === "string" ? formState.photo : "";
   try {
-    const res = await http.post("/api/patients/register", body);
+    const res = await http.post("/api/patients/register", {
+      ...body,
+      ...(photo ? { photo } : {}),
+    });
     if (!res.data?.status) {
       throw new Error(res.data?.message || "Patient create failed");
     }
@@ -465,12 +470,17 @@ export async function createHmisPatient(formState) {
 
 /**
  * Update patient demographics via BFF → HMIS PUT /patient/:id, then TriasNtd mirror.
+ * Photo is NTD/Mongo-only (sibling field; not sent to HMIS).
  */
 export async function updateHmisPatient(patientId, formState) {
   if (!patientId) throw new Error("patientId is required");
-  const body = mapNtdPatientToHmisUpdate(formState);
+  const patientDetails = mapNtdPatientToHmisUpdate(formState);
+  const photo = typeof formState?.photo === "string" ? formState.photo : "";
   try {
-    const res = await http.put(`/api/patients/${encodeURIComponent(patientId)}`, body);
+    const res = await http.put(`/api/patients/${encodeURIComponent(patientId)}`, {
+      ...patientDetails,
+      photo,
+    });
     if (!res.data?.status) {
       throw new Error(res.data?.message || "Patient update failed");
     }
