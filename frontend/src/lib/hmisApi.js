@@ -19,14 +19,23 @@ function apiError(err, fallback) {
 
 /**
  * Login via BFF → admin facility resolve → tri-authentication.
- * Sends page hostname as facilityUrl (same as Apex) so production tenants
- * resolve dynamically; localhost falls back to BFF FACILITY_URL env.
+ * Facility host comes from the frontend (same as Apex / HMIS):
+ * - production: window.location.hostname
+ * - localhost: REACT_APP_FACILITY_URL (optional local override)
+ * Backend does not hardcode FACILITY_URL.
  */
 export async function loginWithTriAuth(email, password) {
-  const facilityUrl =
+  const host =
     typeof window !== "undefined" && window.location?.hostname
-      ? window.location.hostname
+      ? String(window.location.hostname).toLowerCase()
       : "";
+  const isLocal =
+    !host ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host.endsWith(".localhost");
+  const facilityUrl = isLocal ? config.facilityUrl : host;
   const loginRes = await http.post("/api/auth/login", {
     email,
     password,

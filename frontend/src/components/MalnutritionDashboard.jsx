@@ -7,10 +7,10 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes } from "@/mock/specs";
 import { ageMonthsToLabel } from "@/mock/growth";
 import {
-  MAL_ID, monitoringAlert, PROGRESS_MATRIX_ROWS, malColorGrade, malDisplayStatus,
+  MAL_ID, MAL_NAME, monitoringAlert, PROGRESS_MATRIX_ROWS, malColorGrade, malDisplayStatus,
   malStatusColor, malWeeksVisited, malLatestWeek, visitWeekNumber, isMalEpisodeClosed, alertGrade,
 } from "@/mock/malnutrition";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil, Plus, Printer } from "lucide-react";
 
 const statusBadgeCls = {
   green: "border-green-300 bg-green-50 text-green-700",
@@ -48,7 +48,7 @@ const buildWeekColumns = (followUps = []) => {
   return cols;
 };
 
-export default function MalnutritionDashboard({ patient, encounters, canEdit, onEdit, onAddVisit }) {
+export default function MalnutritionDashboard({ patient, encounters, canEdit, onEdit, onAddVisit, onPrint }) {
   const episode = useMemo(() => groupDiseaseEpisodes(encounters, MAL_ID, null)[0], [encounters]);
   const [featureOpen, setFeatureOpen] = useState({});
   const visits = useMemo(
@@ -175,6 +175,33 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
             testid="mal-toggle-all-features-btn"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
           />
+          {onPrint && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 shrink-0 bg-white/70"
+              disabled={!visits.length}
+              data-testid="mal-print-visit-summary"
+              title={visits.length ? "Print visit summary" : "No visits to print"}
+              onClick={() =>
+                onPrint({
+                  diseaseName: MAL_NAME,
+                  episode,
+                  visits,
+                  caption: `Malnutrition · Case #${cd.caseNo || "—"}`,
+                  dates: [
+                    `Admitted ${cd.admissionDate ? fmtDate(cd.admissionDate) : "—"}`,
+                    latest ? `Last visit ${fmtDate(latest.date)}` : null,
+                    weeksVisited > 0 ? `${weeksVisited}/12 weeks recorded` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · "),
+                })
+              }
+            >
+              <Printer className="mr-1 h-4 w-4" /> Print
+            </Button>
+          )}
           {canEdit && onAddVisit && !closed && (
             <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="mal-add-visit">
               <Plus className="mr-1 h-4 w-4" /> Malnutrition visit

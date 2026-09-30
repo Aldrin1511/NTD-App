@@ -513,11 +513,12 @@ export default function Patients() {
               .filter(Boolean)
               .sort((a, b) => String(b).localeCompare(String(a)))[0] ||
             "";
+          const hasEncounterToPrint = Boolean(lastEncounterDate) || encs.length > 0;
           const statusRecords = patientStatusRecords(p, encounters, settings);
           const printPatientEncounters = async (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            if (printingId) return;
+            if (!hasEncounterToPrint || printingId) return;
             setPrintingId(p.id);
             try {
               let visits = encs
@@ -664,10 +665,10 @@ export default function Patients() {
                   data-testid={`patient-print-btn-${p.id}`}
                   onClick={printPatientEncounters}
                   onMouseDown={(ev) => ev.stopPropagation()}
-                  disabled={printingId === p.id}
-                  className="grid h-11 w-11 place-items-center rounded-md border border-border text-primary transition-colors hover:bg-secondary disabled:opacity-50"
-                  title="Print all encounters"
-                  aria-label="Print all encounters"
+                  disabled={!hasEncounterToPrint || printingId === p.id}
+                  className="grid h-11 w-11 place-items-center rounded-md border border-border text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  title={hasEncounterToPrint ? "Print all encounters" : "No encounters to print"}
+                  aria-label={hasEncounterToPrint ? "Print all encounters" : "No encounters to print"}
                 >
                   <Printer className="h-4 w-4" />
                 </button>

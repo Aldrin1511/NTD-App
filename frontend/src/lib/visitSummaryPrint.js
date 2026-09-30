@@ -399,15 +399,28 @@ const FEATURE_SECTION_LABELS = [
   ["caseDetails", "Case details"],
   ["history", "Clinical history"],
   ["marks", "Examination"],
+  ["vitals", "Vitals"],
   ["lab", "Laboratory"],
+  ["radiology", "Radiology"],
   ["diagnosis", "Diagnosis"],
   ["drugs", "Medications"],
   ["adherence", "Medication Adherence"],
   ["household", "Household Contact Tracing"],
   ["reactions", "Lepra reactions"],
+  ["immunization", "Immunization"],
+  ["delivery", "Delivery / newborn"],
+  ["growth", "Growth"],
+  ["milestones", "Milestones"],
+  ["complaints", "Complaints"],
+  ["allergy", "Allergy"],
   ["notes", "Visit notes"],
   ["outcome", "Final case outcome"],
 ];
+
+const KNOWN_FEATURE_KEYS = new Set(FEATURE_SECTION_LABELS.map(([k]) => k));
+
+/** Root-level visit fields used by malnutrition (and similar) that are not nested sections. */
+const ROOT_MONITOR_SKIP = new Set(["alert"]);
 
 const labelize = (key) =>
   String(key || "")
@@ -471,12 +484,13 @@ function summaryFromSection(key, raw, encounter) {
 
 /**
  * Build featureRows for visit summary from one or more encounters (appointments print).
+ * Also covers Ante Natal / Well Baby / Malnutrition section keys and leftover root fields.
  * @param {object[]} visits
  */
 export function featureRowsFromVisits(visits = []) {
   const list = (visits || []).filter(Boolean);
   if (!list.length) return [];
-  return FEATURE_SECTION_LABELS.map(([k, label]) => {
+  const sections = FEATURE_SECTION_LABELS.map(([k, label]) => {
     const rows = list
       .map((e) => {
         const raw = e?.data?.[k];
@@ -486,6 +500,24 @@ export function featureRowsFromVisits(visits = []) {
       .filter(Boolean);
     return rows.length ? { k, label, rows } : null;
   }).filter(Boolean);
+
+  const otherRows = list
+    .map((e) => {
+      const data = e?.data && typeof e.data === "object" ? e.data : {};
+      const leftover = {};
+      Object.entries(data).forEach(([k, v]) => {
+        if (KNOWN_FEATURE_KEYS.has(k) || ROOT_MONITOR_SKIP.has(k)) return;
+        if (v == null || v === "") return;
+        leftover[k] = v;
+      });
+      const s = summaryFromSection("other", leftover, e);
+      return s ? { e, s } : null;
+    })
+    .filter(Boolean);
+  if (otherRows.length) {
+    sections.push({ k: "other", label: "Visit details", rows: otherRows });
+  }
+  return sections;
 }
 
 /**

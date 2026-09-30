@@ -6,11 +6,11 @@ import { GrowthReview } from "@/components/GrowthChart";
 import MilestoneChart from "@/components/MilestoneChart";
 import { dobFromAge, formatAgeYMD } from "@/components/Capture";
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes } from "@/mock/specs";
-import { WELLBABY_ID, immunizationDueFromDob, isVaccineOverdue, WELLBABY_DRUG_META } from "@/mock/wellbaby";
+import { WELLBABY_ID, WELLBABY_NAME, immunizationDueFromDob, isVaccineOverdue, WELLBABY_DRUG_META } from "@/mock/wellbaby";
 import { monthsBetween } from "@/mock/growth";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { medicationRows } from "@/components/AntenatalMedications";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil, Plus, Printer } from "lucide-react";
 
 const VisitHead = ({ v, onEdit, canEdit, testid, section }) => (
   <div className="mb-2 flex items-start justify-between gap-2">
@@ -54,7 +54,7 @@ const VaccineBoxes = ({ vaccines, records, dob, testidPrefix = "wb-dash-vac" }) 
   />
 );
 
-export default function WellBabyDashboard({ patient, encounters, settings, canEdit, onEdit, onAddVisit }) {
+export default function WellBabyDashboard({ patient, encounters, settings, canEdit, onEdit, onAddVisit, onPrint }) {
   const episodes = useMemo(() => groupDiseaseEpisodes(encounters, WELLBABY_ID, null), [encounters]);
   const [featureOpen, setFeatureOpen] = useState({});
   const episode = episodes[0];
@@ -160,6 +160,27 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
             testid="wb-toggle-all-features-btn"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
           />
+          {onPrint && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 shrink-0 bg-white/70"
+              disabled={!visits.length}
+              data-testid="wb-print-visit-summary"
+              title={visits.length ? "Print visit summary" : "No visits to print"}
+              onClick={() =>
+                onPrint({
+                  diseaseName: WELLBABY_NAME,
+                  episode,
+                  visits,
+                  caption: `Well Baby record · ${visits.length} visit${visits.length === 1 ? "" : "s"}`,
+                  dates: `Current age ${formatAgeYMD(dob) || "—"} · DOB ${dob ? fmtDate(dob) : "—"}`,
+                })
+              }
+            >
+              <Printer className="mr-1 h-4 w-4" /> Print
+            </Button>
+          )}
           {canEdit && <Button className="h-10" onClick={onAddVisit} data-testid="wb-add-visit"><Plus className="mr-1 h-4 w-4" /> Well baby visit</Button>}
         </div>
       </div>

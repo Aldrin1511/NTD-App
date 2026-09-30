@@ -5,14 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { AlertPanel } from "@/components/Fields";
 import { FeatureCard, ExpandAllButton } from "@/components/EntryKit";
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes, visitLabel } from "@/mock/specs";
-import {
-  ANTENATAL_ID, resolveDating, trimesterLabel, trimesterOf, gaFromEdd, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
+import { ANTENATAL_ID, ANTENATAL_NAME, resolveDating, trimesterLabel, trimesterOf, gaFromEdd, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
   FETAL_VITALS, FETAL_VITAL_CHOICES, vitalStatus, ANC_IMMUNIZATION, immunizationDueDate, isImmunizationOverdue,
   isAncEpisodeClosed, babyName, ancStatusColor, ancRiskLevel, PHYSICAL_EXAM_FIELDS, autoRiskFactors,
 } from "@/mock/antenatal";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { ancMedicationRows } from "@/components/AntenatalMedications";
-import { Pencil, Plus, Baby, Activity } from "lucide-react";
+import { Pencil, Plus, Baby, Activity, Printer } from "lucide-react";
 
 const chip = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-foreground" };
 
@@ -157,7 +156,7 @@ const statusBadgeCls = {
   primary: "border-primary/30 bg-secondary text-primary",
 };
 
-export default function AntenatalDashboard({ patient, encounters, canEdit, onEdit, onAddVisit }) {
+export default function AntenatalDashboard({ patient, encounters, canEdit, onEdit, onAddVisit, onPrint }) {
   const episodes = useMemo(() => groupDiseaseEpisodes(encounters, ANTENATAL_ID, null), [encounters]);
   const [sel, setSel] = useState(episodes[0]?.id || "");
   const [featureOpen, setFeatureOpen] = useState({});
@@ -288,6 +287,27 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
               testid="anc-toggle-all-features-btn"
               className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-white/70 text-primary hover:bg-white"
             />
+          )}
+          {onPrint && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 shrink-0 bg-white/70"
+              disabled={!visits.length}
+              data-testid="anc-print-visit-summary"
+              title={visits.length ? "Print visit summary" : "No visits to print"}
+              onClick={() =>
+                onPrint({
+                  diseaseName: ANTENATAL_NAME,
+                  episode,
+                  visits,
+                  caption: `Pregnancy episode · ${visitLabel(episode.visitCount)}`,
+                  dates: `Start: ${fmtDate(episode.start)} · Latest: ${fmtDate(episode.last)}`,
+                })
+              }
+            >
+              <Printer className="mr-1 h-4 w-4" /> Print
+            </Button>
           )}
           {canEdit && !closed && (
             <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="anc-add-visit"><Plus className="mr-1 h-4 w-4" /> ANC visit</Button>

@@ -18,7 +18,7 @@ import PatientSidebar from "@/components/PatientSidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SCABIES_DRUGS, ageInMonths } from "@/components/ScabiesMedications";
 import { patientAgeLabel } from "@/components/Capture";
-import { buildVisitSummaryPrintHtml, printHtmlDocument } from "@/lib/visitSummaryPrint";
+import { buildVisitSummaryPrintHtml, featureRowsFromVisits, printHtmlDocument } from "@/lib/visitSummaryPrint";
 import { YAWS_DRUGS, azithromycinDose, benzathineDose } from "@/components/YawsMedications";
 import { LF_DRUGS, ivermectinDose, albendazoleDose, decDose } from "@/components/LfMedications";
 import { BURULI_DRUGS, rifampicinDose, clarithromycinDose } from "@/components/BuruliMedications";
@@ -1725,6 +1725,55 @@ export default function PatientRecord() {
   };
   printVisitSummaryRef.current = printVisitSummary;
 
+  /** Visit summary for Ante Natal / Well Baby / Malnutrition dashboards. */
+  const printProgramVisitSummary = ({ diseaseName, episode, visits, caption, dates }) => {
+    const visitList = (visits || []).filter(Boolean);
+    if (!visitList.length) return;
+    const apptRaw = episode?.last || episode?.start || visitList[0]?.date || "";
+    const apptDate = (() => {
+      if (!apptRaw) return "";
+      const d = new Date(/T/.test(apptRaw) ? apptRaw : `${apptRaw}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return fmtDate(apptRaw);
+      const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+      return `${d.getDate()} ${m} ${d.getFullYear()}`;
+    })();
+    const clinicAddress = [
+      branding?.address,
+      [p?.village, p?.district, p?.province].filter(Boolean).join(", "),
+    ]
+      .filter(Boolean)
+      .join(branding?.address ? " · " : "") || "";
+    const html = buildVisitSummaryPrintHtml({
+      patient: {
+        ...p,
+        ageLabel: patientAgeLabel(p),
+      },
+      clinic: {
+        name: branding?.clientName || p?.facility || "Clinic",
+        phone: branding?.phone || "",
+        email: branding?.email || "",
+        address: clinicAddress,
+      },
+      clinician: {
+        name: user?.name || "",
+        specialty: user?.role || user?.specialty || "",
+        appointmentDate: apptDate,
+      },
+      diseaseName: diseaseName || "Program",
+      episode: episode
+        ? {
+            diagnosis: episode.diagnosis,
+            outcome: episodeStatus(episode.outcome),
+          }
+        : null,
+      episodeCaption: caption || "",
+      episodeDates: dates || "",
+      featureRows: featureRowsFromVisits(visitList),
+      worker: user?.name || "",
+    });
+    setPrintPreviewHtml(html);
+  };
+
   const actions = (
     <div className="flex shrink-0 flex-wrap justify-end gap-2" data-testid="record-actions">
       {myDiseases.some((x) => x.id === activeTab) && selectedEpisode && (
@@ -1908,6 +1957,7 @@ export default function PatientRecord() {
                 navigate(`/patients/${p.id}/antenatal?${q.toString()}`);
               }}
               onAddVisit={() => setEnc({ ...enc, show: true, disease: ANTENATAL_ID })}
+              onPrint={printProgramVisitSummary}
             />
           )}
           {activeTab === WELLBABY_ID && isExtra(WELLBABY_ID) && (
@@ -1922,6 +1972,7 @@ export default function PatientRecord() {
                 navigate(`/patients/${p.id}/wellbaby?${q.toString()}`);
               }}
               onAddVisit={() => setEnc({ ...enc, show: true, disease: WELLBABY_ID })}
+              onPrint={printProgramVisitSummary}
             />
           )}
           {activeTab === MAL_ID && isExtra(MAL_ID) && (
@@ -1931,6 +1982,7 @@ export default function PatientRecord() {
               canEdit={canEdit}
               onEdit={(v) => navigate(`/patients/${p.id}/malnutrition?enc=${encodeURIComponent(v.id)}`)}
               onAddVisit={() => setEnc({ ...enc, show: true, disease: MAL_ID })}
+              onPrint={printProgramVisitSummary}
             />
           )}
 
