@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { FACILITIES_LIST, DRUGS, VISIT_TYPES, DEFAULT_LTFU } from "@/mock/data";
 import { DEFAULT_IMMUNIZATION_SCHEDULES, DEFAULT_LAB_MASTER, DEFAULT_FEATURE_CONFIG } from "@/mock/masters";
-import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, upsertPatientDiseaseStatus, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs, fetchSchoolHealthSchools, createSchoolHealthSchool, deleteSchoolHealthSchool, fetchSchoolHealthDonors, createSchoolHealthDonor, deleteSchoolHealthDonor, fetchSchoolHealthVisits, createSchoolHealthVisit, updateSchoolHealthVisit, deleteSchoolHealthVisit, saveSchoolHealthChild, deleteSchoolHealthChild, saveSchoolHealthReport, fetchSchoolHealthVisit } from "@/lib/hmisApi";
+import { createHmisPatient, updateHmisPatient, fetchPatients, loginWithTriAuth, logoutTriAuth, fetchAuthSession, startEpisode, addEpisodeVisit, fetchPatientEpisodes, fetchLocations, fetchVisitTypes, fetchAppointments, startSuspectEpisode, fetchPatientSuspects, fetchEncounterPhi, upsertEncounterPhiItem, finalizeEncounterPhi, upsertPatientDiseaseStatus, discardEncounterPhi as discardEncounterPhiApi, fetchPhiByVisit, fetchNtdFormConfigs, fetchSchoolHealthSchools, createSchoolHealthSchool, deleteSchoolHealthSchool, fetchSchoolHealthDonors, createSchoolHealthDonor, deleteSchoolHealthDonor, fetchSchoolHealthVisits, createSchoolHealthVisit, updateSchoolHealthVisit, deleteSchoolHealthVisit, saveSchoolHealthChild, deleteSchoolHealthChild, saveSchoolHealthReport, fetchSchoolHealthVisit } from "@/lib/hmisApi";
 import { applyNtdFormConfigs } from "@/lib/ntdFormConfig";
 import {
   SUSPECT_SYMPTOMS,
@@ -19,8 +19,8 @@ import {
   DISEASE_SPECS,
 } from "@/mock/specs";
 import { featureCodeForDisease, rehydrateFormFromPhi } from "@/lib/phiMap";
-import { resolveDob } from "@/lib/hmisPatient";
-import { formatInternational } from "@/lib/phone";
+import { resolveDob, validateNtdForHmis } from "@/lib/hmisPatient";
+import { formatInternational, parseStoredPhone, digitsOnly } from "@/lib/phone";
 import { dobFromAgeYmd } from "@/components/Capture";
 
 /** ANC/Mal store outcome as `{ status, ... }`; chips/API need a string. */
@@ -223,6 +223,8 @@ function clearPatientsLoadCache() {
 /** Deduplicate locations + episode sync (StrictMode / remount). */
 let locationsInflight = null;
 let locationsLoadedKey = null;
+let visitTypesInflight = null;
+let visitTypesLoaded = false;
 let episodesInflight = null;
 let episodesLoadedKey = null;
 let appointmentsInflight = null;
@@ -234,6 +236,8 @@ let phiInflight = null;
 function clearRecordLoadCaches() {
   locationsInflight = null;
   locationsLoadedKey = null;
+  visitTypesInflight = null;
+  visitTypesLoaded = false;
   episodesInflight = null;
   episodesLoadedKey = null;
   appointmentsInflight = null;
@@ -353,6 +357,18 @@ export function StoreProvider({ children }) {
             }
           } catch (err) {
             console.warn("session bootstrap school health failed", err);
+          }
+          try {
+            const rows = await fetchVisitTypes();
+            const labels = (rows || []).map((r) => r.visitType || r.label).filter(Boolean);
+            if (!cancelled && labels.length) {
+              visitTypesLoaded = true;
+              patch((s) => ({
+                settings: { ...s.settings, visitTypes: labels },
+              }));
+            }
+          } catch (err) {
+            console.warn("session bootstrap visit types failed", err);
           }
         }
       } catch (err) {
@@ -574,6 +590,18 @@ export function StoreProvider({ children }) {
             }));
           } catch (err) {
             console.warn("load school health after login failed", err);
+          }
+          try {
+            const rows = await fetchVisitTypes();
+            const labels = (rows || []).map((r) => r.visitType || r.label).filter(Boolean);
+            if (labels.length) {
+              visitTypesLoaded = true;
+              patch((s) => ({
+                settings: { ...s.settings, visitTypes: labels },
+              }));
+            }
+          } catch (err) {
+            console.warn("load visit types after login failed", err);
           }
           return { ...localUser, authSession: session };
         } catch (err) {
@@ -976,36 +1004,140 @@ export function StoreProvider({ children }) {
         }));
         return next;
       },
-      registerBaby: (motherId, baby) => {
+      /**
+       * Register a newborn from ANC delivery — same path as main Register patient
+       * (HMIS/Apex + TriasNtd Mongo). Copies mother contact/address/consent except
+       * age, blood group, and DOB (baby gets its own DOB/sex from the delivery form).
+       */
+      registerBaby: async (motherId, baby) => {
         const mother = state.patients.find((p) => p.id === motherId);
-        if (!mother) return null;
-        const nextNum =
-          state.patients.reduce((max, p) => {
-            const m = String(p.id).match(/^PNG(\d+)$/i);
-            return m ? Math.max(max, Number(m[1])) : max;
-          }, 0) + 1;
-        const rec = {
-          id: `PNG${String(nextNum).padStart(7, "0")}`,
-          episodeId: `WB-${new Date().getFullYear()}-${String(1240 + nextNum).padStart(8, "0")}`,
-          createdBy: state.currentUserId,
-          createdAt: new Date().toISOString().slice(0, 10),
+        if (!mother) throw new Error("Mother patient not found");
+        if (!authSession?.facilityId) {
+          throw new Error("Sign in with programme credentials before registering a baby");
+        }
+
+        const gender = String(baby.sex || baby.gender || "").trim();
+        if (!gender || /ambiguous/i.test(gender)) {
+          throw new Error("Select Male or Female before registering the baby");
+        }
+
+        const parsed = parseStoredPhone(
+          mother.phone,
+          mother.countryCode || mother.phoneCountry
+        );
+        const phoneNational =
+          String(parsed.national || "").trim() ||
+          digitsOnly(mother.phone) ||
+          "";
+        const addresses =
+          Array.isArray(mother.addresses) && mother.addresses.length
+            ? mother.addresses.map((a) => ({
+                type: a.type || "By residency",
+                country: a.country || "",
+                countryId: a.countryId || "",
+                province: a.province || "",
+                provinceId: a.provinceId || "",
+                district: a.district || "",
+                districtId: a.districtId || "",
+                village: a.village || "",
+                villageId: a.villageId || "",
+              }))
+            : [
+                {
+                  type: mother.addressType || "By residency",
+                  country: mother.country || "",
+                  province: mother.province || "",
+                  district: mother.district || "",
+                  village: mother.village || "",
+                },
+              ];
+
+        const babyDob = String(baby.dob || "").slice(0, 10);
+        const formState = {
+          name: String(baby.name || "").trim(),
+          middleName: "",
+          lastName: String(mother.lastName || "").trim(),
+          gender,
+          sex: gender,
+          dob: babyDob,
+          ageY: "0",
+          ageM: "0",
+          ageD: "0",
+          // Explicitly not copied from mother
+          bloodGroup: "Unknown",
+          phone: phoneNational,
+          phoneCountry: parsed.country || mother.phoneCountry || mother.countryCode,
+          email: mother.email || "",
+          consent: mother.consent || "By verbal",
+          addresses,
+          registeredAt: new Date().toISOString().slice(0, 10),
           status: "New born",
           diseases: [],
-          province: mother.province,
-          district: mother.district,
-          village: mother.village,
-          facility: mother.facility,
-          household: mother.household,
-          phone: mother.phone,
-          age: 0,
+          facility: mother.facility || "",
+          household: mother.household || "",
           bornFrom: motherId,
-          ...baby,
-          sex: baby.sex || "",
-          gender: baby.sex || "",
+          weight: baby.weight != null && baby.weight !== "" ? baby.weight : "",
+          height: baby.height != null && baby.height !== "" ? baby.height : "",
+          deliveryDetails: baby.deliveryDetails || null,
         };
-        const nextPending = queuedCount(state) + 1;
-        patch((s) => ({ patients: [rec, ...s.patients], pendingSync: nextPending }));
-        offerSyncAfterSave(nextPending);
+
+        const validationError = validateNtdForHmis(formState);
+        if (validationError) throw new Error(validationError);
+
+        const buildRec = (patientId, patientCode, { localOnly = false } = {}) => {
+          const primary = (formState.addresses && formState.addresses[0]) || {};
+          return {
+            ...formState,
+            firstName: formState.name,
+            name: [formState.name, formState.middleName, formState.lastName].filter(Boolean).join(" "),
+            dob: formState.dob,
+            age: 0,
+            phone: formatInternational(formState.phoneCountry, formState.phone) || mother.phone || "",
+            countryCode: formState.phoneCountry,
+            country: primary.country || mother.country || "",
+            province: primary.province || mother.province || "",
+            district: primary.district || mother.district || "",
+            village: primary.village || mother.village || "",
+            addressType: primary.type || mother.addressType || "",
+            id: patientId,
+            patientId,
+            patientCode: patientCode || "",
+            episodeId: "",
+            createdBy: state.currentUserId,
+            createdAt: new Date().toISOString().slice(0, 10),
+            status: "New born",
+            diseases: [],
+            sex: gender,
+            gender,
+            facilityId: authSession?.facilityId,
+            bornFrom: motherId,
+            localOnly: Boolean(localOnly),
+            synced: !localOnly,
+          };
+        };
+
+        if (!online) {
+          const localPatientId = newLocalId("local-patient");
+          const rec = buildRec(localPatientId, "", { localOnly: true });
+          const op = await enqueueOp({
+            type: OP.REGISTER_PATIENT,
+            localEntityId: localPatientId,
+            label: `Register baby ${rec.name || ""}`.trim(),
+            payload: { localPatientId, formState: { ...formState } },
+          });
+          await putLocalPatient(rec);
+          patch((s) => ({
+            patients: [rec, ...s.patients],
+          }));
+          await offerSyncAfterSave();
+          return { ...rec, outboxOpId: op.id };
+        }
+
+        const { patientId, patientCode } = await createHmisPatient(formState);
+        const rec = buildRec(patientId, patientCode, { localOnly: false });
+        patch((s) => ({
+          patients: [rec, ...s.patients],
+        }));
         return rec;
       },
       addDisease: (patientId, diseaseId) =>
@@ -1674,6 +1806,38 @@ export function StoreProvider({ children }) {
             if (locationsInflight?.promise === promise) locationsInflight = null;
           });
         locationsInflight = { key, promise };
+        return promise;
+      },
+      /**
+       * Visit types from HMIS VisitTypeReferencesT (same as Apex OP booking).
+       * Falls back to existing settings.visitTypes when offline / request fails.
+       */
+      loadVisitTypes: async (opts = {}) => {
+        if (!opts.force && visitTypesLoaded && !visitTypesInflight) {
+          return state.settings?.visitTypes || [];
+        }
+        if (!opts.force && visitTypesInflight) {
+          return visitTypesInflight;
+        }
+        const promise = fetchVisitTypes()
+          .then((rows) => {
+            const labels = (rows || []).map((r) => r.visitType || r.label).filter(Boolean);
+            if (labels.length) {
+              visitTypesLoaded = true;
+              patch((s) => ({
+                settings: { ...s.settings, visitTypes: labels },
+              }));
+            }
+            return labels;
+          })
+          .catch((err) => {
+            console.warn("loadVisitTypes failed", err);
+            return state.settings?.visitTypes || [];
+          })
+          .finally(() => {
+            if (visitTypesInflight === promise) visitTypesInflight = null;
+          });
+        visitTypesInflight = promise;
         return promise;
       },
       /**

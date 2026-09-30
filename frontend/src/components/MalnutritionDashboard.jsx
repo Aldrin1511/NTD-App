@@ -65,13 +65,13 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
             <p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">No visits yet</p>
           </div>
           {canEdit && onAddVisit && (
-            <Button className="h-10" onClick={onAddVisit} data-testid="mal-add-visit">
-              <Plus className="mr-1 h-4 w-4" /> Malnutrition visit
+            <Button className="h-10" onClick={() => onAddVisit?.()} data-testid="mal-add-visit">
+              <Plus className="mr-1 h-4 w-4" /> Encounter
             </Button>
           )}
         </div>
         <AlertPanel level="info" title="No Malnutrition data yet" testid="mal-empty-msg">
-          Use <span className="font-medium text-foreground">Malnutrition visit</span> to start this record.
+          Use <span className="font-medium text-foreground">Encounter</span> to start this record.
         </AlertPanel>
       </div>
     );
@@ -203,8 +203,8 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
             </Button>
           )}
           {canEdit && onAddVisit && !closed && (
-            <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="mal-add-visit">
-              <Plus className="mr-1 h-4 w-4" /> Malnutrition visit
+            <Button className="h-10 shrink-0" onClick={() => onAddVisit?.(episode)} data-testid="mal-add-visit">
+              <Plus className="mr-1 h-4 w-4" /> Encounter
             </Button>
           )}
         </div>

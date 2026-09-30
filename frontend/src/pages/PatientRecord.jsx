@@ -1189,7 +1189,7 @@ export default function PatientRecord() {
   const [searchParams] = useSearchParams();
   const backTo = location.state?.from || "/patients";
   const withFrom = (opts = {}) => (location.state?.from ? { ...opts, state: { from: location.state.from } } : opts);
-  const { patients, encounters, user, suspects, facilities, settings, branding, startEpisode, addEncounter, saveEncounter, syncPatientEpisodes, syncPatientSuspects, syncPatientVisitPhi, loadLocations, authSession, canAccessDisease, online } = useStore();
+  const { patients, encounters, user, suspects, facilities, settings, branding, startEpisode, addEncounter, saveEncounter, syncPatientEpisodes, syncPatientSuspects, syncPatientVisitPhi, loadLocations, loadVisitTypes, authSession, canAccessDisease, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const [tab, setTab] = useState(() => diseaseId || searchParams.get("tab") || "");
   const [lhs, setLhs] = useState(true);
@@ -1266,10 +1266,11 @@ export default function PatientRecord() {
     if (myDiseases.some((d) => d.id === diseaseId) || isExtra(diseaseId)) setTab(diseaseId);
   }, [diseaseId, hasSuspects, myDiseases, presentExtras]);
 
-  // Load LocationsT + open HMIS episodes + suspect screenings + PHI for dashboard
+  // Load LocationsT + visit types (Apex OP master) + open HMIS episodes + suspect screenings + PHI for dashboard
   useEffect(() => {
     if (!p?.id) return;
     loadLocations?.({ force: true });
+    loadVisitTypes?.();
     let cancelled = false;
     const wantPrint = pendingOpenPrint.current;
     if (authSession?.facilityId) {
@@ -1622,7 +1623,8 @@ export default function PatientRecord() {
     });
   };
 
-  const openAddEncounter = () => {    if (!canEdit || !selectedEpisode) return;
+  const openAddEncounter = () => {
+    if (!canEdit || !selectedEpisode) return;
     const seed = [...(selectedEpisode.visits || [])]
       .slice()
       .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))[0]
@@ -1646,6 +1648,41 @@ export default function PatientRecord() {
       prevLocationId: locationId,
     });
   };
+
+  /** ANC / Well Baby / Malnutrition — same Add Encounter dialog as skin NTDs, Go to locked. */
+  const openProgramEncounter = (diseaseId, episode) => {
+    if (!canEdit) return;
+    const seed = episode
+      ? [...(episode.visits || [])]
+          .slice()
+          .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")))[0]
+          || episode.visits?.[0]
+      : null;
+    const facility = seed?.facility || "";
+    const locationId = seed?.locationId || facilities.find((f) => f.name === facility)?.id || "";
+    setEnc({
+      ...enc,
+      show: true,
+      mode: "encounter",
+      recordId: episode?.id || "",
+      disease: diseaseId,
+      facility,
+      locationId,
+      visitType: "",
+      referral: seed?.referral || "No",
+      date: localISODate(),
+      province: "",
+      district: "",
+      prevFacility: facility,
+      prevLocationId: locationId,
+    });
+  };
+
+  const diseaseLabel = (diseaseId) =>
+    EXTRA_CONDITIONS.find((c) => c.id === diseaseId)?.name ||
+    DISEASE_SPECS[diseaseId]?.name ||
+    diseaseId ||
+    "this disease";
 
   const openFeatureEncounter = (visit, featureKey) => {
     if (!canEdit) return;
@@ -1956,7 +1993,7 @@ export default function PatientRecord() {
                 if (section) q.set("section", String(section));
                 navigate(`/patients/${p.id}/antenatal?${q.toString()}`);
               }}
-              onAddVisit={() => setEnc({ ...enc, show: true, disease: ANTENATAL_ID })}
+              onAddVisit={(episode) => openProgramEncounter(ANTENATAL_ID, episode)}
               onPrint={printProgramVisitSummary}
             />
           )}
@@ -1971,7 +2008,7 @@ export default function PatientRecord() {
                 if (section) q.set("section", String(section));
                 navigate(`/patients/${p.id}/wellbaby?${q.toString()}`);
               }}
-              onAddVisit={() => setEnc({ ...enc, show: true, disease: WELLBABY_ID })}
+              onAddVisit={(episode) => openProgramEncounter(WELLBABY_ID, episode)}
               onPrint={printProgramVisitSummary}
             />
           )}
@@ -1981,7 +2018,7 @@ export default function PatientRecord() {
               encounters={encs}
               canEdit={canEdit}
               onEdit={(v) => navigate(`/patients/${p.id}/malnutrition?enc=${encodeURIComponent(v.id)}`)}
-              onAddVisit={() => setEnc({ ...enc, show: true, disease: MAL_ID })}
+              onAddVisit={(episode) => openProgramEncounter(MAL_ID, episode)}
               onPrint={printProgramVisitSummary}
             />
           )}
@@ -2480,18 +2517,14 @@ export default function PatientRecord() {
               label="Go to"
               options={
                 enc.mode === "encounter"
-                  ? [DISEASE_SPECS[enc.disease]?.name].filter(Boolean)
+                  ? [diseaseLabel(enc.disease)].filter(Boolean)
                   : episodeGoToOptions
               }
               value={
                 enc.mode === "encounter"
-                  ? (EXTRA_IDS.includes(enc.disease)
-                      ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease)?.name
-                      : DISEASE_SPECS[enc.disease]?.name) || ""
+                  ? diseaseLabel(enc.disease)
                   : enc.disease && !activeDiseaseIds.has(enc.disease)
-                    ? EXTRA_IDS.includes(enc.disease)
-                      ? EXTRA_CONDITIONS.find((c) => c.id === enc.disease)?.name
-                      : DISEASE_SPECS[enc.disease]?.name || episodeGoToOptions[0] || ""
+                    ? diseaseLabel(enc.disease) || episodeGoToOptions[0] || ""
                     : !enc.disease && canAccessDisease("suspect") && episodeGoToOptions[0] === "Suspect screening"
                       ? "Suspect screening"
                       : episodeGoToOptions[0] || ""
@@ -2506,7 +2539,7 @@ export default function PatientRecord() {
               testid="encounter-target-select"
               hint={
                 enc.mode === "encounter"
-                  ? `Locked to ${DISEASE_SPECS[enc.disease]?.name || "this disease"} episode`
+                  ? `Locked to ${diseaseLabel(enc.disease)} episode`
                   : activeDiseaseIds.size
                     ? "Active diseases are hidden — close the episode to start a new one"
                     : undefined

@@ -310,7 +310,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
             </Button>
           )}
           {canEdit && !closed && (
-            <Button className="h-10 shrink-0" onClick={onAddVisit} data-testid="anc-add-visit"><Plus className="mr-1 h-4 w-4" /> ANC visit</Button>
+            <Button className="h-10 shrink-0" onClick={() => onAddVisit?.(episode)} data-testid="anc-add-visit"><Plus className="mr-1 h-4 w-4" /> Encounter</Button>
           )}
         </div>
       </div>

@@ -276,6 +276,7 @@ export default function AntenatalEncounter() {
   const [open, setOpen] = useState({});
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
   const [labOther, setLabOther] = useState("");
+  const [registeringBabyIdx, setRegisteringBabyIdx] = useState(null);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "ANC visit";
   const focusSection = params.get("section");
@@ -596,37 +597,54 @@ export default function AntenatalEncounter() {
     queueSectionDiff("delivery", prev, next);
   };
 
-  const doRegisterBaby = (i) => {
+  const doRegisterBaby = async (i) => {
     const b = babies[i];
     if (b.registered) return toast.message("Baby already registered");
-    if (/still birth|neonatal death/i.test(b.outcome || "")) return toast.error("Only live births can be registered as a patient");
+    if (/still birth|neonatal death/i.test(b.outcome || "")) {
+      return toast.error("Only live births can be registered as a patient");
+    }
+    if (!b.sex || /ambiguous/i.test(b.sex)) {
+      return toast.error("Select Male or Female before registering the baby");
+    }
     const name = babyName(p.name, i, babies.length);
-    const rec = registerBaby(p.id, {
-      name,
-      sex: b.sex,
-      dob: d.delivery.date || localISODate(),
-      weight: b.weightKg ? Number(b.weightKg) : "",
-      height: b.lengthCm ? Number(b.lengthCm) : "",
-      deliveryDetails: {
-        ...b,
-        motherId: p.id,
-        motherName: p.name,
-        deliveryDate: d.delivery.date || d.delivery.deliveryDate,
-        date: d.delivery.date || d.delivery.deliveryDate,
-        mode: d.delivery.type || d.delivery.mode,
-        type: d.delivery.type || d.delivery.mode,
-        place: d.delivery.outcome || d.delivery.place,
-        outcome: d.delivery.outcome || d.delivery.place,
-        complication: d.delivery.complication,
-        fetuses: d.delivery.fetuses,
-        fetusLengths: d.delivery.fetusLengths,
-        familyPlanning: d.delivery.familyPlanning,
-        postpartum: d.delivery.postpartum || [],
-        babies: d.delivery.babies || [],
-      },
-    });
-    updBaby(i, { registered: true, patientId: rec.id });
-    toast.success(`${name} registered · ${rec.id}`);
+    setRegisteringBabyIdx(i);
+    try {
+      const rec = await registerBaby(p.id, {
+        name,
+        sex: b.sex,
+        dob: d.delivery.date || d.delivery.deliveryDate || localISODate(),
+        weight: b.weightKg ? Number(b.weightKg) : "",
+        height: b.lengthCm ? Number(b.lengthCm) : "",
+        deliveryDetails: {
+          ...b,
+          motherId: p.id,
+          motherName: p.name,
+          deliveryDate: d.delivery.date || d.delivery.deliveryDate,
+          date: d.delivery.date || d.delivery.deliveryDate,
+          mode: d.delivery.type || d.delivery.mode,
+          type: d.delivery.type || d.delivery.mode,
+          place: d.delivery.outcome || d.delivery.place,
+          outcome: d.delivery.outcome || d.delivery.place,
+          complication: d.delivery.complication,
+          fetuses: d.delivery.fetuses,
+          fetusLengths: d.delivery.fetusLengths,
+          familyPlanning: d.delivery.familyPlanning,
+          postpartum: d.delivery.postpartum || [],
+          babies: d.delivery.babies || [],
+        },
+      });
+      if (!rec?.id) throw new Error("Baby registration failed");
+      updBaby(i, { registered: true, patientId: rec.id, patientCode: rec.patientCode || "" });
+      toast.success(
+        rec.localOnly
+          ? `${name} queued for sync · will register in Apex when online`
+          : `${name} registered · ${rec.patientCode || rec.id}`
+      );
+    } catch (err) {
+      toast.error(err?.message || "Failed to register baby");
+    } finally {
+      setRegisteringBabyIdx(null);
+    }
   };
 
   const persist = async (close) => {
@@ -1126,8 +1144,17 @@ export default function AntenatalEncounter() {
                 )}
               </div>
 
-              <Button className="h-10" disabled={b.registered} onClick={() => doRegisterBaby(i)} data-testid={`anc-baby-register-${i}`}>
-                {b.registered ? `Registered · ${b.patientId}` : "Register baby"}
+              <Button
+                className="h-10"
+                disabled={b.registered || registeringBabyIdx === i}
+                onClick={() => doRegisterBaby(i)}
+                data-testid={`anc-baby-register-${i}`}
+              >
+                {b.registered
+                  ? `Registered · ${b.patientCode || b.patientId}`
+                  : registeringBabyIdx === i
+                    ? "Registering…"
+                    : "Register baby"}
               </Button>
             </div>
           ))}

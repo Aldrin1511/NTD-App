@@ -188,6 +188,31 @@ export async function fetchLocations({ facilityId, all } = {}) {
     .filter((r) => r.name);
 }
 
+/**
+ * Visit types from HMIS VisitTypeReferencesT — same master Apex OP booking uses
+ * (GET /fetch/visit-types via portal-be).
+ */
+export async function fetchVisitTypes() {
+  const res = await http.get("/api/visit-types");
+  if (!res.data?.status) {
+    throw new Error(res.data?.message || "Failed to load visit types");
+  }
+  const rows = Array.isArray(res.data.data) ? res.data.data : [];
+  return rows
+    .map((r) => {
+      const label = String(r.visitType || r.label || r.name || r.value || "").trim();
+      if (!label) return null;
+      return {
+        id: String(r.visitTypeReferenceId || r.id || label),
+        visitTypeReferenceId: r.visitTypeReferenceId || r.id || "",
+        visitType: label,
+        label,
+        value: label,
+      };
+    })
+    .filter(Boolean);
+}
+
 /** Start NTD episode: creates RecordsT + VisitsT + VisitMetaT via portal-be. */
 export async function startEpisode(patientId, body) {
   try {

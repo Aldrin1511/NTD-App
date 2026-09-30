@@ -181,7 +181,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
               <Printer className="mr-1 h-4 w-4" /> Print
             </Button>
           )}
-          {canEdit && <Button className="h-10" onClick={onAddVisit} data-testid="wb-add-visit"><Plus className="mr-1 h-4 w-4" /> Well baby visit</Button>}
+          {canEdit && <Button className="h-10" onClick={() => onAddVisit?.(episode)} data-testid="wb-add-visit"><Plus className="mr-1 h-4 w-4" /> Encounter</Button>}
         </div>
       </div>
 
