@@ -37,11 +37,14 @@ export default function PatientNew() {
   formRef.current = f;
   const setDraftRef = useRef(setPatientRegisterDraft);
   setDraftRef.current = setPatientRegisterDraft;
+  /** After successful register, do not re-save typed values on unmount. */
+  const registeredRef = useRef(false);
 
-  // Persist draft only on unmount / leave (not every keystroke)
+  // Persist in-progress draft only on leave (not every keystroke). Cleared after successful register.
   useEffect(() => {
     if (isEdit) return undefined;
     return () => {
+      if (registeredRef.current) return;
       setDraftRef.current(formRef.current);
     };
   }, [isEdit]);
@@ -133,6 +136,9 @@ export default function PatientNew() {
     try {
       const rec = await addPatient(f);
       markSaved(f);
+      // Clear draft so returning to registration shows a fresh form
+      registeredRef.current = true;
+      setPatientRegisterDraft(null);
       toast.success(
         rec.localOnly
           ? `Patient saved offline · tap Sync when you are online`
