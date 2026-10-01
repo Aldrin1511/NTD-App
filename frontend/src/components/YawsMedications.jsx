@@ -1,9 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { AlertPanel, withDrugCourse } from "@/components/Fields";
 import { ageInMonths } from "@/components/ScabiesMedications";
-import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
-import { formatDosePhysical, physicalUnits, dropVisitPosology } from "@/lib/medications";
+import { CompactPosology, DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, physicalUnits, dropVisitPosology, setVisitPosology } from "@/lib/medications";
 
 export const YAWS_DRUGS = {
   azithromycin: "Tab Azithromycin 500mg (30mg per Kg)",
@@ -71,11 +71,12 @@ function AdviceList({ items }) {
   );
 }
 
-function DrugCard({ id, title, selected, onToggle, children }) {
+function DrugCard({ id, title, selected, expanded, onToggle, onActivate, compactBody, children }) {
   return (
     <div
       className={`rounded-lg border p-4 ${selected ? "border-primary bg-secondary/40" : "border-border bg-white"}`}
       data-testid={`yaws-drug-${id}`}
+      onFocusCapture={selected ? onActivate : undefined}
     >
       <button
         type="button"
@@ -94,7 +95,11 @@ function DrugCard({ id, title, selected, onToggle, children }) {
           <p className="font-semibold">{title}</p>
         </div>
       </button>
-      {children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>}
+      {selected && !expanded && compactBody ? (
+        <div className="mt-3 border-t border-border/60 pt-3">{compactBody}</div>
+      ) : (
+        children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>
+      )}
     </div>
   );
 }
@@ -149,6 +154,7 @@ export default function YawsMedications({
   const months = ageInMonths(patient);
   const years = months != null ? months / 12 : Number(patient.age);
   const yearsNum = Number.isFinite(years) ? years : null;
+  const [activeDrug, setActiveDrug] = useState(null);
 
   const selected = useMemo(
     () => ({
@@ -173,14 +179,46 @@ export default function YawsMedications({
       })
     : -1;
 
-  const setOral = (name, on) => {
+  const azithDefaults = {
+    dosage: azith ? formatDosePhysical(azith.mg, azithTabs) : "30 mg/kg",
+    frequency: "Once",
+    duration: "Single dose",
+  };
+  const benzDefaults = {
+    dosage: benz?.mls != null ? `${benz.mls} ml IMI` : "IMI",
+    frequency: "Once",
+    duration: "Single dose",
+  };
+
+  const seedPosology = (name, on, defaults) => {
+    if (!on) return dropVisitPosology(posology, name);
+    if (posology?.[name] || !defaults) return posology;
+    return setVisitPosology(posology, name, {
+      dosage: defaults.dosage || "",
+      frequency: defaults.frequency || "",
+      duration: defaults.duration || "",
+    }, defaults);
+  };
+
+  const setOral = (name, on, defaults) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       oral: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
     });
   };
+
+  const compact = (name, defaults) => (
+    <CompactPosology
+      name={name}
+      defaults={defaults}
+      posology={posology}
+      onExpand={() => setActiveDrug(name)}
+      testidPrefix="yaws-drug"
+    />
+  );
 
   return (
     <div className="space-y-4" data-testid="yaws-medications">
@@ -193,7 +231,10 @@ export default function YawsMedications({
         id="azithromycin"
         title={YAWS_DRUGS.azithromycin}
         selected={selected.azithromycin}
-        onToggle={() => setOral(YAWS_DRUGS.azithromycin, !selected.azithromycin)}
+        expanded={activeDrug === YAWS_DRUGS.azithromycin}
+        onActivate={() => setActiveDrug(YAWS_DRUGS.azithromycin)}
+        compactBody={compact(YAWS_DRUGS.azithromycin, azithDefaults)}
+        onToggle={() => setOral(YAWS_DRUGS.azithromycin, !selected.azithromycin, azithDefaults)}
       >
         <AlertPanel level="info" title="Note" testid="azithromycin-note">
           The dose of Azithromycin is calculated according to weight and age.
@@ -227,11 +268,7 @@ export default function YawsMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: azith ? formatDosePhysical(azith.mg, azithTabs) : "30 mg/kg",
-              frequency: "Once",
-              duration: "Single dose",
-            }}
+            defaults={azithDefaults}
           />
         )}
       </DrugCard>
@@ -241,7 +278,10 @@ export default function YawsMedications({
         id="benzathine"
         title={YAWS_DRUGS.benzathine}
         selected={selected.benzathine}
-        onToggle={() => setOral(YAWS_DRUGS.benzathine, !selected.benzathine)}
+        expanded={activeDrug === YAWS_DRUGS.benzathine}
+        onActivate={() => setActiveDrug(YAWS_DRUGS.benzathine)}
+        compactBody={compact(YAWS_DRUGS.benzathine, benzDefaults)}
+        onToggle={() => setOral(YAWS_DRUGS.benzathine, !selected.benzathine, benzDefaults)}
       >
         <AlertPanel level="info" title="Note" testid="benzathine-note">
           Use Benzathine Penicillin 2.4 million units diluted with 5mls sterile water.
@@ -268,11 +308,7 @@ export default function YawsMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: benz?.mls != null ? `${benz.mls} ml IMI` : "IMI",
-              frequency: "Once",
-              duration: "Single dose",
-            }}
+            defaults={benzDefaults}
           />
         )}
       </DrugCard>

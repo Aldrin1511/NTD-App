@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { AreaField, SectionCard, AlertPanel, CheckGrid } from "@/components/Fields";
 import { PhotoCapture } from "@/components/Capture";
 import PatientSidebar from "@/components/PatientSidebar";
-import { SUSPECT_OPTIONS, assessmentSpecs } from "@/mock/specs";
+import { SUSPECT_OPTIONS, assessmentSpecs, localISODate } from "@/mock/specs";
 import { DISEASES } from "@/mock/data";
 import { useFormDirty } from "@/lib/useFormDirty";
 import { toast } from "sonner";
@@ -14,17 +14,41 @@ import { ArrowLeft, ClipboardList, ShieldQuestion, PanelLeft } from "lucide-reac
 
 export default function SuspectScreen() {
   const { id } = useParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, suspects, addSuspect, addDisease, settings, user, online } = useStore();
+  const {
+    patients,
+    encounters,
+    facilities,
+    addSuspect,
+    addDisease,
+    startSuspectEpisode,
+    settings,
+    user,
+    online,
+    authSession,
+    canAccessDisease,
+  } = useStore();
   const p = patients.find((x) => x.id === id);
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
   const myDiseases = useMemo(() => assessmentSpecs(id, { encounters: patientEncs }), [id, patientEncs]);
+
+  const facilityName = params.get("fac") || p?.facility || "";
+  const visitType = params.get("vt") || settings.visitTypes?.[0] || "Initial encounter";
+  const referral = params.get("ref") || "No";
+  const visitDate = params.get("date") || localISODate();
+  const locationId =
+    params.get("loc") ||
+    facilities.find((f) => f.name === facilityName)?.id ||
+    "";
 
   const [symptoms, setSymptoms] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [suspect, setSuspect] = useState("");
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [lhs, setLhs] = useState(true);
   const formState = useMemo(() => ({ symptoms, photos, suspect, notes }), [symptoms, photos, suspect, notes]);
   const { dirty, markSaved } = useFormDirty(formState, `${id}-suspect`);
@@ -36,24 +60,100 @@ export default function SuspectScreen() {
       </AppShell>
     );
 
-  const options = SUSPECT_OPTIONS;
+  const options = SUSPECT_OPTIONS.filter(
+    (o) => o.id === "other" || o.id === "none" || canAccessDisease(o.id)
+  );
+  const accessibleDiseases = DISEASES.filter((d) => canAccessDisease(d.id));
 
-  const save = () => {
-    if (!symptoms.length) return toast.error("Select at least one presenting complaint");
-    if (!suspect) return toast.error("Choose the suspected NTD, or None");
-    const rec = addSuspect({ patientId: p.id, symptoms, photos, suspect, notes });
-    setSaved(rec);
-    markSaved(formState);
-    toast.success(
-      online
-        ? `Suspect screening ${rec.id} saved to device`
-        : `Suspect screening ${rec.id} saved locally · queued until you are online`
-    );
+  const persistSuspect = async (diseaseId) => {
+    if (!symptoms.length) {
+      toast.error("Select at least one presenting complaint");
+      return null;
+    }
+    if (!suspect) {
+      toast.error("Choose the suspected NTD, or None");
+      return null;
+    }
+    if (!visitType) {
+      toast.error("Visit type is missing — start again from Add Pathways");
+      return null;
+    }
+    if (!locationId) {
+      toast.error("Location is missing — start again from Add Pathways and choose a location");
+      return null;
+    }
+    if (!authSession?.facilityId) {
+      // Demo / no HMIS session — local only (not queued for HMIS)
+      const rec = addSuspect({ patientId: p.id, symptoms, photos, suspect, notes });
+      if (diseaseId) addDisease(p.id, diseaseId);
+      return { suspect: rec, encounter: null, localOnly: true };
+    }
+
+    const data = await startSuspectEpisode({
+      patientId: p.id,
+      disease: diseaseId || undefined,
+      suspect,
+      symptoms,
+      notes,
+      photos,
+      visitType,
+      locationId,
+      locationName: facilityName,
+      visitDate,
+      referral,
+      clinicianName: user?.name,
+    });
+    return data;
   };
 
-  const startEncounter = (diseaseId) => {
-    addDisease(p.id, diseaseId);
-    navigate(`/patients/${p.id}/encounter/${diseaseId}?sus=${saved?.id || ""}`);
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      // Save screening only (no disease episode yet)
+      const result = await persistSuspect(undefined);
+      if (!result) return;
+      const rec = result.suspect || result;
+      setSaved(rec);
+      markSaved(formState);
+      toast.success(
+        result.localOnly
+          ? online
+            ? `Suspect screening ${rec.id} saved to device`
+            : `Suspect screening ${rec.id} saved locally · queued until you are online`
+          : "Suspect screening saved"
+      );
+    } catch (err) {
+      toast.error(err?.message || "Failed to save suspect screening");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEncounter = async (diseaseId) => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const result = await persistSuspect(diseaseId);
+      if (!result) return;
+      const rec = result.suspect || saved;
+      setSaved(rec);
+      markSaved(formState);
+      addDisease(p.id, diseaseId);
+      const visitId = result.visitId || result.encounter?.id;
+      toast.success(`${accessibleDiseases.find((d) => d.id === diseaseId)?.name || DISEASES.find((d) => d.id === diseaseId)?.name || "Disease"} pathway started`);
+      if (visitId) {
+        navigate(
+          `/patients/${p.id}/encounter/${diseaseId}?enc=${encodeURIComponent(visitId)}&fac=${encodeURIComponent(facilityName)}&vt=${encodeURIComponent(visitType)}&ref=${encodeURIComponent(referral)}`
+        );
+      } else {
+        navigate(`/patients/${p.id}/encounter/${diseaseId}?sus=${encodeURIComponent(rec?.id || "")}`);
+      }
+    } catch (err) {
+      toast.error(err?.message || "Failed to start pathway from suspect screening");
+    } finally {
+      setStarting(false);
+    }
   };
 
   const requestLeave = () => {
@@ -87,18 +187,13 @@ export default function SuspectScreen() {
             <div className="min-w-0 flex-1">
               <p className="font-head text-xl font-bold tracking-tight sm:text-2xl">NTD Suspect</p>
               <p className="text-xs text-muted-foreground" data-testid="suspect-context">
-                {p.facility || "No facility"} · Step 1 — presenting complaints
+                {facilityName || "No facility"} · {visitType} · Step 1 — presenting complaints
               </p>
             </div>
             <Button variant="outline" className="h-11" data-testid="back-btn" onClick={requestLeave}>
               <ArrowLeft className="mr-2 h-4 w-4" /> Exit to record
             </Button>
           </div>
-
-          {/* <AlertPanel level="info" title="Step 1 — what is the patient telling you?" testid="suspect-intro">
-            Tick everything the patient reports in their own words, take photos of the skin, then choose which NTD you
-            suspect. The complaint list is maintained by your programme administrator.
-          </AlertPanel> */}
 
           <SectionCard title="Presenting complaints / symptoms" desc={`${settings.symptoms.length} complaints configured by the programme`}>
             <CheckGrid label="" options={settings.symptoms} value={symptoms} onChange={setSymptoms} testid="symptom" cols="sm:grid-cols-2" />
@@ -133,24 +228,43 @@ export default function SuspectScreen() {
             <PhotoCapture label="Capture skin photos" photos={photos} onChange={setPhotos} testid="suspect-photo" />
           </SectionCard>
 
-          {saved && (
-            <SectionCard title="Screening saved" desc={`${saved.id} · ${symptoms.length} complaint(s) · ${photos.length} photo(s)`}>
-              {["none", "other"].includes(suspect) || !DISEASES.find((d) => d.id === suspect) ? (
+          {(saved || suspect) && (
+            <SectionCard
+              title={saved ? "Screening saved" : "Ready to start"}
+              desc={
+                saved
+                  ? `${saved.id} · ${(saved.symptoms || symptoms).length} complaint(s) · ${(saved.photos || photos).length} photo(s)`
+                  : "Save screening, or start a disease pathway to persist symptoms in HMIS"
+              }
+            >
+              {["none", "other"].includes(suspect) || !accessibleDiseases.find((d) => d.id === suspect) ? (
                 <AlertPanel level="routine" title="🟢 Suspect Non-NTDs Skin Condition" testid="suspect-none-result">
                   No disease flow is required. Advise the patient to return if symptoms change.
                 </AlertPanel>
               ) : (
                 <>
                   <AlertPanel level="review" title={`🟠 ${SUSPECT_OPTIONS.find((d) => d.id === suspect)?.label}`} testid="suspect-result">
-                    Start the {DISEASES.find((d) => d.id === suspect)?.name || "disease"} clinical flow to record history, assessment,
-                    diagnosis and treatment.
+                    Start the {accessibleDiseases.find((d) => d.id === suspect)?.name || "disease"} clinical flow to record history, assessment,
+                    diagnosis and treatment. Symptoms will be saved with the pathway visit.
                   </AlertPanel>
-                  <Button className="h-12 w-full text-base" disabled={!user?.canEdit} data-testid="start-encounter-btn" onClick={() => startEncounter(suspect)}>
-                    Start {DISEASES.find((d) => d.id === suspect)?.name} episode
+                  <Button
+                    className="h-12 w-full text-base"
+                    disabled={!user?.canEdit || starting}
+                    data-testid="start-encounter-btn"
+                    onClick={() => startEncounter(suspect)}
+                  >
+                    {starting ? "Starting…" : `Start ${accessibleDiseases.find((d) => d.id === suspect)?.name} pathway`}
                   </Button>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {DISEASES.filter((d) => d.id !== suspect).map((d) => (
-                      <Button key={d.id} variant="outline" className="h-12" data-testid={`start-other-${d.id}`} onClick={() => startEncounter(d.id)}>
+                    {accessibleDiseases.filter((d) => d.id !== suspect).map((d) => (
+                      <Button
+                        key={d.id}
+                        variant="outline"
+                        className="h-12"
+                        disabled={!user?.canEdit || starting}
+                        data-testid={`start-other-${d.id}`}
+                        onClick={() => startEncounter(d.id)}
+                      >
                         Use {d.name} flow instead
                       </Button>
                     ))}
@@ -167,8 +281,13 @@ export default function SuspectScreen() {
           <span className="hidden text-xs text-muted-foreground sm:block" data-testid="suspect-saved-indicator">
             {saved ? (dirty ? "Unsaved changes" : `Saved: ${saved.id}`) : dirty ? "Unsaved changes" : "Not saved yet"}
           </span>
-          <Button className="ml-auto h-12 flex-1 text-base sm:flex-none sm:px-10" data-testid="save-suspect-btn" disabled={!dirty || !user?.canEdit} onClick={save}>
-            Save suspect screening
+          <Button
+            className="ml-auto h-12 flex-1 text-base sm:flex-none sm:px-10"
+            data-testid="save-suspect-btn"
+            disabled={!dirty || !user?.canEdit || saving}
+            onClick={save}
+          >
+            {saving ? "Saving…" : "Save suspect screening"}
           </Button>
         </div>
       </div>

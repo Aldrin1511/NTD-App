@@ -1,8 +1,10 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { withSelectAllOnFocus } from "@/lib/selectOnFocus"
 
-const Textarea = React.forwardRef(({ className, ...props }, ref) => {
+const Textarea = React.forwardRef(({ className, onFocus, ...props }, ref) => {
+  const selectProps = withSelectAllOnFocus({ type: "text", onFocus });
   return (
     <textarea
       className={cn(
@@ -10,7 +12,9 @@ const Textarea = React.forwardRef(({ className, ...props }, ref) => {
         className
       )}
       ref={ref}
-      {...props} />
+      {...props}
+      {...selectProps}
+    />
   );
 })
 Textarea.displayName = "Textarea"

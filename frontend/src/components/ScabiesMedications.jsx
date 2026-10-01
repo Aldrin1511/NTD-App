@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertPanel, withDrugCourse } from "@/components/Fields";
-import { DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
-import { formatDosePhysical, dropVisitPosology } from "@/lib/medications";
+import { CompactPosology, DosePhysicalBox, DoseUnitSelect, DrugVisitFields } from "@/components/MedicationShared";
+import { formatDosePhysical, dropVisitPosology, setVisitPosology } from "@/lib/medications";
 import {
   Dialog,
   DialogContent,
@@ -47,11 +47,12 @@ function AdviceList({ items }) {
   );
 }
 
-function DrugCard({ id, title, selected, onToggle, children, disabled, disabledHint }) {
+function DrugCard({ id, title, selected, expanded, onToggle, onActivate, compactBody, children, disabled, disabledHint }) {
   return (
     <div
       className={`rounded-lg border p-4 ${selected ? "border-primary bg-secondary/40" : "border-border bg-white"} ${disabled ? "opacity-70" : ""}`}
       data-testid={`scabies-drug-${id}`}
+      onFocusCapture={selected ? onActivate : undefined}
     >
       <button
         type="button"
@@ -72,7 +73,11 @@ function DrugCard({ id, title, selected, onToggle, children, disabled, disabledH
           {disabled && disabledHint && <p className="mt-1 text-xs text-red-700">{disabledHint}</p>}
         </div>
       </button>
-      {children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>}
+      {selected && !expanded && compactBody ? (
+        <div className="mt-3 border-t border-border/60 pt-3">{compactBody}</div>
+      ) : (
+        children && <div className="mt-3 space-y-3 border-t border-border/60 pt-3">{children}</div>
+      )}
     </div>
   );
 }
@@ -160,23 +165,71 @@ export default function ScabiesMedications({
   const iverContraindicated = iverBlockedReasons.length > 0;
 
   const [iverDialog, setIverDialog] = useState(false);
+  const [activeDrug, setActiveDrug] = useState(null);
   const dose = ivermectinDose(weight, Number(ivermectinTabletMg) || 3);
 
-  const setTopical = (name, on) => {
+  const seedPosology = (name, on, defaults) => {
+    if (!on) return dropVisitPosology(posology, name);
+    if (posology?.[name] || !defaults) return posology;
+    return setVisitPosology(posology, name, {
+      dosage: defaults.dosage || "",
+      frequency: defaults.frequency || "",
+      duration: defaults.duration || "",
+    }, defaults);
+  };
+
+  const setTopical = (name, on, defaults) => {
     const next = on ? [...new Set([...topical, name])] : topical.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       topical: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
     });
   };
-  const setOral = (name, on) => {
+  const setOral = (name, on, defaults) => {
     const next = on ? [...new Set([...oral, name])] : oral.filter((x) => x !== name);
+    setActiveDrug(on ? name : activeDrug === name ? null : activeDrug);
     onChange({
       oral: next,
       medCourses: withDrugCourse(medCourses, name, on),
-      posology: on ? posology : dropVisitPosology(posology, name),
+      posology: seedPosology(name, on, defaults),
     });
+  };
+
+  const compact = (name, defaults) => (
+    <CompactPosology
+      name={name}
+      defaults={defaults}
+      posology={posology}
+      onExpand={() => setActiveDrug(name)}
+      testidPrefix="scabies-drug"
+    />
+  );
+
+  const permethrinDefaults = {
+    dosage: "Apply to body below the neck",
+    frequency: "Once at night",
+    duration: "Overnight; repeat in 7 days if needed",
+  };
+  const benzylDefaults = {
+    dosage: months != null && months < 24
+      ? "Dilute 1:3 (10 ml + 30 ml water)"
+      : months != null && months < 144
+        ? "Dilute 1:1 (25 ml + 25 ml water)"
+        : "Undiluted",
+    frequency: months != null && months >= 24 && months < 144 ? "Twice" : "Once",
+    duration: months != null && months >= 24 && months < 144 ? "24 hours apart" : "12 hours contact",
+  };
+  const sulphurDefaults = {
+    dosage: sulphurStrength || "5%",
+    frequency: "Every night",
+    duration: "3–5 consecutive nights",
+  };
+  const ivermectinDefaults = {
+    dosage: dose ? formatDosePhysical(dose.mg, dose.tabs) : "0.2 mg/kg",
+    frequency: "Once",
+    duration: "2 doses (today + after 2 weeks)",
   };
 
   const toggleIvermectin = () => {
@@ -188,7 +241,7 @@ export default function ScabiesMedications({
       setIverDialog(true);
       return;
     }
-    setOral(SCABIES_DRUGS.ivermectin, true);
+    setOral(SCABIES_DRUGS.ivermectin, true, ivermectinDefaults);
   };
 
   return (
@@ -202,11 +255,14 @@ export default function ScabiesMedications({
         id="permethrin"
         title={SCABIES_DRUGS.permethrin}
         selected={selected.permethrin}
+        expanded={activeDrug === SCABIES_DRUGS.permethrin}
         disabled={permethrinTooYoung}
         disabledHint="Use ONLY in babies 2 months of age and older."
+        onActivate={() => setActiveDrug(SCABIES_DRUGS.permethrin)}
+        compactBody={compact(SCABIES_DRUGS.permethrin, permethrinDefaults)}
         onToggle={() => {
           if (permethrinTooYoung) return;
-          setTopical(SCABIES_DRUGS.permethrin, !selected.permethrin);
+          setTopical(SCABIES_DRUGS.permethrin, !selected.permethrin, permethrinDefaults);
         }}
       >
         <div>
@@ -235,11 +291,7 @@ export default function ScabiesMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: "Apply to body below the neck",
-              frequency: "Once at night",
-              duration: "Overnight; repeat in 7 days if needed",
-            }}
+            defaults={permethrinDefaults}
           />
         )}
       </DrugCard>
@@ -249,11 +301,14 @@ export default function ScabiesMedications({
         id="benzyl"
         title={SCABIES_DRUGS.benzyl}
         selected={selected.benzyl}
+        expanded={activeDrug === SCABIES_DRUGS.benzyl}
         disabled={benzyl.ban}
         disabledHint={benzyl.ban ? benzyl.text : undefined}
+        onActivate={() => setActiveDrug(SCABIES_DRUGS.benzyl)}
+        compactBody={compact(SCABIES_DRUGS.benzyl, benzylDefaults)}
         onToggle={() => {
           if (benzyl.ban) return;
-          setTopical(SCABIES_DRUGS.benzyl, !selected.benzyl);
+          setTopical(SCABIES_DRUGS.benzyl, !selected.benzyl, benzylDefaults);
         }}
       >
         <AlertPanel level="info" title="Note" testid="benzyl-note">
@@ -280,15 +335,7 @@ export default function ScabiesMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: months != null && months < 24
-                ? "Dilute 1:3 (10 ml + 30 ml water)"
-                : months != null && months < 144
-                  ? "Dilute 1:1 (25 ml + 25 ml water)"
-                  : "Undiluted",
-              frequency: months != null && months >= 24 && months < 144 ? "Twice" : "Once",
-              duration: months != null && months >= 24 && months < 144 ? "24 hours apart" : "12 hours contact",
-            }}
+            defaults={benzylDefaults}
           />
         )}
       </DrugCard>
@@ -298,7 +345,10 @@ export default function ScabiesMedications({
         id="sulphur"
         title={SCABIES_DRUGS.sulphur}
         selected={selected.sulphur}
-        onToggle={() => setTopical(SCABIES_DRUGS.sulphur, !selected.sulphur)}
+        expanded={activeDrug === SCABIES_DRUGS.sulphur}
+        onActivate={() => setActiveDrug(SCABIES_DRUGS.sulphur)}
+        compactBody={compact(SCABIES_DRUGS.sulphur, sulphurDefaults)}
+        onToggle={() => setTopical(SCABIES_DRUGS.sulphur, !selected.sulphur, sulphurDefaults)}
       >
         <AlertPanel level="info" title="Note" testid="sulphur-note">
           Preferred traditional treatment for infants under 2 months.
@@ -335,11 +385,7 @@ export default function ScabiesMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: sulphurStrength || "5%",
-              frequency: "Every night",
-              duration: "3–5 consecutive nights",
-            }}
+            defaults={sulphurDefaults}
           />
         )}
       </DrugCard>
@@ -349,6 +395,9 @@ export default function ScabiesMedications({
         id="ivermectin"
         title={SCABIES_DRUGS.ivermectin}
         selected={selected.ivermectin}
+        expanded={activeDrug === SCABIES_DRUGS.ivermectin}
+        onActivate={() => setActiveDrug(SCABIES_DRUGS.ivermectin)}
+        compactBody={compact(SCABIES_DRUGS.ivermectin, ivermectinDefaults)}
         onToggle={toggleIvermectin}
       >
         <p className="text-sm text-muted-foreground">Once today and once after 2 weeks. Dose 0.2 mg/kg by weight.</p>
@@ -386,11 +435,7 @@ export default function ScabiesMedications({
             posology={posology}
             onChange={onChange}
             {...regimenVisit}
-            defaults={{
-              dosage: dose ? formatDosePhysical(dose.mg, dose.tabs) : "0.2 mg/kg",
-              frequency: "Once",
-              duration: "2 doses (today + after 2 weeks)",
-            }}
+            defaults={ivermectinDefaults}
           />
         )}
       </DrugCard>
@@ -416,7 +461,7 @@ export default function ScabiesMedications({
               type="button"
               data-testid="ivermectin-override"
               onClick={() => {
-                setOral(SCABIES_DRUGS.ivermectin, true);
+                setOral(SCABIES_DRUGS.ivermectin, true, ivermectinDefaults);
                 setIverDialog(false);
               }}
             >

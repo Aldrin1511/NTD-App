@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, useLocation } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import BuruliMedications, { buruliTreatmentSummary } from "@/components/BuruliMe
 import LeprosyMedications, { leprosyTreatmentSummary } from "@/components/LeprosyMedications";
 import { DISEASE_SPECS, assessmentSpecs, leprosyScores, leprosyClass, yawsClass, resolveEpisodeId, isEpisodeClosed, encounterOutcome, groupDiseaseEpisodes, localISODate } from "@/mock/specs";
 import { flattenMarks } from "@/lib/markFindings";
+import { featureCodeForDisease, examSectionTitle, phiItemsForSectionDiff, phiItemForFieldChange } from "@/lib/phiMap";
 import { changedSectionKeys } from "@/sectionDiff";
 import { applyMatchingRegimens, matchingRegimens, formatDosePhysical, dropVisitPosology } from "@/lib/medications";
 import { RegimenBanner, AddDrugSelect, ExtraSelectedDrugs, addCatalogueDrug, DrugVisitFields } from "@/components/MedicationShared";
@@ -285,7 +286,10 @@ export default function Encounter() {
   const { id, diseaseId } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, suspects, saveEncounter, user, addDisease, settings, online } = useStore();
+  const location = useLocation();
+  const listFrom = location.state?.from;
+  const toRecord = (path) => navigate(path, listFrom ? { state: { from: listFrom } } : undefined);
+  const { patients, encounters, suspects, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, discardEncounterPhi, ensureCatalogueDrug, user, addDisease, settings, online } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.id === params.get("enc"));
   const spec = DISEASE_SPECS[existing?.disease || diseaseId] || DISEASE_SPECS.scabies;
@@ -354,9 +358,24 @@ export default function Encounter() {
   const [open, setOpen] = useState({});
   const [lhs, setLhs] = useState(true);
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
+  const [phiLoading, setPhiLoading] = useState(false);
+  /** Bumped after HMIS PHI hydrate so regimen auto-select can re-run if meds were empty. */
+  const [phiHydration, setPhiHydration] = useState(0);
+  const [saving, setSaving] = useState(false);
   const [nfaGate, setNfaGate] = useState(null);
   const [examFocus, setExamFocus] = useState({ round: null, key: 0 });
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  /** Snapshot of last loaded / saved form — restored on Discard and leave. */
+  const baselineRef = useRef(null);
+  const captureBaseline = (form) => {
+    const snap = form && typeof form === "object" ? form : {};
+    baselineRef.current = {
+      outcome: snap.outcome || "Active",
+      diagnosis: snap.diagnosis || "",
+      data: { ...snap },
+    };
+  };
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "Encounter";
   const referral = params.get("ref") || existing?.referral || "No";
@@ -371,6 +390,12 @@ export default function Encounter() {
     scrollViewToTop();
     return undefined;
   }, [id, diseaseId, requestedSection]);
+
+  // Capture initial form as discard baseline (PHI hydrate / Save refresh it later).
+  useEffect(() => {
+    if (!baselineRef.current) captureBaseline(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!requestedSection) return undefined;
@@ -457,9 +482,137 @@ export default function Encounter() {
   const ageMonths = ageInMonths(p || {});
   const ageYears = ageMonths != null ? ageMonths / 12 : Number(p?.age);
 
+  const dirtyKey = `${existing?.id || "new"}-${spec.id}-${params.get("enc") || params.get("new") || "draft"}`;
+  const { dirty, markSaved } = useFormDirty(d, dirtyKey);
+
+  const phiEncounter = useMemo(() => ({
+    patientId: p?.id || id,
+    encounterId: existing?.encounterId || "",
+    visitId: existing?.visitId || existing?.id || "",
+    recordId: existing?.recordId || "",
+    disease: existing?.disease || diseaseId || spec.id,
+    featureCode: existing?.featureCode || featureCodeForDisease(existing?.disease || diseaseId || spec.id),
+  }), [p?.id, id, existing, diseaseId, spec.id]);
+
+  const phiTimers = useRef({});
+  const queuePhiItems = (items, delay = 350) => {
+    (items || []).forEach((item) => {
+      const key = item.fieldKey || `${item.subFeatureCode}::${item.item}`;
+      if (phiTimers.current[key]) clearTimeout(phiTimers.current[key]);
+      phiTimers.current[key] = setTimeout(() => {
+        const visitId = phiEncounter.visitId || "";
+        const encId = phiEncounter.encounterId || "";
+        if (!online || !encId || String(visitId).startsWith("local-") || String(encId).startsWith("local-")) return;
+        upsertEncounterPhiField(phiEncounter, item).catch((err) => {
+          console.warn("PHI autosave failed", key, err);
+        });
+      }, delay);
+    });
+  };
+
+  const setCaseDetails = (next) => {
+    const prev = d.caseDetails || {};
+    set("caseDetails")(next);
+    queuePhiItems(
+      phiItemsForSectionDiff({
+        disease: spec.id,
+        pathPrefix: "caseDetails",
+        subFeatureCode: "Case details",
+        fields: spec.caseDetails,
+        prev,
+        next,
+      }),
+      200
+    );
+  };
+  const setHistory = (next) => {
+    const prev = d.history || {};
+    set("history")(next);
+    queuePhiItems(
+      phiItemsForSectionDiff({
+        disease: spec.id,
+        pathPrefix: "history",
+        subFeatureCode: `${spec.name} Clinical history`,
+        fields: spec.history,
+        prev,
+        next,
+      })
+    );
+  };
+  const setLab = (next) => {
+    const prev = d.lab || {};
+    set("lab")(next);
+    queuePhiItems(
+      phiItemsForSectionDiff({
+        disease: spec.id,
+        pathPrefix: "lab",
+        subFeatureCode: "Laboratory",
+        fields: spec.lab,
+        prev,
+        next,
+      })
+    );
+  };
+  const setHousehold = (next) => {
+    const prev = d.household || {};
+    set("household")(next);
+    queuePhiItems(
+      phiItemsForSectionDiff({
+        disease: spec.id,
+        pathPrefix: "household",
+        subFeatureCode: "Household Contact Tracing",
+        fields: spec.household,
+        prev,
+        next,
+      })
+    );
+  };
+  const queueBlob = (item, subFeatureCode, value, fieldKey, delay = 400) => {
+    if (value === undefined) return;
+    queuePhiItems(
+      [phiItemForFieldChange({
+        disease: spec.id,
+        pathPrefix: "",
+        fieldKey,
+        value,
+        fields: [],
+        subFeatureCode,
+        itemLabel: item,
+      })],
+      delay
+    );
+  };
+
+  /** Persist medication blobs to HMIS (ProgressEdited) without re-writing form state. */
+  const persistMedPhi = (patch, delay = 450) => {
+    const medTitle = "Medications";
+    const labels = {
+      topical: "Topical medications",
+      oral: "Oral medications",
+      topicalAntibiotics: "Topical antibiotics",
+      oralAntibiotics: "Oral antibiotics",
+      medCourses: "Medication courses",
+      posology: "Posology",
+      recommendations: "Recommendations",
+      adherence: "Adherence",
+      treatmentDate: "Treatment date",
+      ivermectinTabletMg: "Ivermectin tablet mg",
+      sulphurStrength: "Sulphur strength",
+      azithromycinTabletMg: "Azithromycin tablet mg",
+      rifampicinTabletMg: "Rifampicin tablet mg",
+      clarithromycinTabletMg: "Clarithromycin tablet mg",
+    };
+    Object.entries(patch || {}).forEach(([k, v]) => {
+      if (labels[k]) queueBlob(labels[k], medTitle, v, k, delay);
+    });
+  };
+
+  // Diagnosis/weight-matched regimens auto-select drugs in UI — must also PHI-autosave
+  // (manual checkbox / Add Drug already go through queueMedPatch).
   useEffect(() => {
     const catalogue = settings.drugs || [];
     const regimens = settings.regimens || [];
+    let toPersist = null;
     setD((s) => {
       const matched = matchingRegimens({
         regimens,
@@ -495,12 +648,70 @@ export default function Encounter() {
         medCourses = withDrugCourse(medCourses, name, true);
       });
       const { added: _added, ...rest } = patch;
-      return { ...s, ...rest, medCourses };
+      const next = { ...s, ...rest, medCourses };
+      if ((_added || []).length) {
+        toPersist = {
+          oral: next.oral,
+          topical: next.topical,
+          medCourses: next.medCourses,
+        };
+      }
+      return next;
     });
-  }, [diagnosis, weight, ageYears, spec.id, settings.drugs, settings.regimens]);
+    if (toPersist) persistMedPhi(toPersist, 450);
+    // persistMedPhi/queueBlob are stable enough for this visit; omit to avoid re-apply loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagnosis, weight, ageYears, spec.id, settings.drugs, settings.regimens, phiHydration]);
 
-  const dirtyKey = `${existing?.id || "new"}-${spec.id}-${params.get("enc") || params.get("new") || "draft"}`;
-  const { dirty, markSaved } = useFormDirty(d, dirtyKey);
+  /** Load one-PHI-per-question answers from HMIS via portal-be when opening a visit. */
+  useEffect(() => {
+    if (!existing?.encounterId || !existing?.patientId) return undefined;
+    // Offline: keep local form state — do not call HMIS / toast network errors.
+    if (!online) {
+      setPhiLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setPhiLoading(true);
+    loadEncounterPhi(existing)
+      .then((form) => {
+        if (cancelled || !form) return;
+        const disease = existing.disease || diseaseId;
+        const loaded = applyLoadedEncounter({ ...form }, disease);
+        // Empty meds → allow diagnosis-matched regimens to auto-select after hydrate
+        // (avoids PHI load wiping an in-memory auto-select, or skipping apply entirely).
+        if (!(loaded.oral || []).length && !(loaded.topical || []).length) {
+          loaded.regimenAppliedKey = "";
+        }
+        setD(loaded);
+        markSaved(loaded);
+        captureBaseline(loaded);
+        setSavedAt("loaded from HMIS");
+        setPhiHydration((n) => n + 1);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn("loadEncounterPhi failed", err);
+        // Empty / new visits / offline / upstream HTML 404s must not toast.
+        const msg = String(err?.message || "");
+        if (
+          /failed to fetch informations|Cannot POST|<!DOCTYPE|network|offline|Failed to fetch|Network Error/i.test(
+            msg
+          )
+        ) {
+          return;
+        }
+        toast.error(err?.message || "Could not load form answers from server");
+      })
+      .finally(() => {
+        if (!cancelled) setPhiLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Only re-fetch when the visit / OP encounter / connectivity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [existing?.id, existing?.encounterId, existing?.patientId, online]);
 
   if (!p) return <AppShell title="Patient not found"><Button className="h-12" onClick={() => navigate("/patients")}>Back</Button></AppShell>;
 
@@ -522,7 +733,7 @@ export default function Encounter() {
 
   const recordPath = () => (spec?.id ? `/patients/${p.id}/disease/${spec.id}` : `/patients/${p.id}`);
 
-  const persist = (close) => {
+  const persist = async (close) => {
     if (spec.id === "leprosy") {
       const rounds = examRounds?.length ? examRounds : [{}];
       const gapIdx = rounds.findIndex((r, idx) =>
@@ -566,14 +777,29 @@ export default function Encounter() {
         };
       }
     }
-    saveEncounter({
+    const nextSnapshot = { ...existing, data: payload, diagnosis, outcome };
+    // "Edited" only after pencil-revising a visit that was already completed — never on first fill.
+    const isRevision = !!existing && existing.complete === true;
+    const newlyEdited = isRevision ? changedSectionKeys(existing, nextSnapshot) : [];
+    const keepPriorEdited = isRevision && existing.revised === true;
+    const visitId = existing?.visitId || existing?.id;
+    const encounterId = existing?.encounterId || "";
+    const featureCode = existing?.featureCode || featureCodeForDisease(spec.id);
+    const recordId = existing?.recordId;
+    const savedLocal = {
       id: existing?.id, patientId: p.id, episodeId: resolveEpisodeId({
         existingId: existing?.episodeId,
         disease: spec.id,
         patientEpisodeId: p.episodeId,
         diseaseEncounters: encounters.filter((e) => e.patientId === p.id && e.disease === spec.id),
       }), disease: spec.id,
+      visitId,
+      recordId,
+      encounterId,
+      featureCode,
       facility, worker: user?.name, type: visitType, referral, status: "Complete",
+      pendingStart: false,
+      complete: true,
       diagnosis: diagnosis || "",
       treatment: (
         spec.id === "scabies"
@@ -590,28 +816,150 @@ export default function Encounter() {
       ) || "",
       outcome: outcome || "",
       data: payload,
-      ...(existing ? {
-        editedSections: [...new Set([
-          ...(existing.editedSections || []),
-          ...changedSectionKeys(existing, { ...existing, data: payload, diagnosis, outcome }),
-        ])],
-      } : {}),
-    });
-    const savedForm = { ...d, diagnosis: diagnosis || "", outcome: outcome || "", scores };
-    setD((s) => ({ ...s, diagnosis: savedForm.diagnosis, outcome: savedForm.outcome, scores: savedForm.scores }));
-    markSaved(savedForm);
-    setSavedAt(new Date().toLocaleTimeString());
-    if (close) navigate(recordPath());
-    if (online) toast.success(close ? "Encounter saved" : "Saved to device");
-    else toast.success(close ? "Encounter saved · queued until you are online" : "Saved to device · queued until you are online");
+      revised: isRevision && (keepPriorEdited || newlyEdited.length > 0),
+      editedSections: isRevision
+        ? [...new Set([...(keepPriorEdited ? existing.editedSections || [] : []), ...newlyEdited])]
+        : [],
+    };
+
+    setSaving(true);
+    try {
+      const canWritePhi =
+        online &&
+        encounterId &&
+        visitId &&
+        !String(visitId).startsWith("local-") &&
+        !String(encounterId).startsWith("local-");
+      if (canWritePhi) {
+        // Flush debounced PHI timers and ensure selected meds (incl. regimen auto-select)
+        // are upserted before ProgressEdited → null finalize.
+        // Do NOT write disease-agnostic tablet/strength defaults (e.g. azithromycinTabletMg:500
+        // living on every form empty state) unless that drug was actually selected.
+        Object.values(phiTimers.current || {}).forEach((t) => clearTimeout(t));
+        phiTimers.current = {};
+        const oral = payload.oral || [];
+        const topical = payload.topical || [];
+        const hasOral = (re) => oral.some((n) => re.test(String(n)));
+        const hasTopical = (re) => topical.some((n) => re.test(String(n)));
+        const medFlush = {
+          oral: payload.oral,
+          topical: payload.topical,
+          topicalAntibiotics: payload.topicalAntibiotics,
+          oralAntibiotics: payload.oralAntibiotics,
+          medCourses: payload.medCourses,
+          posology: payload.posology,
+          recommendations: payload.recommendations,
+          adherence: payload.adherence,
+          treatmentDate: payload.treatmentDate,
+          ...(hasOral(/ivermectin/i) ? { ivermectinTabletMg: payload.ivermectinTabletMg } : {}),
+          ...(hasTopical(/sulphur/i) ? { sulphurStrength: payload.sulphurStrength } : {}),
+          ...(hasOral(/azithromycin/i) ? { azithromycinTabletMg: payload.azithromycinTabletMg } : {}),
+          ...(hasOral(/rifampicin/i) ? { rifampicinTabletMg: payload.rifampicinTabletMg } : {}),
+          ...(hasOral(/clarithromycin/i) ? { clarithromycinTabletMg: payload.clarithromycinTabletMg } : {}),
+        };
+        const medTitle = "Medications";
+        const medLabels = {
+          topical: "Topical medications",
+          oral: "Oral medications",
+          topicalAntibiotics: "Topical antibiotics",
+          oralAntibiotics: "Oral antibiotics",
+          medCourses: "Medication courses",
+          posology: "Posology",
+          recommendations: "Recommendations",
+          adherence: "Adherence",
+          treatmentDate: "Treatment date",
+          ivermectinTabletMg: "Ivermectin tablet mg",
+          sulphurStrength: "Sulphur strength",
+          azithromycinTabletMg: "Azithromycin tablet mg",
+          rifampicinTabletMg: "Rifampicin tablet mg",
+          clarithromycinTabletMg: "Clarithromycin tablet mg",
+        };
+        await Promise.all(
+          Object.entries(medFlush).map(async ([k, v]) => {
+            if (v === undefined || !medLabels[k]) return;
+            if (Array.isArray(v) && v.length === 0) return;
+            if (v && typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length) return;
+            try {
+              await upsertEncounterPhiField(phiEncounter, phiItemForFieldChange({
+                disease: spec.id,
+                pathPrefix: "",
+                fieldKey: k,
+                value: v,
+                fields: [],
+                subFeatureCode: medTitle,
+                itemLabel: medLabels[k],
+              }));
+            } catch (err) {
+              console.warn("PHI med flush failed", k, err);
+            }
+          })
+        );
+        await finalizeEncounterPhi({
+          patientId: p.id,
+          encounterId,
+          visitId,
+          disease: spec.id,
+          diagnosis: diagnosis || "",
+          outcome: outcome || "",
+          date: savedLocal.date || existing?.date || new Date().toISOString(),
+          data: payload,
+        });
+      }
+      await saveEncounter(savedLocal);
+      const savedForm = { ...d, diagnosis: diagnosis || "", outcome: outcome || "", scores };
+      setD((s) => ({ ...s, diagnosis: savedForm.diagnosis, outcome: savedForm.outcome, scores: savedForm.scores }));
+      markSaved(savedForm);
+      captureBaseline(savedForm);
+      setSavedAt(new Date().toLocaleTimeString());
+      if (close) toRecord(recordPath());
+      if (canWritePhi) toast.success(close ? "Encounter saved" : "Saved");
+      else if (online && !canWritePhi) toast.success(close ? "Encounter queued for sync" : "Saved · queued for sync");
+      else toast.success(close ? "Encounter saved · queued until you are online" : "Saved to device · queued until you are online");
+    } catch (err) {
+      toast.error(err?.message || "Failed to save form answers to server");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const discardEncounter = () => {
-    setD(applyLoadedEncounter(cloneData(empty), spec.id));
+  const discardEncounter = async () => {
+    if (discarding) return;
+    setDiscarding(true);
+    // Stop any pending autosave timers so Cured (etc.) is not written after we leave.
+    Object.values(phiTimers.current || {}).forEach((t) => clearTimeout(t));
+    phiTimers.current = {};
+    const baseline = baselineRef.current;
+    try {
+      if (existing) {
+        await discardEncounterPhi(
+          {
+            patientId: p?.id || id,
+            encounterId: existing.encounterId || existing.id,
+            visitId: existing.visitId || existing.id || "",
+            id: existing.id,
+          },
+          baseline
+            ? {
+                outcome: baseline.outcome,
+                diagnosis: baseline.diagnosis,
+                data: baseline.data,
+              }
+            : null
+        );
+      }
+    } catch (err) {
+      console.warn("discardEncounter PHI revert failed", err);
+    }
+    if (baseline?.data) {
+      setD(applyLoadedEncounter(cloneData(baseline.data), spec.id));
+    } else {
+      setD(applyLoadedEncounter(cloneData(empty), spec.id));
+    }
     setSavedAt("");
     setCancelOpen(false);
+    setDiscarding(false);
     toast.success("Encounter cancelled");
-    navigate(recordPath());
+    toRecord(recordPath());
   };
 
   const requestLeave = () => {
@@ -619,7 +967,7 @@ export default function Encounter() {
       setCancelOpen(true);
       return;
     }
-    navigate(recordPath());
+    toRecord(recordPath());
   };
 
   const openLeprosyExam = (occasion) => {
@@ -641,9 +989,14 @@ export default function Encounter() {
     toast.message(`Opened ${occasion} assessment`);
   };
 
+  const queueMedPatch = (patch) => {
+    setD((s) => ({ ...s, ...patch }));
+    persistMedPhi(patch, 450);
+  };
+
   const sections = [
-    { n: 1, title: `Case details`, done: !!d.caseDetails.mode, body: <FormRenderer fields={spec.caseDetails} data={d.caseDetails} onChange={set("caseDetails")} prefix="case" gender={p.gender || p.sex} /> },
-    { n: 2, title: `${spec.name} Clinical history`, done: Object.keys(d.history).length > 0, body: <FormRenderer fields={spec.history} data={d.history} onChange={set("history")} prefix="hist" /> },
+    { n: 1, title: `Case details`, done: !!d.caseDetails.mode, body: <FormRenderer fields={spec.caseDetails} data={d.caseDetails} onChange={setCaseDetails} prefix="case" gender={p.gender || p.sex} /> },
+    { n: 2, title: `${spec.name} Clinical history`, done: Object.keys(d.history).length > 0, body: <FormRenderer fields={spec.history} data={d.history} onChange={setHistory} prefix="hist" /> },
     { n: 3, title: spec.id === "scabies" ? "Scabies Examination"
       : spec.id === "yaws" ? "Yaws Examination"
       : spec.id === "lf" ? "Lymphatic Filariasis Examination"
@@ -665,18 +1018,37 @@ export default function Encounter() {
               highlightNfa={Boolean(nfaGate)}
               focusRound={examFocus.round ?? nfaGate?.round}
               focusKey={examFocus.key}
-              onChange={(rounds) => setD((s) => ({
-                ...s,
-                examRounds: rounds,
-                assessment: rounds[rounds.length - 1]?.assessment || s.assessment,
-                marks: rounds.reduce((acc, r) => ({ ...acc, ...(r.marks || {}) }), {}),
-              }))}
+              onChange={(rounds) => {
+                setD((s) => ({
+                  ...s,
+                  examRounds: rounds,
+                  assessment: rounds[rounds.length - 1]?.assessment || s.assessment,
+                  marks: rounds.reduce((acc, r) => ({ ...acc, ...(r.marks || {}) }), {}),
+                }));
+                const examTitle = examSectionTitle(spec.id);
+                queueBlob("Exam rounds", examTitle, rounds, "examRounds");
+                queueBlob("Body chart marks", examTitle, rounds.reduce((acc, r) => ({ ...acc, ...(r.marks || {}) }), {}), "marks");
+              }}
               sex={p.gender || p.sex}
             />
           ) : (
             <>
-              <DiseaseBodyChart spec={spec} marks={d.marks} onChange={set("marks")} sex={p.gender || p.sex} />
-              {spec.assessmentExtra.length > 0 && <FormRenderer fields={spec.assessmentExtra} data={d.assessment} onChange={set("assessment")} prefix="assess" />}
+              <DiseaseBodyChart spec={spec} marks={d.marks} onChange={(marks) => {
+                set("marks")(marks);
+                queueBlob("Body chart marks", examSectionTitle(spec.id), marks, "marks");
+              }} sex={p.gender || p.sex} />
+              {spec.assessmentExtra.length > 0 && <FormRenderer fields={spec.assessmentExtra} data={d.assessment} onChange={(next) => {
+                const prev = d.assessment || {};
+                set("assessment")(next);
+                queuePhiItems(phiItemsForSectionDiff({
+                  disease: spec.id,
+                  pathPrefix: "assessment",
+                  subFeatureCode: examSectionTitle(spec.id),
+                  fields: spec.assessmentExtra,
+                  prev,
+                  next,
+                }));
+              }} prefix="assess" />}
             </>
           )}
           {spec.id === "leprosy" && lepClass && (Object.keys(chartMarks).length > 0 || Object.keys(leprosyAssessment).length > 0) && scores && (
@@ -685,10 +1057,13 @@ export default function Encounter() {
               scores={scores}
             />
           )}
-          <PhotoCapture label="Assessment photographs" photos={d.photos} onChange={set("photos")} testid="encounter-photo" />
+          <PhotoCapture label="Assessment photographs" photos={d.photos} onChange={(photos) => {
+            set("photos")(photos);
+            queueBlob("Assessment photographs", examSectionTitle(spec.id), photos, "photos");
+          }} testid="encounter-photo" />
         </div>
       ) },
-    { n: 4, title: "Laboratory", done: Object.keys(d.lab).length > 0, body: <FormRenderer fields={spec.lab} data={d.lab} onChange={set("lab")} prefix="lab" /> },
+    { n: 4, title: "Laboratory", done: Object.keys(d.lab).length > 0, body: <FormRenderer fields={spec.lab} data={d.lab} onChange={setLab} prefix="lab" /> },
     { n: 5, title: "Diagnosis", done: !!diagnosis,
       body: (
         <div className="space-y-4">
@@ -706,6 +1081,7 @@ export default function Encounter() {
             onChange={(v) => {
               diagnosisTouchedRef.current = true;
               set("diagnosis")(v);
+              queueBlob("Diagnosis", "Diagnosis", v, "diagnosis", 150);
             }}
             testid="diagnosis"
           />
@@ -738,7 +1114,7 @@ export default function Encounter() {
               posology={d.posology || {}}
               matchedRegimens={matchedRegimens}
               catalogue={catalogue}
-              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+              onChange={queueMedPatch}
             />
           ) : spec.id === "yaws" ? (
             <YawsMedications
@@ -750,7 +1126,7 @@ export default function Encounter() {
               posology={d.posology || {}}
               matchedRegimens={matchedRegimens}
               catalogue={catalogue}
-              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+              onChange={queueMedPatch}
             />
           ) : spec.id === "lf" ? (
             <LfMedications
@@ -765,7 +1141,7 @@ export default function Encounter() {
               posology={d.posology || {}}
               matchedRegimens={matchedRegimens}
               catalogue={catalogue}
-              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+              onChange={queueMedPatch}
             />
           ) : spec.id === "buruli" ? (
             <BuruliMedications
@@ -777,7 +1153,7 @@ export default function Encounter() {
               posology={d.posology || {}}
               matchedRegimens={matchedRegimens}
               catalogue={catalogue}
-              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+              onChange={queueMedPatch}
             />
           ) : spec.id === "leprosy" ? (
             <LeprosyMedications
@@ -790,7 +1166,7 @@ export default function Encounter() {
               matchedRegimens={matchedRegimens}
               catalogue={catalogue}
               diagnosis={diagnosis}
-              onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+              onChange={queueMedPatch}
             />
           ) : (
             <>
@@ -803,16 +1179,15 @@ export default function Encounter() {
                     return (
                       <div key={o.name} className="space-y-2">
                         <button type="button" data-testid={`oral-${o.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-                          onClick={() => setD((s) => {
-                            const nextOn = !s.oral.includes(o.name);
-                            const oral = nextOn ? [...s.oral, o.name] : s.oral.filter((x) => x !== o.name);
-                            return {
-                              ...s,
+                          onClick={() => {
+                            const nextOn = !d.oral.includes(o.name);
+                            const oral = nextOn ? [...d.oral, o.name] : d.oral.filter((x) => x !== o.name);
+                            queueMedPatch({
                               oral,
-                              medCourses: withDrugCourse(s.medCourses, o.name, nextOn),
-                              posology: nextOn ? s.posology : dropVisitPosology(s.posology, o.name),
-                            };
-                          })}
+                              medCourses: withDrugCourse(d.medCourses, o.name, nextOn),
+                              posology: nextOn ? d.posology : dropVisitPosology(d.posology, o.name),
+                            });
+                          }}
                           className={`flex min-h-12 w-full items-center gap-3 rounded-md border px-4 text-left text-sm font-semibold ${on ? "border-primary bg-secondary" : "border-border bg-white hover:bg-muted"}`}>
                           <span className={`grid h-6 w-6 place-items-center rounded border ${on ? "border-primary bg-primary text-white" : "border-input"}`}>{on && <Check className="h-4 w-4" />}</span>
                           <span className="flex-1">{o.name}</span>
@@ -826,7 +1201,7 @@ export default function Encounter() {
                             posology={d.posology || {}}
                             matchedRegimens={matchedRegimens}
                             catalogue={catalogue}
-                            onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+                            onChange={queueMedPatch}
                             defaults={{
                               dosage: doseText === "enter weight" ? "" : doseText,
                               frequency: /BID/i.test(String(o.schedule)) ? "Twice daily" : /\bOD\b/i.test(String(o.schedule)) ? "Once daily" : "",
@@ -845,19 +1220,25 @@ export default function Encounter() {
             catalogue={catalogue}
             diseaseId={spec.id}
             selected={[...d.topical, ...d.oral]}
-            onAdd={(name) => setD((s) => ({
-              ...s,
-              ...addCatalogueDrug({
-                name,
-                catalogue,
-                topical: s.topical,
-                oral: s.oral,
-                medCourses: s.medCourses,
-                posology: s.posology,
-                matchedRegimens,
-                allRegimens: settings.regimens || [],
-              }),
-            }))}
+            online={online}
+            onAdd={(name, drugMeta) => {
+              if (drugMeta) ensureCatalogueDrug(drugMeta);
+              setD((s) => ({
+                ...s,
+                ...addCatalogueDrug({
+                  name,
+                  catalogue: drugMeta
+                    ? [...catalogue, { name: drugMeta.name, form: drugMeta.form || "Oral" }]
+                    : catalogue,
+                  topical: s.topical,
+                  oral: s.oral,
+                  medCourses: s.medCourses,
+                  posology: s.posology,
+                  matchedRegimens,
+                  allRegimens: settings.regimens || [],
+                }),
+              }));
+            }}
           />
           <ExtraSelectedDrugs
             diseaseId={spec.id}
@@ -868,13 +1249,16 @@ export default function Encounter() {
             posology={d.posology || {}}
             matchedRegimens={matchedRegimens}
             allRegimens={settings.regimens || []}
-            onChange={(patch) => setD((s) => ({ ...s, ...patch }))}
+            onChange={queueMedPatch}
           />
           {spec.adherence && (
             <AdherenceGrid
               spec={spec}
               value={d.adherence}
-              onChange={set("adherence")}
+              onChange={(adherence) => {
+                set("adherence")(adherence);
+                queueBlob("Adherence", "Medications", adherence, "adherence");
+              }}
               startDate={d.caseDetails?.treatmentStart || d.adherence?.lines?.[d.adherence.lines.length - 1]?.startDate}
               diagnosis={diagnosis}
               onRestart={() => set("adherence")({})}
@@ -887,26 +1271,40 @@ export default function Encounter() {
       if (Array.isArray(v)) return v.length > 0;
       if (v && typeof v === "object") return Object.values(v).some((n) => Number(n) > 0);
       return !!v;
-    }), body: <FormRenderer fields={spec.household} data={d.household} onChange={set("household")} prefix="hh" sourcePatient={p} /> },
+    }), body: <FormRenderer fields={spec.household} data={d.household} onChange={setHousehold} prefix="hh" sourcePatient={p} /> },
     ...(spec.id === "leprosy"
       ? [{
           n: 8,
           title: "Leprosy reaction",
           done: (d.reactions || []).some(isReactionFilled),
-          body: <LeprosyReaction value={d.reactions || []} onChange={set("reactions")} onStartExam={openLeprosyExam} followUp={lepReactionMode.followUp} allowAdd={lepReactionMode.allowAdd} id="lep-reaction" />,
+          body: <LeprosyReaction value={d.reactions || []} onChange={(reactions) => {
+            set("reactions")(reactions);
+            queueBlob("Leprosy reactions", "Leprosy reaction", reactions, "reactions");
+          }} onStartExam={openLeprosyExam} followUp={lepReactionMode.followUp} allowAdd={lepReactionMode.allowAdd} id="lep-reaction" />,
         }]
       : []),
-    { n: spec.id === "leprosy" ? 9 : 8, title: "Visit notes", done: normalizeNotes(d.notes).some((n) => String(n).trim()), body: <VisitNotes value={d.notes} onChange={set("notes")} /> },
+    { n: spec.id === "leprosy" ? 9 : 8, title: "Visit notes", done: normalizeNotes(d.notes).some((n) => String(n).trim()), body: <VisitNotes value={d.notes} onChange={(notes) => {
+      set("notes")(notes);
+      queueBlob("Visit notes", "Visit notes", notes, "notes");
+    }} /> },
     { n: spec.id === "leprosy" ? 10 : 9, title: usesActiveDefault ? "Final case outcome" : "Treatment outcome & recommendation",
       done: usesActiveDefault ? !!outcome : d.outcome !== "Open",
       body: (
         <div className="space-y-5">
           {usesActiveDefault && (
             <p className="text-sm text-muted-foreground">
-              Outcome defaults to Active when the episode starts. If diagnosis is {noDiseaseOutcome || "No disease"}, outcome is set to {noDiseaseOutcome || "match"} automatically.
+              Outcome defaults to Active when the pathway starts. If diagnosis is {noDiseaseOutcome || "No disease"}, outcome is set to {noDiseaseOutcome || "match"} automatically.
             </p>
           )}
-          <ChoiceRow label="Outcome" options={spec.outcomes} value={outcome} onChange={set("outcome")} testid="outcome" />
+          <ChoiceRow label="Outcome" options={spec.outcomes} value={outcome} onChange={(v) => {
+            set("outcome")(v);
+            queueBlob("Outcome", "Final case outcome", v, "outcome", 150);
+          }} testid="outcome" />
+          {isEpisodeClosed(outcome) && (
+            <AlertPanel level="review" title="This closes the pathway" testid="outcome-close">
+              Saving with this outcome closes the pathway. Start a new encounter to open a fresh pathway later.
+            </AlertPanel>
+          )}
           {spec.id === "leprosy" && outcome === "Cured" && (
             <div className="rounded-md border border-border bg-secondary/40 p-4">
               <p className="mb-3 text-sm text-muted-foreground">
@@ -1017,25 +1415,25 @@ export default function Encounter() {
           </span>
           <div className="ml-auto flex flex-1 gap-3 sm:flex-none">
             <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="cancel-encounter-btn" onClick={requestLeave}>Cancel</Button>
-            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="save-btn" disabled={!dirty || !user?.canEdit} onClick={() => persist(false)}><Save className="mr-2 h-4 w-4" /> Save</Button>
-            <Button className="h-12 flex-1 text-base sm:flex-none sm:px-8" data-testid="save-close-btn" disabled={!dirty || !user?.canEdit} onClick={() => persist(true)}><Check className="mr-2 h-4 w-4" /> Save &amp; close</Button>
+            <Button variant="outline" className="h-12 flex-1 sm:flex-none sm:px-8" data-testid="save-btn" disabled={!dirty || !user?.canEdit || saving || phiLoading} onClick={() => persist(false)}><Save className="mr-2 h-4 w-4" /> Save</Button>
+            <Button className="h-12 flex-1 text-base sm:flex-none sm:px-8" data-testid="save-close-btn" disabled={!dirty || !user?.canEdit || saving || phiLoading} onClick={() => persist(true)}><Check className="mr-2 h-4 w-4" /> Save &amp; close</Button>
           </div>
         </div>
       </div>
-      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+      <Dialog open={cancelOpen} onOpenChange={(open) => { if (!discarding) setCancelOpen(open); }}>
         <DialogContent className="sm:max-w-md" data-testid="cancel-encounter-dialog">
           <DialogHeader>
             <DialogTitle>Cancel this encounter?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will discard unsaved entries on this visit and return to the patient record. Already saved records are not deleted.
+            This will discard unsaved entries on this visit (including answers autosaved while editing) and return to the patient record. Previously saved visits are not deleted.
           </p>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" data-testid="cancel-encounter-keep" onClick={() => setCancelOpen(false)}>
+            <Button type="button" variant="outline" data-testid="cancel-encounter-keep" disabled={discarding} onClick={() => setCancelOpen(false)}>
               Keep editing
             </Button>
-            <Button type="button" data-testid="cancel-encounter-confirm" onClick={discardEncounter}>
-              Discard and leave
+            <Button type="button" data-testid="cancel-encounter-confirm" disabled={discarding} onClick={discardEncounter}>
+              {discarding ? "Discarding…" : "Discard and leave"}
             </Button>
           </DialogFooter>
         </DialogContent>

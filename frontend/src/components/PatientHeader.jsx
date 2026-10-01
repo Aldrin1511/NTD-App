@@ -26,7 +26,8 @@ export const PatientHeader = ({ patient: p, right, children, testid = "patient-h
             <h1 className="font-head text-2xl font-bold tracking-tight sm:text-3xl">{p.name}</h1>
             <Badge variant="outline" className="rounded text-[11px]">{p.status}</Badge>
             <span className="text-xs text-muted-foreground">
-              {p.id} · {p.episodeId}
+              {p.patientCode ? `PID ${p.patientCode}` : "PID —"}
+              {p.episodeId ? ` · ${p.episodeId}` : ""}
             </span>
             {fp && (
               <span className="text-xs text-muted-foreground">FP {fp}</span>

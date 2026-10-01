@@ -11,15 +11,24 @@ import ScabiesEncounter from "@/pages/Encounter";
 import AntenatalEncounter from "@/pages/AntenatalEncounter";
 import WellBabyEncounter from "@/pages/WellBabyEncounter";
 import MalnutritionEncounter from "@/pages/MalnutritionEncounter";
+import FamilyPlanningEncounter from "@/pages/FamilyPlanningEncounter";
 import SchoolHealth, { SchoolHealthVisit } from "@/pages/SchoolHealth";
 import SuspectScreen from "@/pages/SuspectScreen";
-import Admin from "@/pages/Admin";
+// Admin module hidden for now — re-enable import + route when ready
+// import Admin from "@/pages/Admin";
 import Sync from "@/pages/Sync";
 
 const Guard = ({ children }) => {
-  const { user } = useStore();
+  const { user, authReady } = useStore();
   const loc = useLocation();
-  if (!user) return <Navigate to="/" replace state={{ from: loc.pathname }} />;
+  if (!authReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">
+        Restoring session…
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/" replace state={{ from: loc.pathname + loc.search }} />;
   return children;
 };
 
@@ -33,7 +42,14 @@ const EncounterRoute = () => {
 };
 
 function Shell() {
-  const { user } = useStore();
+  const { user, authReady } = useStore();
+  if (!authReady) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">
+        Restoring session…
+      </div>
+    );
+  }
   return (
     <Routes>
       <Route path="/" element={user ? <Navigate to="/patients" replace /> : <Login />} />
@@ -50,10 +66,12 @@ function Shell() {
       <Route path="/patients/:id/antenatal" element={<Guard><AntenatalEncounter /></Guard>} />
       <Route path="/patients/:id/wellbaby" element={<Guard><WellBabyEncounter /></Guard>} />
       <Route path="/patients/:id/malnutrition" element={<Guard><MalnutritionEncounter /></Guard>} />
+      <Route path="/patients/:id/familyplanning" element={<Guard><FamilyPlanningEncounter /></Guard>} />
       <Route path="/school-health" element={<Guard><SchoolHealth /></Guard>} />
       <Route path="/school-health/:visitId" element={<Guard><SchoolHealthVisit /></Guard>} />
       <Route path="/patients/:id/disease/:diseaseId" element={<Guard><PatientRecord /></Guard>} />
-      <Route path="/admin" element={<Guard><Admin /></Guard>} />
+      {/* Admin hidden for now — redirect to patients */}
+      <Route path="/admin" element={<Guard><Navigate to="/patients" replace /></Guard>} />
       <Route path="/sync" element={<Guard><Sync /></Guard>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

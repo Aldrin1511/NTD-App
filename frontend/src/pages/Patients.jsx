@@ -1,16 +1,32 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/Fields";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Avatar, isLostToFollowUp, dobFromAge, patientAgeLabel } from "@/components/Capture";
 import { GEO, DISEASES } from "@/mock/data";
-import { fmtDate, fmtDateTime } from "@/mock/specs";
-import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft } from "lucide-react";
+import { DISEASE_SPECS, fmtDate, fmtDateTime } from "@/mock/specs";
+import { Search, Plus, ChevronRight, Phone, SlidersHorizontal, ChevronLeft, Printer } from "lucide-react";
 import WhatsAppIcon from "@/components/WhatsAppIcon";
-import StatusChips, { PendingSyncChip, patientStatusRecords } from "@/components/StatusChips";
+import StatusChips, { PendingSyncChip, EncounterStatusChip, patientStatusRecords } from "@/components/StatusChips";
+import { buildVisitSummaryPrintHtml, buildPatientEncountersPrintHtml, featureRowsFromVisits, printHtmlDocument } from "@/lib/visitSummaryPrint";
+import { toast } from "sonner";
+import { MAL_ID, malLastVisitLabel } from "@/mock/malnutrition";
+import { ANTENATAL_ID } from "@/mock/antenatal";
+import { WELLBABY_ID } from "@/mock/wellbaby";
+import { FP_ID } from "@/mock/familyPlanning";
+import { useAppointmentDateGate } from "@/components/AppointmentDatePrompt";
+import { visitDay } from "@/lib/appointmentDate";
+
+const EXTRA_ROUTES = {
+  [ANTENATAL_ID]: "antenatal",
+  [WELLBABY_ID]: "wellbaby",
+  [MAL_ID]: "malnutrition",
+  [FP_ID]: "familyplanning",
+};
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -39,10 +55,11 @@ const shift = (period, anchor, dir) => {
 };
 
 export default function Patients() {
-  const { visiblePatients, users, encounters, settings, suspects } = useStore();
+  const { visiblePatients, users, encounters, settings, suspects, loadPatients, loadAppointments, syncPatientVisitPhi, syncPatientEpisodes, saveEncounter, branding, user, authSession } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
   const view = location.pathname.startsWith("/appointments") ? "encounter" : "patient";
+  const { gate: gateAppointmentDate, dialog: appointmentDateDialog } = useAppointmentDateGate();
   const [q, setQ] = useState("");
   const [village, setVillage] = useState("");
   const [status, setStatus] = useState("");
@@ -53,8 +70,30 @@ export default function Patients() {
   const [period, setPeriod] = useState("Day");
   const [anchor, setAnchor] = useState(iso(new Date()));
   const [custom, setCustom] = useState({ from: "", to: "" });
+  const [loadingPatients, setLoadingPatients] = useState(Boolean(authSession?.facilityId));
+  const [loadingAppointments, setLoadingAppointments] = useState(false);
+  const [printPreviewHtml, setPrintPreviewHtml] = useState("");
+  const [printingId, setPrintingId] = useState("");
   const all = visiblePatients();
   const activeFilters = [village, status, outcome, disease, clinician].filter(Boolean).length;
+
+  // Keep patient list in sync with portal-be (registered NTD patients).
+  useEffect(() => {
+    if (!authSession?.facilityId) {
+      setLoadingPatients(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingPatients(true);
+    loadPatients({ session: authSession })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingPatients(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authSession?.facilityId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const villages = [...new Set(Object.values(GEO).flatMap((d) => Object.values(d).flat()))];
   const outcomeOf = (p) => p.outcome || (isLostToFollowUp(p, encounters, settings) ? "Lost to follow-up" : "Open / in treatment");
@@ -62,12 +101,14 @@ export default function Patients() {
   const rows = useMemo(
     () => {
       const diseaseId = DISEASES.find((d) => d.name === disease)?.id;
+      const qq = q.trim().toLowerCase();
       return all.filter(
         (p) =>
-          (!q ||
-            p.name.toLowerCase().includes(q.toLowerCase()) ||
-            p.id.toLowerCase().includes(q.toLowerCase()) ||
-            p.episodeId.toLowerCase().includes(q.toLowerCase())) &&
+          (!qq ||
+            String(p.name || "").toLowerCase().includes(qq) ||
+            String(p.id || "").toLowerCase().includes(qq) ||
+            String(p.patientCode || "").toLowerCase().includes(qq) ||
+            String(p.episodeId || "").toLowerCase().includes(qq)) &&
           (!village || p.village === village) &&
           (!status || p.status === status) &&
           (!outcome || outcomeOf(p) === outcome) &&
@@ -89,6 +130,27 @@ export default function Patients() {
       .sort((a, b) => b.date.localeCompare(a.date)),
     [encounters, range.from, range.to, rows] // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  // Appointments page: fetch facility visits from HMIS for the selected period.
+  useEffect(() => {
+    if (view !== "encounter" || !authSession?.facilityId) {
+      setLoadingAppointments(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingAppointments(true);
+    loadAppointments({
+      from: period === "All" ? undefined : range.from,
+      to: period === "All" ? undefined : range.to,
+    })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingAppointments(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, authSession?.facilityId, range.from, range.to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <AppShell>
@@ -127,7 +189,7 @@ export default function Patients() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             data-testid="patient-search-input"
-            placeholder="Search name, patient ID or episode ID"
+            placeholder="Search name, patient ID or pathway ID"
             className="h-12 w-full min-w-0 bg-white pl-10 text-base"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -202,7 +264,13 @@ export default function Patients() {
 
       {view === "encounter" ? (
         <div className="space-y-3" data-testid="encounter-list">
-          {dayEncounters.length === 0 && (
+          {loadingAppointments && dayEncounters.length === 0 && (
+            <div className="rounded-lg border border-dashed border-border bg-white p-10 text-center">
+              <p className="font-semibold">Loading appointments…</p>
+              <p className="mt-1 text-sm text-muted-foreground">Fetching encounters for {range.label}.</p>
+            </div>
+          )}
+          {!loadingAppointments && dayEncounters.length === 0 && (
             <div className="rounded-lg border border-dashed border-border bg-white p-10 text-center">
               <p className="font-semibold">No encounters in this period</p>
               <p className="mt-1 text-sm text-muted-foreground">{range.label} · use the arrows or change the duration.</p>
@@ -211,10 +279,148 @@ export default function Patients() {
           {dayEncounters.map((e) => {
             const pt = all.find((x) => x.id === e.patientId);
             if (!pt) return null;
+            const visitSaved = e.pendingStart === false || e.complete === true || e.status === "Complete";
+            const openAppointment = () => {
+              const fromAppts = {
+                state: {
+                  from: "/appointments",
+                  episodeId: e.recordId || e.episodeId || "",
+                  visitId: e.visitId || e.id || "",
+                },
+              };
+              const go = async (resolvedDate) => {
+                if (
+                  !visitSaved &&
+                  resolvedDate &&
+                  visitDay(e.date) !== resolvedDate &&
+                  typeof saveEncounter === "function"
+                ) {
+                  try {
+                    await saveEncounter({ ...e, date: `${resolvedDate}T12:00:00` });
+                  } catch (err) {
+                    console.warn("Could not update appointment date", err);
+                  }
+                }
+                if (visitSaved && e.disease) {
+                  navigate(`/patients/${pt.id}/disease/${e.disease}`, fromAppts);
+                  return;
+                }
+                if (visitSaved) {
+                  navigate(`/patients/${pt.id}`, fromAppts);
+                  return;
+                }
+                const extraRoute = EXTRA_ROUTES[e.disease];
+                if (extraRoute) {
+                  const q = new URLSearchParams({
+                    enc: String(e.id || ""),
+                    fac: e.facility || "",
+                    vt: e.type || "",
+                    ref: e.referral || "No",
+                  });
+                  navigate(`/patients/${pt.id}/${extraRoute}?${q.toString()}`, fromAppts);
+                  return;
+                }
+                navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${encodeURIComponent(e.id)}`, fromAppts);
+              };
+              if (visitSaved) {
+                void go(visitDay(e.date));
+                return;
+              }
+              gateAppointmentDate(e.date, (resolvedDate) => {
+                void go(resolvedDate);
+              });
+            };
+            const printAppointment = async (ev) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (!visitSaved) {
+                toast.error("Complete the encounter before printing a visit summary");
+                return;
+              }
+              if (!e.disease) {
+                toast.error("No disease linked to this appointment");
+                return;
+              }
+              if (printingId) return;
+              setPrintingId(e.id);
+              try {
+                let visitForPrint = { ...e, data: e.data || {} };
+                try {
+                  const loaded = await syncPatientVisitPhi?.(pt.id, {
+                    visits: [
+                      {
+                        visitId: e.visitId || e.id,
+                        recordId: e.recordId || e.episodeId || "",
+                        disease: e.disease,
+                        featureCode: e.featureCode,
+                        encounterId: e.encounterId,
+                      },
+                    ],
+                  });
+                  const hit = (loaded || []).find((r) => String(r.visitId) === String(e.visitId || e.id));
+                  if (hit?.form) {
+                    visitForPrint = {
+                      ...visitForPrint,
+                      data: { ...(visitForPrint.data || {}), ...hit.form },
+                      diagnosis: hit.form.diagnosis || visitForPrint.diagnosis || "",
+                      outcome: hit.form.outcome || visitForPrint.outcome || "",
+                    };
+                  }
+                } catch (err) {
+                  console.warn("appointment print PHI sync failed", err);
+                }
+
+                const diseaseName = DISEASE_SPECS[e.disease]?.name || e.disease;
+                const apptRaw = e.date || "";
+                const apptDate = (() => {
+                  if (!apptRaw) return "";
+                  const d = new Date(/T/.test(apptRaw) ? apptRaw : `${apptRaw}T12:00:00`);
+                  if (Number.isNaN(d.getTime())) return fmtDate(apptRaw);
+                  const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+                  return `${d.getDate()} ${m} ${d.getFullYear()}`;
+                })();
+                const clinicAddress = [
+                  branding?.address,
+                  [pt.village, pt.district, pt.province].filter(Boolean).join(", "),
+                ]
+                  .filter(Boolean)
+                  .join(branding?.address ? " · " : "");
+                const featureRows = featureRowsFromVisits([visitForPrint]);
+                const html = buildVisitSummaryPrintHtml({
+                  patient: {
+                    ...pt,
+                    ageLabel: patientAgeLabel(pt),
+                  },
+                  clinic: {
+                    name: branding?.clientName || e.facility || pt.facility || "Clinic",
+                    phone: branding?.phone || "",
+                    email: branding?.email || "",
+                    address: clinicAddress,
+                  },
+                  clinician: {
+                    name: e.worker || user?.name || "",
+                    specialty: user?.role || user?.specialty || "",
+                    appointmentDate: apptDate,
+                  },
+                  diseaseName,
+                  episode: {
+                    diagnosis: visitForPrint.diagnosis || e.diagnosis || "",
+                    outcome: visitForPrint.outcome || e.outcome || "",
+                  },
+                  episodeCaption: [diseaseName, e.type].filter(Boolean).join(" · "),
+                  episodeDates: e.date ? `Visit: ${fmtDateTime(e.date)}` : "",
+                  featureRows,
+                  worker: e.worker || user?.name || "",
+                });
+                setPrintPreviewHtml(html);
+              } finally {
+                setPrintingId("");
+              }
+            };
             return (
               <div key={e.id} role="button" tabIndex={0} data-testid={`encounter-row-${e.id}`}
-                onClick={() => navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${e.id}`)}
-                onKeyDown={(ev) => ev.key === "Enter" && navigate(`/patients/${pt.id}/encounter/${e.disease}?enc=${e.id}`)}
+                onClick={openAppointment}
+                onKeyDown={(ev) => ev.key === "Enter" && openAppointment()}
                 className="flex cursor-pointer items-center gap-4 rounded-lg border border-border bg-white p-4 transition-colors hover:border-primary">
                 <Avatar patient={pt} testid={`encounter-photo-${e.id}`} />
                 <div className="min-w-0 flex-1">
@@ -239,7 +445,20 @@ export default function Patients() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  <EncounterStatusChip encounter={e} testid={`encounter-workflow-status-${e.id}`} />
                   <PendingSyncChip pending={!e.synced} testid={`encounter-pending-${e.id}`} />
+                  <button
+                    type="button"
+                    data-testid={`encounter-print-btn-${e.id}`}
+                    onClick={printAppointment}
+                    onMouseDown={(ev) => ev.stopPropagation()}
+                    disabled={printingId === e.id}
+                    className="grid h-11 w-11 place-items-center rounded-md border border-border text-primary transition-colors hover:bg-secondary disabled:opacity-50"
+                    title="Print visit summary"
+                    aria-label="Print visit summary"
+                  >
+                    <Printer className="h-4 w-4" />
+                  </button>
                   {pt.phone && (
                     <>
                       <a
@@ -272,7 +491,13 @@ export default function Patients() {
         </div>
       ) : (
       <div className="stagger space-y-3" data-testid="patient-list">
-        {rows.length === 0 && (
+        {loadingPatients && rows.length === 0 && (
+          <div className="rounded-lg border border-dashed border-border bg-white p-10 text-center">
+            <p className="font-semibold">Loading patients…</p>
+            <p className="mt-1 text-sm text-muted-foreground">Fetching registered patients for your facility.</p>
+          </div>
+        )}
+        {!loadingPatients && rows.length === 0 && (
           <div className="rounded-lg border border-dashed border-border bg-white p-10 text-center">
             <p className="font-semibold">No patients match your filters</p>
             <p className="mt-1 text-sm text-muted-foreground">Adjust the filters or register a new patient.</p>
@@ -282,14 +507,135 @@ export default function Patients() {
           const encs = encounters.filter((e) => e.patientId === p.id);
           const unsynced = encs.some((e) => !e.synced);
           const lastEnc = [...encs].sort((a, b) => b.date.localeCompare(a.date))[0];
+          const lastEncounterDate =
+            lastEnc?.date ||
+            p.lastEncounter ||
+            [...(p.diseaseStatuses || [])]
+              .map((s) => s.lastEncounter)
+              .filter(Boolean)
+              .sort((a, b) => String(b).localeCompare(String(a)))[0] ||
+            "";
+          const hasEncounterToPrint = Boolean(lastEncounterDate) || encs.length > 0;
           const statusRecords = patientStatusRecords(p, encounters, settings);
+          const printPatientEncounters = async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (!hasEncounterToPrint || printingId) return;
+            setPrintingId(p.id);
+            try {
+              let visits = encs
+                .filter((e) => e.pendingStart === false || e.complete === true || e.status === "Complete" || (e.data && Object.keys(e.data).length))
+                .slice();
+              // Include all non-pending if we have any; otherwise all local encounters
+              if (!visits.length) {
+                visits = encs.filter((e) => !e.pendingStart).slice();
+              }
+              if (!visits.length) {
+                visits = encs.slice();
+              }
+
+              try {
+                const episodeRows = (await syncPatientEpisodes?.(p.id, { force: true })) || [];
+                const phiVisits = (episodeRows.length ? episodeRows : visits).map((row) => ({
+                  visitId: row.visitId || row.id,
+                  recordId: row.recordId || row.episodeId || "",
+                  disease: row.disease,
+                  featureCode: row.featureCode,
+                  encounterId: row.encounterId,
+                }));
+                const loaded = await syncPatientVisitPhi?.(p.id, { visits: phiVisits });
+                const byVisit = new Map((loaded || []).map((r) => [String(r.visitId), r]));
+                // Prefer hydrated list: merge PHI onto local encounters, keep chronological order
+                const base = (episodeRows.length
+                  ? episodeRows.map((row) => {
+                      const id = String(row.visitId || row.id);
+                      const local = encs.find((e) => String(e.id) === id || String(e.visitId) === id);
+                      return {
+                        ...(local || {}),
+                        id,
+                        visitId: id,
+                        patientId: p.id,
+                        recordId: row.recordId || local?.recordId || "",
+                        disease: String(row.disease || local?.disease || "").toLowerCase(),
+                        facility: row.locationName || local?.facility || "",
+                        type: row.visitType || local?.type || "",
+                        worker: row.clinicianName || local?.worker || "",
+                        date: local?.date || (row.visitDate ? `${String(row.visitDate).slice(0, 10)}T12:00:00` : new Date().toISOString()),
+                        diagnosis: local?.diagnosis || "",
+                        outcome: local?.outcome || "",
+                        data: local?.data || {},
+                        pendingStart: row.pendingStart === true,
+                        complete: row.pendingStart === false,
+                      };
+                    })
+                  : visits
+                ).filter((e) => !e.pendingStart || e.complete || (e.data && Object.keys(e.data).length));
+
+                visits = (base.length ? base : visits).map((e) => {
+                  const hit = byVisit.get(String(e.visitId || e.id));
+                  if (!hit?.form) return e;
+                  return {
+                    ...e,
+                    data: { ...(e.data || {}), ...hit.form },
+                    diagnosis: hit.form.diagnosis || e.diagnosis || "",
+                    outcome: hit.form.outcome || e.outcome || "",
+                  };
+                });
+              } catch (err) {
+                console.warn("patient print PHI sync failed", err);
+              }
+
+              visits = [...visits].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+              if (!visits.length) {
+                toast.error("No encounters to print for this patient");
+                return;
+              }
+
+              const clinicAddress = [
+                branding?.address,
+                [p.village, p.district, p.province].filter(Boolean).join(", "),
+              ]
+                .filter(Boolean)
+                .join(branding?.address ? " · " : "");
+
+              const html = buildPatientEncountersPrintHtml({
+                patient: {
+                  ...p,
+                  ageLabel: patientAgeLabel(p),
+                },
+                clinic: {
+                  name: branding?.clientName || p.facility || lastEnc?.facility || "Clinic",
+                  phone: branding?.phone || "",
+                  email: branding?.email || "",
+                  address: clinicAddress,
+                },
+                clinician: {
+                  name: user?.name || lastEnc?.worker || "",
+                  specialty: user?.role || user?.specialty || "",
+                },
+                encounters: visits.map((e) => ({
+                  diseaseName: DISEASE_SPECS[e.disease]?.name || e.disease || "Encounter",
+                  encounter: {
+                    ...e,
+                    date: e.date ? fmtDateTime(e.date) : "",
+                  },
+                  featureRows: featureRowsFromVisits([e]),
+                  caption: [e.type, e.facility].filter(Boolean).join(" · "),
+                })),
+                worker: user?.name || "",
+              });
+              setPrintPreviewHtml(html);
+            } finally {
+              setPrintingId("");
+            }
+          };
           return (
             <div
               key={p.id}
               role="button"
               tabIndex={0}
-              onClick={() => navigate(`/patients/${p.id}`)}
-              onKeyDown={(e) => e.key === "Enter" && navigate(`/patients/${p.id}`)}
+              onClick={() => navigate(`/patients/${p.id}`, { state: { from: "/patients" } })}
+              onKeyDown={(e) => e.key === "Enter" && navigate(`/patients/${p.id}`, { state: { from: "/patients" } })}
               data-testid={`patient-card-${p.id}`}
               className="flex cursor-pointer items-center gap-4 rounded-lg border border-border bg-white p-4 transition-colors hover:border-primary sm:p-5"
             >
@@ -303,14 +649,31 @@ export default function Patients() {
                   />
                 </div>
                 <p className="mt-1 truncate text-sm text-muted-foreground">
-                  {patientAgeLabel(p)} · {p.sex} · {p.weight}kg · Date of Birth {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {p.village}, {p.district}
+                  {patientAgeLabel(p)} · {p.sex || p.gender || "—"} · {p.weight != null && p.weight !== "" ? `${p.weight}kg` : "—"} · Date of Birth {fmtDate(p.dob || dobFromAge(p.age, p.createdAt))} · Blood {p.bloodGroup || "Unknown"} · {[p.village, p.district].filter(Boolean).join(", ") || "—"}
                 </p>
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {p.id} · Last encounter {lastEnc ? fmtDate(lastEnc.date) : "—"}
+                  {p.patientCode ? `PID ${p.patientCode}` : "PID —"} · Last encounter{" "}
+                  {(() => {
+                    const malVisits = encs.filter((e) => e.disease === MAL_ID);
+                    if (malVisits.length) return malLastVisitLabel(malVisits);
+                    return lastEncounterDate ? fmtDate(lastEncounterDate) : "—";
+                  })()}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <PendingSyncChip pending={unsynced} testid={`patient-pending-${p.id}`} />
+                <button
+                  type="button"
+                  data-testid={`patient-print-btn-${p.id}`}
+                  onClick={printPatientEncounters}
+                  onMouseDown={(ev) => ev.stopPropagation()}
+                  disabled={!hasEncounterToPrint || printingId === p.id}
+                  className="grid h-11 w-11 place-items-center rounded-md border border-border text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  title={hasEncounterToPrint ? "Print all encounters" : "No encounters to print"}
+                  aria-label={hasEncounterToPrint ? "Print all encounters" : "No encounters to print"}
+                >
+                  <Printer className="h-4 w-4" />
+                </button>
                 {p.phone && (
                   <>
                     <a
@@ -342,6 +705,49 @@ export default function Patients() {
         })}
       </div>
       )}
+
+      <Dialog open={Boolean(printPreviewHtml)} onOpenChange={(o) => !o && setPrintPreviewHtml("")}>
+        <DialogContent
+          className="flex max-h-[92vh] w-[min(960px,calc(100vw-1rem))] max-w-[min(960px,calc(100vw-1rem))] flex-col gap-3 overflow-hidden p-3 sm:p-4"
+          data-testid="visit-summary-preview-dialog"
+        >
+          <DialogHeader className="shrink-0 space-y-1 pr-8">
+            <DialogTitle className="font-head text-lg sm:text-xl">Visit Summary</DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
+            {printPreviewHtml ? (
+              <iframe
+                title="Visit summary preview"
+                srcDoc={printPreviewHtml}
+                className="h-[min(70vh,720px)] w-full border-0 bg-white"
+                data-testid="visit-summary-preview-frame"
+              />
+            ) : null}
+          </div>
+          <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-row sm:justify-end">
+            <Button
+              variant="outline"
+              className="h-11 w-full sm:w-auto"
+              data-testid="visit-summary-preview-close"
+              onClick={() => setPrintPreviewHtml("")}
+            >
+              Close
+            </Button>
+            <Button
+              className="h-11 w-full sm:w-auto"
+              data-testid="visit-summary-preview-print"
+              onClick={() => {
+                if (!printHtmlDocument(printPreviewHtml)) {
+                  toast.error("Could not prepare print view");
+                }
+              }}
+            >
+              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {appointmentDateDialog}
     </AppShell>
   );
 }

@@ -5,3 +5,9 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Python virtualenv (never commit)
+backend/venv/
+venv/
+__pycache__/
+*.pyc

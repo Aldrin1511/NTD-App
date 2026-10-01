@@ -60,7 +60,7 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
     canvas.getContext("2d").drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
     onChange([dataUrl, ...photos].slice(0, max));
-    toast.success("Photo captured — stored on the device until sync");
+    toast.success("Photo captured — will upload with the record on Save / Sync");
     closeCamera();
   };
 
@@ -71,12 +71,12 @@ export const PhotoCapture = ({ label = "Photos", photos = [], onChange, testid =
       r.onload = () => onChange([r.result, ...photos].slice(0, max));
       r.readAsDataURL(f);
     });
-    if (files.length) toast.success(`${files.length} photo(s) attached — stored on the device until sync`);
+    if (files.length) toast.success(`${files.length} photo(s) attached — will upload with the record on Save / Sync`);
     e.target.value = "";
   };
 
   return (
-    <Field label={label} hint="Camera or gallery. Photos are held on the device and upload with the record.">
+    <Field label={label} hint="Camera or gallery. Photos stay on this device until Save (online) or Sync (offline).">
       <div className="flex flex-wrap gap-3">
         {photos.map((src, i) => (
           <div key={i} className="relative h-24 w-24 overflow-hidden rounded-md border border-border">
@@ -309,22 +309,31 @@ export const fingerprintSummary = (value) => {
   return `${keys.length} finger${keys.length === 1 ? "" : "s"}`;
 };
 
-export const Avatar = ({ patient, size = "h-12 w-12", testid }) =>
-  patient.photo ? (
-    <img
-      src={patient.photo}
-      alt={patient.name}
-      data-testid={testid}
-      className={`${size} shrink-0 rounded-md border border-border object-cover`}
-    />
-  ) : (
+export const Avatar = ({ patient, size = "h-12 w-12", testid }) => {
+  const name = String(patient?.name || "").trim();
+  const photo = typeof patient?.photo === "string" ? patient.photo.trim() : "";
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt={name || "Patient"}
+        data-testid={testid}
+        className={`${size} shrink-0 rounded-md border border-border object-cover`}
+      />
+    );
+  }
+  const initials = name
+    ? name.split(/\s+/).map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    : "?";
+  return (
     <span
       data-testid={testid}
       className={`${size} grid shrink-0 place-items-center rounded-md bg-secondary font-head text-base font-bold text-primary`}
     >
-      {patient.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+      {initials}
     </span>
   );
+};
 
 export const isLostToFollowUp = (patient, encounters, settings) => {
   if (!patient.treatmentEnd || patient.outcome) return false;

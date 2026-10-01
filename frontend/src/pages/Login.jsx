@@ -2,115 +2,115 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import { TextField, AlertPanel } from "@/components/Fields";
+import { TextField } from "@/components/Fields";
 import { toast } from "sonner";
-import { ShieldCheck, WifiOff, Layers, Activity } from "lucide-react";
 
 export default function Login() {
-  const { login, branding } = useStore();
+  const { login } = useStore();
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
+  const [busy, setBusy] = useState(false);
   const set = (k) => (v) => setForm({ ...form, [k]: v });
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const u = login(form.email, form.password);
-    if (!u) return toast.error("Invalid email or password");
-    toast.success(`Welcome back, ${u.name}`);
-    navigate("/patients");
+    if (busy) return;
+    setBusy(true);
+    try {
+      const u = await login(form.email, form.password);
+      if (!u) {
+        toast.error("Invalid email or password");
+        return;
+      }
+      toast.success(`Welcome back, ${u.name}`, { duration: 2000 });
+      navigate("/patients");
+    } catch (err) {
+      toast.error(err?.message || "Invalid email or password");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
-      <div className="trias-grid relative hidden flex-col justify-between bg-primary p-10 text-white lg:flex xl:p-14">
-        <div className="flex items-center gap-3">
-          <span className="grid h-11 w-11 place-items-center rounded-md bg-white font-head text-lg font-extrabold text-primary">
-            T
-          </span>
-          <span>
-            <span className="block font-head text-lg font-extrabold leading-none">TRIAS</span>
-            <span className="text-[11px] font-medium text-white/70">Skin &amp; NTD</span>
-          </span>
+    <div
+      className="relative flex min-h-screen flex-col items-center justify-center bg-primary px-4 py-8 sm:px-6"
+      style={{
+        backgroundImage: "url(/login/login-bg.png)",
+        backgroundRepeat: "no-repeat",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+      data-testid="login-page"
+    >
+      <div
+        className="flex w-full max-w-5xl overflow-hidden rounded-[2.5rem] bg-white shadow-xl lg:h-[min(70vh,640px)]"
+        data-testid="login-card"
+      >
+        {/* Apex LHS image panel */}
+        <div className="relative hidden w-[45%] shrink-0 bg-[#e4ecff] p-4 lg:block">
+          <div
+            className="flex h-full flex-col-reverse items-center rounded-[1.75rem] bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: "url(/login/login-image.png)" }}
+            data-testid="login-lhs-image"
+          >
+            <span className="p-4 text-sm font-medium text-white drop-shadow">
+              Contact your relationship manager
+            </span>
+          </div>
         </div>
 
-        <div className="stagger max-w-xl">
-          <h1 className="font-head text-4xl font-extrabold leading-[1.05] tracking-tight xl:text-5xl">
-            Scabies case &amp; household management, built for the field.
-          </h1>
-          <p className="mt-6 max-w-md text-base leading-relaxed text-white/80">
-            Clinical care, household control and NTD surveillance in one offline-first record — designed for community
-            health workers in Papua New Guinea.
-          </p>
-          <ul className="mt-10 space-y-4 text-sm">
-            {[
-              [WifiOff, "Works fully offline; syncs when a signal returns"],
-              [Layers, "Patient → Episode → Encounter → Household model"],
-              [Activity, "Weight-based dosing and automatic clinical alerts"],
-              [ShieldCheck, "Role-based access to your own, facility or all data"],
-            ].map(([Icon, text]) => (
-              <li key={text} className="flex items-start gap-3">
-                <Icon className="mt-0.5 h-5 w-5 shrink-0 text-white/80" />
-                <span className="text-white/85">{text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <p className="text-xs text-white/50">{branding.clientName}</p>
-      </div>
-
-      <div className="flex items-center justify-center bg-background px-5 py-12 sm:px-10">
-        <div className="w-full max-w-md">
-          <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <span className="grid h-10 w-10 place-items-center rounded-md bg-primary font-head font-extrabold text-white">
+        {/* RHS form — same credentials flow as before */}
+        <div className="flex min-w-0 flex-1 flex-col px-6 py-8 sm:px-10 lg:px-12 lg:py-10">
+          <div className="mb-6 flex justify-center lg:hidden">
+            <span className="grid h-10 w-10 place-items-center rounded-md bg-primary font-head text-lg font-extrabold text-white">
               T
             </span>
-            <span className="font-head text-lg font-extrabold tracking-tight">TRIAS Skin &amp; NTD</span>
           </div>
 
-          <h2 className="font-head text-3xl font-bold tracking-tight">Sign in</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Use your programme credentials to open your caseload. Accounts are created by your programme administrator.
+          <div className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center">
+            <h1 className="font-head text-3xl font-bold tracking-tight sm:text-4xl">Login</h1>
+            <p className="mt-2 text-sm font-semibold text-foreground/80">
+              Welcome back! Please enter your details.
+            </p>
+
+            <form onSubmit={submit} className="mt-8 space-y-5">
+              <TextField
+                label="User Id / Email"
+                type="email"
+                testid="login-email"
+                placeholder="Enter Email"
+                value={form.email}
+                onChange={(e) => set("email")(e.target.value)}
+              />
+              <TextField
+                label="Password"
+                type="password"
+                testid="login-password"
+                placeholder="Enter Password"
+                value={form.password}
+                onChange={(e) => set("password")(e.target.value)}
+              />
+              <Button
+                type="submit"
+                className="h-12 w-full text-base"
+                data-testid="login-submit"
+                disabled={busy}
+              >
+                {busy ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
+          </div>
+
+          <p className="mt-8 text-center text-xs text-muted-foreground">
+            By logging in you agree to{" "}
+            <span className="font-medium text-primary">Privacy policy | Terms &amp; Conditions</span>
           </p>
-
-          <form onSubmit={submit} className="mt-6 space-y-5">
-            <TextField
-              label="Email"
-              type="email"
-              testid="login-email"
-              placeholder="you@trias.health"
-              value={form.email}
-              onChange={(e) => set("email")(e.target.value)}
-            />
-            <TextField
-              label="Password"
-              type="password"
-              testid="login-password"
-              placeholder="••••••••"
-              value={form.password}
-              onChange={(e) => set("password")(e.target.value)}
-            />
-            <Button type="submit" className="h-12 w-full text-base" data-testid="login-submit">
-              Sign in
-            </Button>
-          </form>
-
-          <div className="mt-6">
-            <AlertPanel level="info" title="Prototype demo accounts" testid="demo-accounts">
-              <ul className="space-y-1">
-                <li>
-                  <b>Admin (all data):</b> admin@trias.health / Admin@123
-                </li>
-                <li>
-                  <b>Health worker (own data):</b> joseph@trias.health / Health@123
-                </li>
-                <li>
-                  <b>Supervisor (facility, view only):</b> mary@trias.health / Health@123
-                </li>
-              </ul>
-            </AlertPanel>
-          </div>
         </div>
+      </div>
+
+      <div className="mt-6 flex items-center gap-2 text-sm text-white" data-testid="login-powered-by">
+        <span>Powered by</span>
+        <img src="/login/trias.png" alt="TRIAS" className="h-5 w-auto object-contain" />
       </div>
     </div>
   );
