@@ -355,7 +355,7 @@ export const ConditionEntryShell = ({ patient, patientEncs, sidebarDiseases, tit
   );
 };
 
-export const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpen = true, open: openProp, onOpenChange }) => {
+export const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpen = true, open: openProp, onOpenChange, className = "" }) => {
   const [uncontrolled, setUncontrolled] = useState(defaultOpen);
   const controlled = openProp !== undefined;
   const open = controlled ? openProp : uncontrolled;
@@ -365,7 +365,7 @@ export const FeatureCard = ({ title, count, lastAt, children, testid, defaultOpe
     onOpenChange?.(value);
   };
   return (
-    <section className="rounded-lg border border-border bg-white" data-testid={testid}>
+    <section className={`rounded-lg border border-border bg-white ${className}`.trim()} data-testid={testid}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 px-4 py-3 text-left" data-testid={`${testid}-toggle`}>
         <h2 className="min-w-0 flex-1 font-head text-lg font-semibold">{title}</h2>
         {lastAt && <span className="truncate text-xs font-medium text-muted-foreground">{lastAt}</span>}

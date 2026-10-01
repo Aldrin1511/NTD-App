@@ -12,17 +12,19 @@ import {
   ANTENATAL_ID, ANTENATAL_NAME, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
   FETAL_VITALS, FETAL_VITAL_CHOICES, vitalStatus, ANC_LAB_TESTS, RADIOLOGY_SCANS,
   ANC_IMMUNIZATION, immunizationDueDate, isImmunizationOverdue,
+  ancEntryVisibleVaccines, ancEntryDropdownVaccines,
   BABY_OUTCOMES, BABY_SEX, BABY_COMPLICATIONS, BABY_OUTCOME_ALERTS, ANC_OUTCOMES, resolveDating, trimesterLabel, newAncEpisodeId,
   isAncEpisodeClosed, babyName, MEDICAL_HISTORY_OPTIONS, RISK_FACTOR_OPTIONS, autoRiskFactors,
   YES_NO, PRESENT_ABSENT, DYSMENORRHEA, MENSTRUAL_FLOW, CYCLE_REGULARITY,
   DELIVERY_TYPES, DELIVERY_COMPLICATIONS, FETUS_COUNTS, FAMILY_PLANNING, POSTPARTUM_COMPLICATIONS,
   DELIVERY_OUTCOMES, PHYSICAL_EXAM_FIELDS, COUNT_0_10, obstetricCountValue,
 } from "@/mock/antenatal";
+import { WELLBABY_ID } from "@/mock/wellbaby";
 import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
 import AntenatalMedications from "@/components/AntenatalMedications";
-import { GEO } from "@/mock/data";
 import { toast } from "sonner";
 import { persistIntegratedEncounter, useExtraPhiAutosave, useLoadEncounterPhi } from "@/lib/extraEncounterSync";
+import { mergeEncounterFormData } from "@/lib/phiMap";
 import { ExpandAllButton } from "@/components/EntryKit";
 import { ArrowLeft, Check, Save, ChevronDown, CircleCheck, Plus, Trash2 } from "lucide-react";
 
@@ -55,10 +57,53 @@ const empty = () => ({
   outcome: { status: "Active" },
 });
 
-/** Normalize ANC form shape (init + PHI hydrate). */
-const normalizeAncForm = (partial = {}, { seedPrior = false, patientEncs = [] } = {}) => {
+/** True when a section object has at least one meaningful value (not just empty keys). */
+const ancSectionHasContent = (obj) => {
+  if (!obj || typeof obj !== "object") return false;
+  return Object.keys(obj).some((k) => {
+    if (String(k).startsWith("_")) return false;
+    const v = obj[k];
+    if (v === undefined || v === null || v === "") return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return ancSectionHasContent(v);
+    return true;
+  });
+};
+
+/**
+ * Latest prior ANC visit with case/history content — same episode when known.
+ * Follow-up visits are created blank (`data: {}`) so we seed episode-level fields from here.
+ */
+const findPriorAncSeed = (patientEncs = [], { excludeId, episodeId } = {}) => {
+  const exclude = String(excludeId || "");
+  const ep = String(episodeId || "");
+  const pool = (patientEncs || []).filter((e) => {
+    if (e.disease !== ANTENATAL_ID) return false;
+    const id = String(e.id || "");
+    const visitId = String(e.visitId || "");
+    if (exclude && (id === exclude || visitId === exclude)) return false;
+    if (ep) {
+      const eEp = String(e.episodeId || e.recordId || "");
+      if (eEp && eEp !== ep) return false;
+    }
+    return (
+      ancSectionHasContent(e.data?.caseDetails) ||
+      (e.data?.history?.medical || []).length > 0 ||
+      (e.data?.history?.riskFactors || []).length > 0 ||
+      ancSectionHasContent(e.data?.history?.menstrual) ||
+      ancSectionHasContent(e.data?.immunization)
+    );
+  });
+  return pool.sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
+};
+
+/** Normalize ANC form shape (init + PHI hydrate). Seeds case/history from prior visit when blank. */
+const normalizeAncForm = (
+  partial = {},
+  { seedPrior = false, patientEncs = [], excludeId, episodeId } = {},
+) => {
   const priorAnc = seedPrior
-    ? [...patientEncs.filter((e) => e.disease === ANTENATAL_ID)].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
+    ? findPriorAncSeed(patientEncs, { excludeId, episodeId })
     : null;
   const priorHist = priorAnc?.data?.history || {};
   const base = { ...empty(), ...partial };
@@ -71,8 +116,18 @@ const normalizeAncForm = (partial = {}, { seedPrior = false, patientEncs = [] } 
     riskFactorsDismissed: seededDismissed,
     menstrual: { ...(priorHist.menstrual || {}), ...(base.history?.menstrual || {}) },
   };
-  if (seedPrior && priorAnc?.data?.caseDetails && !Object.keys(partial.caseDetails || {}).length) {
+  // Episode-level case details: carry into blank follow-ups (and blank PHI hydrates).
+  if (seedPrior && priorAnc?.data?.caseDetails && !ancSectionHasContent(partial.caseDetails)) {
     base.caseDetails = { ...priorAnc.data.caseDetails };
+  }
+  // Immunization is cumulative across the episode — seed when this visit has none yet.
+  if (
+    seedPrior &&
+    priorAnc?.data?.immunization &&
+    ancSectionHasContent(priorAnc.data.immunization) &&
+    !ancSectionHasContent(partial.immunization)
+  ) {
+    base.immunization = { ...priorAnc.data.immunization };
   }
   base.vitals = { mother: {}, fetal: {}, ...(base.vitals || {}) };
   base.posology = { ...(base.posology || {}) };
@@ -265,17 +320,34 @@ export default function AntenatalEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, registerBaby, online, ensureCatalogueDrug } = useStore();
+  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, registerBaby, startEpisode, online, ensureCatalogueDrug } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.disease === ANTENATAL_ID && (e.id === params.get("enc") || e.visitId === params.get("enc")));
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
+  const excludeId = existing?.id || existing?.visitId || params.get("enc") || "";
+  const episodeId = existing?.episodeId || existing?.recordId || "";
+  const seedOpts = useMemo(
+    () => ({
+      seedPrior: true,
+      patientEncs,
+      excludeId,
+      episodeId,
+    }),
+    [patientEncs, excludeId, episodeId],
+  );
 
   const [d, setD] = useState(() =>
-    normalizeAncForm(existing?.data || {}, { seedPrior: !existing, patientEncs }),
+    normalizeAncForm(existing?.data || {}, {
+      seedPrior: true,
+      patientEncs,
+      excludeId,
+      episodeId,
+    }),
   );
   const [open, setOpen] = useState({});
   const [savedAt, setSavedAt] = useState(existing ? "loaded from record" : "");
   const [labOther, setLabOther] = useState("");
+  const [revealedVacIds, setRevealedVacIds] = useState([]);
   const [registeringBabyIdx, setRegisteringBabyIdx] = useState(null);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "ANC visit";
@@ -295,10 +367,46 @@ export default function AntenatalEncounter() {
     existing,
     online,
     loadEncounterPhi,
-    applyForm: (form) => normalizeAncForm({ ...(existing?.data || {}), ...form }),
+    applyForm: (form) =>
+      normalizeAncForm(mergeEncounterFormData(existing?.data || {}, form || {}), seedOpts),
     setD,
     setSavedAt,
   });
+
+  // Follow-ups start as `data: {}`. If prior visit PHI arrives later (dashboard sync),
+  // seed case/history once while this visit is still blank.
+  useEffect(() => {
+    setD((s) => {
+      if (ancSectionHasContent(s.caseDetails)) return s;
+      const prior = findPriorAncSeed(patientEncs, { excludeId, episodeId });
+      if (!prior?.data?.caseDetails || !ancSectionHasContent(prior.data.caseDetails)) return s;
+      return normalizeAncForm(s, seedOpts);
+    });
+  }, [patientEncs, excludeId, episodeId, seedOpts]);
+
+  // If the prior visit is still empty locally but has an HMIS encounter, hydrate its PHI
+  // so follow-up seeding can pick up Case details after a refresh.
+  useEffect(() => {
+    if (!online || typeof loadEncounterPhi !== "function") return undefined;
+    const prior = [...patientEncs]
+      .filter((e) => {
+        if (e.disease !== ANTENATAL_ID) return false;
+        const idKey = String(e.id || "");
+        const visitKey = String(e.visitId || "");
+        if (excludeId && (idKey === excludeId || visitKey === excludeId)) return false;
+        return true;
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    if (!prior?.encounterId || !prior?.patientId) return undefined;
+    if (ancSectionHasContent(prior.data?.caseDetails)) return undefined;
+    let cancelled = false;
+    loadEncounterPhi(prior).catch((err) => {
+      if (!cancelled) console.warn("prior ANC PHI load failed", err);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [online, loadEncounterPhi, patientEncs, excludeId]);
 
   const dating = useMemo(() => resolveDating(d.caseDetails), [d.caseDetails]);
   const facilityHasLab = useMemo(() => facilities.some((f) => f.name === facility && f.hasLab), [facilities, facility]);
@@ -358,6 +466,17 @@ export default function AntenatalEncounter() {
       return { ...s, history: { ...s.history, menstrual: { ...s.history.menstrual, lmp: d.caseDetails.lmp } } };
     });
   }, [d.caseDetails.lmp]);
+
+  // Delivery date TextField shows today when empty, but that display-only value never
+  // reached state/payload — Well Baby then had no DOB/delivery date from ANC.
+  useEffect(() => {
+    setD((s) => {
+      const del = s.delivery || {};
+      if (del.date || del.deliveryDate) return s;
+      const today = localISODate();
+      return { ...s, delivery: { ...del, date: today, deliveryDate: today } };
+    });
+  }, []);
 
   // Ensure every catalogue test is listed (named section + at least one result row)
   useEffect(() => {
@@ -567,6 +686,40 @@ export default function AntenatalEncounter() {
     queueSectionDiff("immunization", prev, next);
   };
 
+  const asOf = existing?.date ? new Date(existing.date) : new Date();
+  const lmpForVac = d.caseDetails?.lmp || "";
+  const visibleVaccines = ancEntryVisibleVaccines(
+    ANC_IMMUNIZATION,
+    d.immunization,
+    firstContact,
+    lmpForVac,
+    revealedVacIds,
+    asOf,
+  );
+  const dropdownScheduleDoses = ancEntryDropdownVaccines(
+    ANC_IMMUNIZATION,
+    d.immunization,
+    firstContact,
+    lmpForVac,
+    revealedVacIds,
+    asOf,
+  );
+  const addVacOptions = [
+    ...dropdownScheduleDoses.map((v) => ({ value: `sch:${v.id}`, label: v.name })),
+    ...vaccineDrugs
+      .filter((v) => !d.immunization[v.name] && !ANC_IMMUNIZATION.some((s) => s.name === v.name || s.id === v.name))
+      .map((v) => ({ value: `drug:${v.name}`, label: v.name })),
+  ];
+  const onAddVaccine = (raw) => {
+    if (!raw) return;
+    if (raw.startsWith("sch:")) {
+      const idKey = raw.slice(4);
+      setRevealedVacIds((prev) => (prev.includes(idKey) ? prev : [...prev, idKey]));
+      return;
+    }
+    if (raw.startsWith("drug:")) setVaccineDate(raw.slice(5), localISODate());
+  };
+
   const catalogueDrugs = (settings.drugs || []).filter((x) => x.type !== "Vaccine" && x.form !== "Vaccine");
 
   const babies = d.delivery.babies || [];
@@ -574,6 +727,13 @@ export default function AntenatalEncounter() {
   const setDelivery = (patch) => {
     const prev = d.delivery || {};
     const next = { ...prev, ...patch };
+    if (patch.date != null && patch.deliveryDate == null) next.deliveryDate = patch.date;
+    if (patch.deliveryDate != null && patch.date == null) next.date = patch.deliveryDate;
+    if (!next.date && !next.deliveryDate) {
+      const today = localISODate();
+      next.date = today;
+      next.deliveryDate = today;
+    }
     setD((s) => ({ ...s, delivery: next }));
     queueSectionDiff("delivery", prev, next);
   };
@@ -607,38 +767,110 @@ export default function AntenatalEncounter() {
       return toast.error("Select Male or Female before registering the baby");
     }
     const name = babyName(p.name, i, babies.length);
+    const deliveryDate = d.delivery.date || d.delivery.deliveryDate || localISODate();
+    const deliveryType = d.delivery.type || d.delivery.mode || "";
     setRegisteringBabyIdx(i);
     try {
+      const deliverySnapshot = {
+        motherId: p.id,
+        motherName: p.name,
+        deliveryDate,
+        date: deliveryDate,
+        mode: deliveryType,
+        type: deliveryType,
+        place: d.delivery.outcome || d.delivery.place || "",
+        outcome: d.delivery.outcome || d.delivery.place || "",
+        complication: d.delivery.complication || "",
+        fetuses: d.delivery.fetuses || String(babies.length || 1),
+        fetusLengths: d.delivery.fetusLengths || {},
+        familyPlanning: d.delivery.familyPlanning || "",
+        postpartum: d.delivery.postpartum || [],
+        babies: d.delivery.babies || [],
+      };
       const rec = await registerBaby(p.id, {
         name,
         sex: b.sex,
-        dob: d.delivery.date || d.delivery.deliveryDate || localISODate(),
+        dob: deliveryDate,
         weight: b.weightKg ? Number(b.weightKg) : "",
         height: b.lengthCm ? Number(b.lengthCm) : "",
         deliveryDetails: {
           ...b,
-          motherId: p.id,
-          motherName: p.name,
-          deliveryDate: d.delivery.date || d.delivery.deliveryDate,
-          date: d.delivery.date || d.delivery.deliveryDate,
-          mode: d.delivery.type || d.delivery.mode,
-          type: d.delivery.type || d.delivery.mode,
-          place: d.delivery.outcome || d.delivery.place,
-          outcome: d.delivery.outcome || d.delivery.place,
-          complication: d.delivery.complication,
-          fetuses: d.delivery.fetuses,
-          fetusLengths: d.delivery.fetusLengths,
-          familyPlanning: d.delivery.familyPlanning,
-          postpartum: d.delivery.postpartum || [],
-          babies: d.delivery.babies || [],
+          ...deliverySnapshot,
         },
       });
       if (!rec?.id) throw new Error("Baby registration failed");
+
+      const linkedBabies = (d.delivery.babies || []).map((baby, idx) =>
+        idx === i
+          ? { ...baby, registered: true, patientId: rec.id, patientCode: rec.patientCode || "" }
+          : baby
+      );
+      const wbDelivery = {
+        ...deliverySnapshot,
+        babies: linkedBabies,
+      };
       updBaby(i, { registered: true, patientId: rec.id, patientCode: rec.patientCode || "" });
+
+      let episodeStarted = false;
+      try {
+        const locationId =
+          existing?.locationId
+          || facilities.find((f) => f.name === (facility || p.facility))?.id
+          || "";
+        const ep = await startEpisode({
+          patientId: rec.id,
+          disease: WELLBABY_ID,
+          visitType: "Well baby visit",
+          locationId,
+          locationName: facility || p.facility || "",
+          visitDate: deliveryDate,
+          referral: "No",
+          clinicianName: user?.name,
+        });
+        const draft = ep?.encounter;
+        if (draft?.id) {
+          await persistIntegratedEncounter({
+            online,
+            saveEncounter,
+            upsertEncounterPhiField,
+            finalizeEncounterPhi,
+            existing: draft,
+            payload: {
+              id: draft.id,
+              patientId: rec.id,
+              episodeId: draft.recordId || draft.episodeId,
+              disease: WELLBABY_ID,
+              facility: facility || p.facility || "",
+              worker: user?.name,
+              type: "Well baby visit",
+              diagnosis: "Newborn",
+              outcome: "Active",
+              data: {
+                delivery: wbDelivery,
+                complaints: [],
+                allergy: ["No known allergy"],
+                growth: { standard: "WHO", mode: "Percentile", measures: {} },
+                immunization: {},
+                milestones: {},
+                notes: [""],
+                drugs: [],
+                posology: {},
+                medCourses: {},
+                lab: [],
+              },
+            },
+          });
+        }
+        episodeStarted = true;
+      } catch (epErr) {
+        console.warn("Well Baby episode after baby register failed", epErr);
+        toast.error(epErr?.message || "Baby registered, but Well Baby episode could not be started");
+      }
+
       toast.success(
         rec.localOnly
-          ? `${name} queued for sync · will register in Apex when online`
-          : `${name} registered · ${rec.patientCode || rec.id}`
+          ? `${name} queued for sync${episodeStarted ? " · Well Baby episode started" : ""}`
+          : `${name} registered · ${rec.patientCode || rec.id}${episodeStarted ? " · Well Baby episode started" : ""}`
       );
     } catch (err) {
       toast.error(err?.message || "Failed to register baby");
@@ -655,10 +887,22 @@ export default function AntenatalEncounter() {
         const openEp = patientEncs
           .filter((e) => e.disease === ANTENATAL_ID)
           .sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-        if (openEp && !isAncEpisodeClosed(openEp.outcome)) return openEp.episodeId || openEp.recordId;
+        const openStatus =
+          openEp?.outcome ||
+          openEp?.data?.outcome?.status ||
+          openEp?.data?.outcome ||
+          "";
+        if (openEp && !isAncEpisodeClosed(openStatus)) return openEp.episodeId || openEp.recordId;
         return newAncEpisodeId();
       })();
     const outcome = d.outcome?.status || "Active";
+    const deliveryDate =
+      d.delivery?.date || d.delivery?.deliveryDate || localISODate();
+    const delivery = {
+      ...(d.delivery || {}),
+      date: deliveryDate,
+      deliveryDate,
+    };
     const { canWritePhi } = await persistIntegratedEncounter({
       online,
       saveEncounter,
@@ -678,6 +922,7 @@ export default function AntenatalEncounter() {
         outcome,
         data: {
           ...d,
+          delivery,
           history: { ...d.history, riskFactors: d.history.riskFactors || [], riskFactorsDismissed: d.history.riskFactorsDismissed || [] },
           caseDetails: { ...d.caseDetails, firstContact },
         },
@@ -1029,8 +1274,11 @@ export default function AntenatalEncounter() {
       done: Object.values(d.immunization).some((x) => x?.given),
       body: (
         <div className="space-y-2" data-testid="anc-immunization">
+          <p className="text-xs text-muted-foreground">
+            TT 1 always; other doses from 1 week before due — else add below.
+          </p>
           <ImmunizationEntryCards
-            vaccines={ANC_IMMUNIZATION}
+            vaccines={visibleVaccines}
             records={d.immunization}
             getDue={(item) => immunizationDueDate(item, firstContact, d.caseDetails.lmp)}
             getOverdue={(item, rec) => isImmunizationOverdue(item, rec, firstContact, d.caseDetails.lmp)}
@@ -1038,9 +1286,19 @@ export default function AntenatalEncounter() {
             onSetDate={setVaccineDate}
             testidPrefix="anc-vac"
           />
-          {vaccineDrugs.length > 0 && (
+          {addVacOptions.length > 0 && (
             <Field label="Add additional vaccine from drug list">
-              <SelectField label="" options={vaccineDrugs.map((v) => v.name).filter((n) => !d.immunization[n])} value="" onChange={(n) => n && setVaccineDate(n, localISODate())} testid="anc-vac-add" placeholder="Choose a vaccine…" />
+              <SelectField
+                label=""
+                options={addVacOptions.map((o) => o.label)}
+                value=""
+                onChange={(label) => {
+                  const hit = addVacOptions.find((o) => o.label === label);
+                  if (hit) onAddVaccine(hit.value);
+                }}
+                testid="anc-vac-add"
+                placeholder="Choose a vaccine…"
+              />
             </Field>
           )}
         </div>
@@ -1069,7 +1327,13 @@ export default function AntenatalEncounter() {
       body: (
         <div className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <TextField label="Delivery date" type="date" value={d.delivery.date || ""} onChange={(e) => setDelivery({ date: e.target.value })} testid="anc-del-date" />
+            <TextField
+              label="Delivery date"
+              type="date"
+              value={d.delivery.date || d.delivery.deliveryDate || localISODate()}
+              onChange={(e) => setDelivery({ date: e.target.value, deliveryDate: e.target.value })}
+              testid="anc-del-date"
+            />
             <SelectField label="Delivery type" options={DELIVERY_TYPES} value={d.delivery.type || d.delivery.mode || ""} onChange={(v) => setDelivery({ type: v, mode: v })} testid="anc-del-type" />
           </div>
           <ChoiceChips label="Delivery complication(s)" options={DELIVERY_COMPLICATIONS} value={d.delivery.complication || ""} onChange={(v) => setDelivery({ complication: v })} testid="anc-del-complication" />
@@ -1109,6 +1373,8 @@ export default function AntenatalEncounter() {
                 <TextField label="Birth Weight (kgs)" type="number" step="0.1" value={b.weightKg} onChange={(e) => updBaby(i, { weightKg: e.target.value })} testid={`anc-baby-weight-${i}`} />
                 <TextField label="Birth Length (cms)" type="number" step="0.1" value={b.lengthCm} onChange={(e) => updBaby(i, { lengthCm: e.target.value })} testid={`anc-baby-length-${i}`} />
                 <TextField label="Head Circumference (cms)" type="number" step="0.1" value={b.headCm || ""} onChange={(e) => updBaby(i, { headCm: e.target.value })} testid={`anc-baby-hc-${i}`} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
                 <TextField label="APGAR 1 min" type="number" value={b.apgar1} onChange={(e) => updBaby(i, { apgar1: e.target.value })} testid={`anc-baby-apgar1-${i}`} />
                 <TextField label="APGAR 5 min" type="number" value={b.apgar5} onChange={(e) => updBaby(i, { apgar5: e.target.value })} testid={`anc-baby-apgar5-${i}`} />
                 <TextField label="APGAR 10 min" type="number" value={b.apgar10 || ""} onChange={(e) => updBaby(i, { apgar10: e.target.value })} testid={`anc-baby-apgar10-${i}`} />
@@ -1180,45 +1446,6 @@ export default function AntenatalEncounter() {
             testid="anc-outcome"
           />
           {isAncEpisodeClosed(d.outcome.status) && <AlertPanel level="review" title="This closes the ANC episode" testid="anc-outcome-close">Saving with this outcome closes the episode.</AlertPanel>}
-          {d.outcome.status === "Discharged" && (
-            <div className="grid gap-4 sm:grid-cols-3">
-              <SelectField
-                label="Province"
-                options={Object.keys(GEO)}
-                value={d.outcome.province || ""}
-                onChange={(v) => {
-                  const prev = d.outcome || {};
-                  const next = { ...prev, province: v, district: "" };
-                  setD((s) => ({ ...s, outcome: next }));
-                  queueSectionDiff("outcome", prev, next);
-                }}
-                testid="anc-outcome-province"
-              />
-              <SelectField
-                label="District"
-                options={Object.keys(GEO[d.outcome.province] || {})}
-                value={d.outcome.district || ""}
-                onChange={(v) => {
-                  const prev = d.outcome || {};
-                  const next = { ...prev, district: v };
-                  setD((s) => ({ ...s, outcome: next }));
-                  queueSectionDiff("outcome", prev, next);
-                }}
-                testid="anc-outcome-district"
-              />
-              <TextField
-                label="Facility"
-                value={d.outcome.facility || ""}
-                onChange={(e) => {
-                  const prev = d.outcome || {};
-                  const next = { ...prev, facility: e.target.value };
-                  setD((s) => ({ ...s, outcome: next }));
-                  queueSectionDiff("outcome", prev, next);
-                }}
-                testid="anc-outcome-facility"
-              />
-            </div>
-          )}
           <AreaField
             label="Outcome notes"
             rows={2}

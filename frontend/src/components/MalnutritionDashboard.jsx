@@ -82,10 +82,23 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
 
   const cd = admission?.data?.caseDetails || {};
   const displayStatus = malDisplayStatus(visits);
-  const lastRecordedStatus = visits[visits.length - 1]?.outcome || visits[visits.length - 1]?.data?.outcome?.status || "Active";
+  const visitOutcomeStatus = (v) =>
+    v?.outcome ||
+    v?.data?.outcome?.status ||
+    (typeof v?.data?.outcome === "string" ? v.data.outcome : "") ||
+    "";
+  const lastRecordedStatus = visitOutcomeStatus(visits[visits.length - 1]) || "Active";
   const closed = isMalEpisodeClosed(lastRecordedStatus);
-  const recordedOutcome = [...visits].reverse().find((v) => isMalEpisodeClosed(v.outcome || v.data?.outcome?.status));
-  const outcome = recordedOutcome?.data?.outcome || (recordedOutcome ? { status: recordedOutcome.outcome } : null);
+  const outcomeVisit =
+    [...visits].reverse().find((v) => isMalEpisodeClosed(visitOutcomeStatus(v))) ||
+    [...visits].reverse().find((v) => visitOutcomeStatus(v)) ||
+    visits[visits.length - 1];
+  const outcome =
+    (outcomeVisit?.data?.outcome && typeof outcomeVisit.data.outcome === "object"
+      ? outcomeVisit.data.outcome
+      : null) ||
+    (visitOutcomeStatus(outcomeVisit) ? { status: visitOutcomeStatus(outcomeVisit) } : null) ||
+    { status: displayStatus };
   const grade = malColorGrade(cd.admissionType);
   const weeksVisited = malWeeksVisited(visits);
   const latestWeek = malLatestWeek(visits);
@@ -125,8 +138,7 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
 
   const latestData = latest?.data || {};
 
-  const showOutcome = !!(outcome || /^lost to follow/i.test(displayStatus));
-  const featureKeys = ["case", "progress", showOutcome && "outcome"].filter(Boolean);
+  const featureKeys = ["case", "progress", "outcome"];
   const allExpanded = featureKeys.length > 0 && featureKeys.every((k) => featureOpen[k] !== false);
   const cardOpen = (k) => featureOpen[k] !== false;
   const setCardOpen = (k) => (next) => setFeatureOpen((o) => ({ ...o, [k]: next }));
@@ -368,23 +380,47 @@ export default function MalnutritionDashboard({ patient, encounters, canEdit, on
         </div>
       </FeatureCard>
 
-      {showOutcome && (
-        <FeatureCard title="Case outcome" testid="mal-feat-outcome" open={cardOpen("outcome")} onOpenChange={setCardOpen("outcome")}>
-          <p className="text-sm font-semibold">{outcome?.status || displayStatus}</p>
-          {outcome?.status === "Recovered / Discharged" && (
-            <p className="text-sm text-muted-foreground">
-              Final wt {outcome.finalWeight || "—"} kg · MUAC {outcome.finalMuac || "—"} cm · Oedema {outcome.finalOedema || "—"} · {outcome.finalClinical || ""}
-            </p>
+      <FeatureCard title="Case outcome" testid="mal-feat-outcome" open={cardOpen("outcome")} onOpenChange={setCardOpen("outcome")}>
+        <div className="flex items-start justify-between gap-2 rounded-md border border-border bg-white px-3 py-2.5" data-testid="mal-outcome-card">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-sm font-semibold leading-snug">{outcome?.status || displayStatus}</p>
+            {outcome?.status === "Recovered / Discharged" && (
+              <p className="text-sm text-muted-foreground">
+                Final wt {outcome.finalWeight || "—"} kg · MUAC {outcome.finalMuac || "—"} cm · Oedema {outcome.finalOedema || "—"}
+                {outcome.finalClinical ? ` · ${outcome.finalClinical}` : ""}
+              </p>
+            )}
+            {outcome?.status === "Transferred" && (
+              <p className="text-sm text-muted-foreground">
+                To {[outcome.facility, outcome.district, outcome.province].filter(Boolean).join(", ") || "—"}
+              </p>
+            )}
+            {outcome?.note && <p className="text-sm text-muted-foreground">{outcome.note}</p>}
+            {!isMalEpisodeClosed(outcome?.status) && /^lost to follow/i.test(displayStatus) && (
+              <p className="text-sm text-muted-foreground">
+                No visit for more than 1 week since {latest ? fmtDate(latest.date) : "—"}. Record outcome to close the case.
+              </p>
+            )}
+            {outcomeVisit && (
+              <p className="text-xs font-semibold leading-snug text-primary">
+                {fmtDateTime(outcomeVisit.date)} · {outcomeVisit.worker || "—"} · {outcomeVisit.type || "—"}
+              </p>
+            )}
+          </div>
+          {canEdit && onEdit && outcomeVisit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-primary"
+              onClick={() => onEdit(outcomeVisit)}
+              data-testid={`mal-outcome-edit-${outcomeVisit.id}`}
+              aria-label="Edit case outcome"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
           )}
-          {outcome?.status === "Transferred" && (
-            <p className="text-sm text-muted-foreground">To {[outcome.facility, outcome.district, outcome.province].filter(Boolean).join(", ")}</p>
-          )}
-          {outcome?.note && <p className="text-sm text-muted-foreground">{outcome.note}</p>}
-          {!outcome && /^lost to follow/i.test(displayStatus) && (
-            <p className="mt-1 text-sm text-muted-foreground">No visit for more than 1 week since {latest ? fmtDate(latest.date) : "—"}. Record outcome to close the case.</p>
-          )}
-        </FeatureCard>
-      )}
+        </div>
+      </FeatureCard>
     </div>
   );
 }

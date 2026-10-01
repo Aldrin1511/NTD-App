@@ -1048,10 +1048,18 @@ export const localISODate = (d = new Date()) => {
 
 export const visitLabel = (n) => `${n} visit${n === 1 ? "" : "s"}`;
 
+/** Coerce string or `{ status }` / `{ outcome }` shapes (ANC / malnutrition). */
+export const coerceOutcome = (value) => {
+  if (value == null || value === "") return "";
+  if (typeof value === "object") {
+    return String(value.status ?? value.outcome ?? "").trim();
+  }
+  return String(value).trim();
+};
+
 /** Closing outcomes end the episode so the next encounter starts episode 2+. */
 export const isEpisodeClosed = (outcome) => {
-  const s = String(outcome || "")
-    .trim()
+  const s = coerceOutcome(outcome)
     .toLowerCase()
     .replace(/[\u2010-\u2015\u2212]/g, "-")
     .replace(/\s+/g, " ");
@@ -1063,13 +1071,17 @@ export const isEpisodeClosed = (outcome) => {
   if (/lost to follow/.test(s)) return true;
   // Ruled-out disease: "No Leprosy", "No Scabies", "No Yaws", "No Buruli Ulcer", "No Lymphatic Filariasis"
   if (/^no\s+(scabies|yaws|leprosy|buruli|lymphatic)/.test(s)) return true;
+  // Ante Natal: Discharged, Maternal Death
+  if (/^(discharged|maternal death)$/.test(s)) return true;
+  // Malnutrition: Recovered / Discharged, Transferred, Died, Refused treatment, Other
+  if (/recovered|transferred|^died$|refused treatment|^other$/.test(s)) return true;
   return false;
 };
 
 /** Prefer a closing / recorded outcome if top-level and data diverge after an edit. */
 export const encounterOutcome = (e) => {
-  const top = String(e?.outcome || "").trim();
-  const data = String(e?.data?.outcome || "").trim();
+  const top = coerceOutcome(e?.outcome);
+  const data = coerceOutcome(e?.data?.outcome);
   if (isEpisodeClosed(top)) return top;
   if (isEpisodeClosed(data)) return data;
   if (top && top !== "Open" && top !== "Active") return top;

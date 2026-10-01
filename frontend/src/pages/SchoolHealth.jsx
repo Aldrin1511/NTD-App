@@ -15,6 +15,8 @@ import {
   SCHOOL_FORM_TYPES,
   PHYSICAL_EXAM_ITEMS,
   SCHOOL_IMMUNIZATION,
+  DEFAULT_SCHOOLS,
+  DEFAULT_DONORS,
   childStatus,
   emptyChild,
   formatChildAge,
@@ -26,6 +28,7 @@ import {
   visitImmunTotals,
 } from "@/mock/schoolhealth";
 import { useFormDirty } from "@/lib/useFormDirty";
+import { buildSchoolHealthVisitPrintHtml } from "@/lib/visitSummaryPrint";
 import { toast } from "sonner";
 import {
   ArrowLeft, Plus, Users, Pencil, Trash2, FileText, Printer, School,
@@ -58,8 +61,8 @@ export default function SchoolHealth() {
   const [fFormType, setFFormType] = useState("");
   const canEdit = user?.canEdit;
 
-  const schoolNames = (schools || []).map((s) => s.name);
-  const donorNames = (donors || []).map((d) => d.name);
+  const schoolNames = (schools?.length ? schools : DEFAULT_SCHOOLS).map((s) => s.name);
+  const donorNames = (donors?.length ? donors : DEFAULT_DONORS).map((d) => d.name);
   const creatorOptions = useMemo(() => {
     const names = new Set((users || []).map((u) => u.name).filter(Boolean));
     (schoolHealth || []).forEach((visit) => { if (visit.worker) names.add(visit.worker); });
@@ -93,7 +96,9 @@ export default function SchoolHealth() {
   }, [schoolHealth, q, fProvince, fDistrict, fSchool, fDonor, fCreatedBy, fFormType]);
 
   const onPickSchool = (name) => {
-    const master = (schools || []).find((s) => s.name === name);
+    const master =
+      (schools || []).find((s) => s.name === name)
+      || DEFAULT_SCHOOLS.find((s) => s.name === name);
     if (master) {
       setV((s) => ({
         ...s,
@@ -109,12 +114,23 @@ export default function SchoolHealth() {
     if (!v.province || !v.school) return toast.error("Province and School are required");
     if (!v.formType) return toast.error("Form type is required");
     try {
-      const schoolMaster = (schools || []).find((s) => s.name === v.school);
-      const donorMaster = (donors || []).find((d) => d.name === v.donor);
+      const schoolMaster =
+        (schools || []).find((s) => s.name === v.school)
+        || DEFAULT_SCHOOLS.find((s) => s.name === v.school);
+      const donorMaster =
+        (donors || []).find((d) => d.name === v.donor)
+        || DEFAULT_DONORS.find((d) => d.name === v.donor);
+      // Never send local seed ids (SCHL-*/DON-*) — API expects UUID masters or name-only
+      const schoolId = schoolMaster?.id && !/^(SCHL|DON)-/i.test(schoolMaster.id)
+        ? schoolMaster.id
+        : undefined;
+      const donorId = donorMaster?.id && !/^(SCHL|DON)-/i.test(donorMaster.id)
+        ? donorMaster.id
+        : undefined;
       const rec = await addSchoolVisit({
         ...v,
-        schoolId: schoolMaster?.id,
-        donorId: donorMaster?.id,
+        schoolId,
+        donorId,
         worker: user?.name || "",
         status: "New",
       });
@@ -235,8 +251,8 @@ export default function SchoolHealth() {
             <SelectField label="Province" options={Object.keys(GEO)} value={v.province || ""} onChange={(x) => setV({ ...v, province: x, district: "", village: "" })} testid="sh-province" />
             <SelectField label="District" options={Object.keys(GEO[v.province] || {})} value={v.district || ""} onChange={(x) => setV({ ...v, district: x, village: "" })} testid="sh-district" />
             <SelectField label="Village" options={(GEO[v.province]?.[v.district]) || []} value={v.village || ""} onChange={(x) => setV({ ...v, village: x })} testid="sh-village" />
-            <SelectField label="School" options={schoolNames} value={v.school || ""} onChange={onPickSchool} testid="sh-school" hint="Admin → Masters → Schools" />
-            <SelectField label="Donor" options={donorNames} value={v.donor || ""} onChange={(x) => setV({ ...v, donor: x })} testid="sh-donor" hint="Admin → Masters → Donors" />
+            <SelectField label="School" options={schoolNames} value={v.school || ""} onChange={onPickSchool} testid="sh-school" hint="Sample schools available until Admin → Masters → Schools is set up" />
+            <SelectField label="Donor" options={donorNames} value={v.donor || ""} onChange={(x) => setV({ ...v, donor: x })} testid="sh-donor" hint="Sample donors available until Admin → Masters → Donors is set up" />
             <ChoiceChips label="Form type" options={SCHOOL_FORM_TYPES} value={v.formType || ""} onChange={(ft) => setV({ ...v, formType: ft })} testid="sh-form-type" />
             <TextField label="Date" type="date" value={v.date} onChange={(e) => setV({ ...v, date: e.target.value })} testid="sh-date" />
             <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
@@ -260,7 +276,7 @@ export function SchoolHealthVisit() {
   const navigate = useNavigate();
   const {
     schoolHealth, saveSchoolChild, removeSchoolChild, saveSchoolReport,
-    updateSchoolVisit, user, users, online, refreshSchoolVisit,
+    updateSchoolVisit, user, users, online, refreshSchoolVisit, branding,
   } = useStore();
   const visit = schoolHealth.find((v) => v.id === visitId);
   const canEdit = user?.canEdit;
@@ -272,6 +288,7 @@ export function SchoolHealthVisit() {
   const [photos, setPhotos] = useState([]);
   const [conductedQ, setConductedQ] = useState("");
   const [offlineInfo, setOfflineInfo] = useState(null);
+  const [printPreviewHtml, setPrintPreviewHtml] = useState("");
 
   useEffect(() => {
     if (!visitId || !refreshSchoolVisit) return;
@@ -296,6 +313,70 @@ export function SchoolHealthVisit() {
   const mCount = children.filter((c) => c.gender === "Male").length;
   const fCount = children.filter((c) => c.gender === "Female").length;
   const totals = visitImmunTotals(visit);
+
+  const printVisitSummary = () => {
+    const clinicAddress = [
+      branding?.address,
+      [visit.village, visit.district, visit.province].filter(Boolean).join(", "),
+    ]
+      .filter(Boolean)
+      .join(branding?.address ? " · " : "");
+    const html = buildSchoolHealthVisitPrintHtml({
+      visit: {
+        ...visit,
+        children: children.map((c) => ({
+          ...c,
+          _negativeExam: negativeExamItems(c).join(", "),
+          _immunSummary: immunSummary(c),
+          _ntd: isSuspectedNtd(c),
+          _ageLabel: formatChildAge(c),
+        })),
+      },
+      clinic: {
+        name: branding?.clientName || "School Health",
+        phone: branding?.phone || "",
+        email: branding?.email || "",
+        address: clinicAddress,
+      },
+      totals,
+      status,
+      worker: user?.name || visit.worker || "",
+    });
+    setPrintPreviewHtml(html);
+  };
+
+  const printPreviewDialog = (
+    <Dialog open={Boolean(printPreviewHtml)} onOpenChange={(o) => !o && setPrintPreviewHtml("")}>
+      <DialogContent
+        className="flex max-h-[92vh] w-[min(960px,calc(100vw-1rem))] max-w-[min(960px,calc(100vw-1rem))] flex-col gap-3 overflow-hidden p-3 sm:p-4"
+        data-testid="shv-visit-summary-preview-dialog"
+      >
+        <DialogHeader className="shrink-0 space-y-1 pr-8">
+          <DialogTitle className="font-head text-lg sm:text-xl">Visit Summary</DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
+          {printPreviewHtml ? (
+            <iframe
+              title="School health visit summary preview"
+              srcDoc={printPreviewHtml}
+              className="h-[min(70vh,720px)] w-full border-0 bg-white"
+              data-testid="shv-visit-summary-preview-frame"
+            />
+          ) : null}
+        </div>
+        <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button
+            variant="outline"
+            className="h-11 w-full sm:w-auto"
+            data-testid="shv-visit-summary-preview-close"
+            onClick={() => setPrintPreviewHtml("")}
+          >
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 
   const userNames = (users || []).map((u) => u.name).filter(Boolean).sort();
   const conductedOptions = userNames.filter((n) => {
@@ -394,11 +475,18 @@ export function SchoolHealthVisit() {
             <ArrowLeft className="mr-2 h-4 w-4" /> Back
           </Button>
           <div className="ml-auto flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11"
+              data-testid="shv-report-print-summary"
+              title="Print visit summary"
+              onClick={printVisitSummary}
+            >
+              <Printer className="mr-2 h-4 w-4" /> Print
+            </Button>
             <Button variant="outline" className="h-11" onClick={() => saveRep(false)} data-testid="shv-report-save">Save report</Button>
             <Button className="h-11" onClick={() => saveRep(true)} data-testid="shv-report-complete">Save &amp; mark Completed</Button>
-            <Button className="h-11" variant="secondary" onClick={() => window.print()} data-testid="shv-report-print">
-              <Printer className="mr-2 h-4 w-4" /> Print / Save PDF
-            </Button>
           </div>
         </div>
         <div className="mx-auto max-w-3xl space-y-4 rounded-lg border border-border bg-white p-6" data-testid="shv-report">
@@ -464,14 +552,6 @@ export function SchoolHealthVisit() {
             <div><dt className="text-[11px] text-muted-foreground">Suspected NTD</dt><dd className="text-lg font-semibold">{totals.ntd}</dd></div>
           </dl>
 
-          {photos.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="shv-report-photos">
-              {photos.map((ph, i) => (
-                <img key={i} src={ph} alt={`Visit photo ${i + 1}`} className="h-28 w-full rounded-md border border-border object-cover" />
-              ))}
-            </div>
-          )}
-
           <h2 className="font-head text-lg font-semibold">Children screened</h2>
           <table className="mt-2 w-full text-xs">
             <thead>
@@ -500,6 +580,7 @@ export function SchoolHealthVisit() {
             </tbody>
           </table>
         </div>
+        {printPreviewDialog}
       </AppShell>
     );
   }
@@ -518,6 +599,16 @@ export function SchoolHealthVisit() {
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Badge variant="outline" className={`rounded h-9 px-3 text-sm font-semibold ${visitStatusBadgeCls(status)}`} data-testid="shv-status">{status}</Badge>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11"
+            data-testid="shv-print-visit-summary"
+            title="Print visit summary"
+            onClick={printVisitSummary}
+          >
+            <Printer className="mr-2 h-4 w-4" /> Print
+          </Button>
           <Button className="h-11" onClick={openReport} data-testid="shv-create-report">
             <FileText className="mr-2 h-4 w-4" />{" "}
             {(visit.report?.completed
@@ -812,6 +903,8 @@ export function SchoolHealthVisit() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {printPreviewDialog}
     </AppShell>
   );
 }

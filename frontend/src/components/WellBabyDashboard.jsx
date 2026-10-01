@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { AlertPanel } from "@/components/Fields";
 import { FeatureCard, ExpandAllButton } from "@/components/EntryKit";
 import { GrowthReview } from "@/components/GrowthChart";
@@ -140,7 +141,6 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
     "immunization",
     "milestones",
     complaintVisits.length > 0 && "complaints",
-    allergyVisits.length > 0 && "allergy",
     drugVisits.length > 0 && "drugs",
     labVisits.length > 0 && "lab",
     noteVisits.length > 0 && "notes",
@@ -148,11 +148,27 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
   const allExpanded = featureKeys.length > 0 && featureKeys.every((k) => featureOpen[k] !== false);
   const cardOpen = (k) => featureOpen[k] !== false;
   const setCardOpen = (k) => (next) => setFeatureOpen((o) => ({ ...o, [k]: next }));
+  const latestAllergy = allergyVisits[0];
+  const allergyList = [...new Set(allergyVisits.flatMap((v) => v.data?.allergy || []).filter(Boolean))];
 
   return (
     <div className="space-y-4" data-testid="wb-dashboard">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-secondary px-4 py-3">
-        <div><p className="font-semibold">Well Baby record · {visits.length} visit{visits.length === 1 ? "" : "s"}</p><p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">Current age {formatAgeYMD(dob) || "—"} · DOB {dob ? fmtDate(dob) : "—"}</p></div>
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-semibold">Well Baby record · {visits.length} visit{visits.length === 1 ? "" : "s"}</p>
+            {allergyList.length > 0 && (
+              <Badge
+                variant="outline"
+                className="rounded-full border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-900"
+                data-testid="wb-allergy-badge"
+              >
+                Allergy · {allergyList.length}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">Current age {formatAgeYMD(dob) || "—"} · DOB {dob ? fmtDate(dob) : "—"}</p>
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           <ExpandAllButton
             allExpanded={allExpanded}
@@ -184,6 +200,36 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
           {canEdit && <Button className="h-10" onClick={() => onAddVisit?.(episode)} data-testid="wb-add-visit"><Plus className="mr-1 h-4 w-4" /> Encounter</Button>}
         </div>
       </div>
+
+      {allergyList.length > 0 && (
+        <section className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3" data-testid="wb-feat-allergy">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="text-sm font-semibold text-amber-900">Allergy · {allergyList.length}</p>
+            {canEdit && onEdit && latestAllergy && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-amber-800 hover:bg-amber-100"
+                onClick={() => onEdit(latestAllergy, WB_SECTIONS.allergy)}
+                data-testid={`wb-allergy-edit-${latestAllergy.id}`}
+                aria-label="Edit allergy"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          <ul className="mt-2 flex flex-wrap gap-2" data-testid="wb-allergy-list">
+            {allergyList.map((a) => (
+              <li
+                key={a}
+                className="rounded-md border border-amber-200 bg-white px-2.5 py-1 text-sm font-semibold text-amber-900"
+              >
+                {a}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {deliveryVisits.length > 0 && (
         <FeatureCard title="Delivery details" count={deliveryVisits.length} lastAt={fmtDateTime(deliveryVisits[0].date)} testid="wb-feat-delivery" open={cardOpen("delivery")} onOpenChange={setCardOpen("delivery")}>
@@ -253,17 +299,6 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
         </FeatureCard>
       )}
 
-      {allergyVisits.length > 0 && (
-        <FeatureCard title="Allergy" count={allergyVisits.length} lastAt={fmtDateTime(allergyVisits[0].date)} testid="wb-feat-allergy" open={cardOpen("allergy")} onOpenChange={setCardOpen("allergy")}>
-          {allergyVisits.map((v) => (
-            <div key={v.id} className="border-b border-border/60 py-2 last:border-0" data-testid={`wb-allergy-visit-${v.id}`}>
-              <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={WB_SECTIONS.allergy} testid={`wb-allergy-edit-${v.id}`} />
-              <p className="text-sm text-muted-foreground">{(v.data.allergy || []).join(" · ") || "—"}</p>
-            </div>
-          ))}
-        </FeatureCard>
-      )}
-
       {drugVisits.length > 0 && (
         <FeatureCard title="Medications" count={drugVisits.reduce((n, v) => n + (v.data?.drugs?.length || 0), 0)} lastAt={fmtDateTime(drugVisits[0].date)} testid="wb-feat-drugs" open={cardOpen("drugs")} onOpenChange={setCardOpen("drugs")}>
           <div className="space-y-4">
@@ -286,7 +321,7 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
                       <tbody>
                         {rows.map((row, i) => (
                           <Fragment key={`${row.name}-${i}`}>
-                            <tr className="border-b border-border/70 align-top">
+                            <tr className={`${row.advice ? "" : "border-b border-border/70 "}align-top`}>
                               <td className="py-2 pr-3 font-medium">{row.name}</td>
                               <td className="py-2 pr-3">{row.dosage}</td>
                               <td className="py-2 pr-3">{row.frequency}</td>
@@ -294,8 +329,10 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
                               <td className="py-2">{row.qualifier || "—"}</td>
                             </tr>
                             {row.advice ? (
-                              <tr className="border-b border-border/40">
-                                <td colSpan={5} className="pb-2 text-xs text-muted-foreground">{row.advice}</td>
+                              <tr className="border-b border-border/70">
+                                <td colSpan={5} className="pb-2.5 pt-0 text-xs text-muted-foreground">
+                                  <span className="font-semibold">Advice:</span> {row.advice}
+                                </td>
                               </tr>
                             ) : null}
                           </Fragment>

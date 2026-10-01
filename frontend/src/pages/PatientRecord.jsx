@@ -1109,7 +1109,7 @@ const MedsSummary = ({ rows }) => {
           <tbody>
             {rows.map((row, i) => (
               <Fragment key={`${row.name || row.dosage}-${i}`}>
-                <tr className="border-b border-border/70 align-top">
+                <tr className={`${row.advice ? "" : "border-b border-border/70 "}align-top`}>
                   <td className="py-2 pr-3 font-medium">{row.name}</td>
                   <td className="py-2 pr-3">{row.dosage}</td>
                   <td className="py-2 pr-3">{row.frequency}</td>
@@ -1117,8 +1117,8 @@ const MedsSummary = ({ rows }) => {
                   <td className="py-2">{row.qualifier || "—"}</td>
                 </tr>
                 {row.advice ? (
-                  <tr className="border-b border-border">
-                    <td colSpan={5} className="advice pb-2 pt-0 text-xs text-muted-foreground">
+                  <tr className="border-b border-border/70">
+                    <td colSpan={5} className="advice pb-2.5 pt-0 text-xs text-muted-foreground">
                       <span className="font-semibold">Advice:</span> {row.advice}
                     </td>
                   </tr>

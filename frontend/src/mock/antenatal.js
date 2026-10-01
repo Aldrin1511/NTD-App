@@ -16,7 +16,9 @@ export const addDays = (date, n) => {
 
 export const daysBetween = (from, to) => {
   const a = parseDate(from);
-  const b = parseDate(to) || new Date();
+  // Only default "to" when omitted — empty/invalid dates must not become "today"
+  // (that made blank follow-ups look like GA 40w / 3rd trimester).
+  const b = to === undefined || to === null ? new Date() : parseDate(to);
   if (!a || !b) return null;
   return Math.round((b.setHours(0, 0, 0, 0) - a.setHours(0, 0, 0, 0)) / DAY);
 };
@@ -47,6 +49,7 @@ export const eddFromScan = (scanDate, weeks, days) => {
 
 /** Build EDD from early-pregnancy scan EDD (absolute date). */
 export const gaFromEdd = (edd, ref = new Date()) => {
+  if (!edd) return null;
   const toEdd = daysBetween(ref, edd);
   if (toEdd == null) return null;
   return gaFromDays(280 - toEdd);
@@ -54,14 +57,19 @@ export const gaFromEdd = (edd, ref = new Date()) => {
 
 export const trimesterOf = (gaWeeks) => {
   const w = Number(gaWeeks);
-  if (!Number.isFinite(w)) return null;
-  if (w < 14) return 1;
-  if (w < 28) return 2;
+  if (!Number.isFinite(w) || w < 0) return null;
+  // Same bands as Apex maternity visit chart (phi.helper / maternity-visit-chart).
+  if (w <= 14) return 1;
+  if (w <= 28) return 2;
   return 3;
 };
 
-export const trimesterLabel = (t) => (t === 1 ? "First trimester" : t === 2 ? "Second trimester" : t === 3 ? "Third trimester" : "—");
-
+export const trimesterLabel = (t) =>
+  t === 1 ? "First trimester" : t === 2 ? "Second trimester" : t === 3 ? "Third trimester" : "—";
+/** Short labels matching Apex maternity visit chart column headers. */
+export const trimesterChartLabel = (t) =>
+  t === 1 ? "Trimester 1" : t === 2 ? "Trimester 2" : t === 3 ? "Trimester 3" : "—";
+export const trimesterLabelLong = trimesterLabel;
 /** Resolve final GA/EDD. Scan EDD may come from caseDetails.scanEdd or computed from scan GA. */
 export const resolveDating = (caseDetails = {}, ref = new Date()) => {
   const lmpEdd = caseDetails.lmp ? eddFromLmp(caseDetails.lmp) : "";
@@ -88,6 +96,28 @@ export const resolveDating = (caseDetails = {}, ref = new Date()) => {
 export const gaAtVisit = (caseDetails = {}, visitDate) => {
   const dating = resolveDating(caseDetails, visitDate || new Date());
   return dating.finalGa;
+};
+
+/**
+ * Apex maternity chart GA: always from episode LMP → visit date
+ * (recordMeta.lastMenstrualPeriod), never from a per-visit blank/bogus EDD.
+ * Returns { weeks, days, totalDays, text, lmpWeek, lmpDay } like Apex TrimesterDetails.
+ */
+export const apexGaAtVisit = (lmp, visitDate) => {
+  if (!lmp || !visitDate) return null;
+  const totalDays = daysBetween(lmp, visitDate);
+  if (totalDays == null || totalDays < 0) return null;
+  const weeks = Math.floor(totalDays / 7);
+  const days = totalDays % 7;
+  return {
+    weeks,
+    days,
+    totalDays,
+    text: `${weeks}w ${days}d`,
+    lmpWeek: `Week ${weeks}`,
+    lmpDay: `Day ${totalDays}`,
+    trimester: trimesterOf(weeks),
+  };
 };
 
 export const MEDICAL_HISTORY_OPTIONS = [
@@ -364,6 +394,44 @@ export const isImmunizationOverdue = (item, record, firstContact, lmp) => {
   return daysBetween(due, new Date()) > 0;
 };
 
+/**
+ * Same as Well Baby: first-contact dose (TT1) always; later doses from `leadDays`
+ * before due (default 1 week), or if already given / manually revealed.
+ */
+export const isAncEntryDoseVisible = (
+  item,
+  rec,
+  firstContact,
+  lmp,
+  revealedIds = [],
+  leadDays = 7,
+  asOf = new Date(),
+) => {
+  if (!item) return false;
+  const isFirstContactDose = (item.offsetDays || 0) === 0 && item.offsetWeeksGa == null;
+  if (isFirstContactDose) return true;
+  if (rec?.given) return true;
+  if ((revealedIds || []).includes(item.id)) return true;
+  const due = immunizationDueDate(item, firstContact, lmp);
+  if (!due) return false;
+  const openAt = addDays(due, -leadDays);
+  if (!openAt) return false;
+  const today = parseDate(asOf) || new Date();
+  today.setHours(0, 0, 0, 0);
+  openAt.setHours(0, 0, 0, 0);
+  return today.getTime() >= openAt.getTime();
+};
+
+export const ancEntryVisibleVaccines = (vaccines, records, firstContact, lmp, revealedIds, asOf) =>
+  (vaccines || []).filter((item) =>
+    isAncEntryDoseVisible(item, records?.[item.id], firstContact, lmp, revealedIds, 7, asOf),
+  );
+
+export const ancEntryDropdownVaccines = (vaccines, records, firstContact, lmp, revealedIds, asOf) =>
+  (vaccines || []).filter(
+    (item) => !isAncEntryDoseVisible(item, records?.[item.id], firstContact, lmp, revealedIds, 7, asOf),
+  );
+
 export const DELIVERY_TYPES = ["SVD (Normal)", "Assisted (Vacuum/Forceps)", "Caesarean section", "Breech delivery", "Vacuum"];
 export const DELIVERY_COMPLICATIONS = ["None", "PPH", "3/4 perineal laceration", "Vacuum"];
 export const FETUS_COUNTS = ["1", "2", "3", "4", "5"];
@@ -421,8 +489,13 @@ export const BABY_OUTCOME_ALERTS = [
 
 export const ANC_OUTCOMES = ["Active", "Discharged", "Maternal Death", "Lost to Follow up"];
 
-export const isAncEpisodeClosed = (outcome) =>
-  /discharged|maternal death|lost to follow/i.test(String(outcome || "").trim());
+export const isAncEpisodeClosed = (outcome) => {
+  const raw =
+    outcome && typeof outcome === "object"
+      ? outcome.status ?? outcome.outcome ?? ""
+      : outcome;
+  return /discharged|maternal death|lost to follow/i.test(String(raw || "").trim());
+};
 
 export const ancStatusColor = (status) => {
   const s = String(status || "Active").toLowerCase();

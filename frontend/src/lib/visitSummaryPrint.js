@@ -762,6 +762,147 @@ export function buildPatientEncountersPrintHtml({
     </body></html>`;
 }
 
+/**
+ * School Health visit summary print (school + children roster).
+ * @param {object} args
+ * @param {object} args.visit
+ * @param {object} [args.clinic]
+ * @param {object} [args.totals]
+ * @param {string} [args.status]
+ * @param {string} [args.worker]
+ */
+export function buildSchoolHealthVisitPrintHtml({
+  visit = {},
+  clinic = {},
+  totals = {},
+  status = "",
+  worker = "",
+}) {
+  const children = visit.children || [];
+  const mCount = children.filter((c) => c.gender === "Male").length;
+  const fCount = children.filter((c) => c.gender === "Female").length;
+  const clinicName = clinic.name || "Clinic";
+  const place = [visit.formType, visit.village, visit.district, visit.province].filter(Boolean).join(" · ");
+  const apptDate = (() => {
+    const raw = visit.date || "";
+    if (!raw) return "—";
+    const d = new Date(/T/.test(raw) ? raw : `${raw}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return String(raw);
+    const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+    return `${d.getDate()} ${m} ${d.getFullYear()}`;
+  })();
+
+  let contacts = "";
+  if (clinic.phone) {
+    contacts += `<span class="clinic-contact">${ICON_PHONE}<span>${escapeHtml(clinic.phone)}</span></span>`;
+  }
+  if (clinic.email) {
+    contacts += `<span class="clinic-contact">${ICON_MAIL}<span>${escapeHtml(clinic.email)}</span></span>`;
+  }
+  let addressHtml = "";
+  if (clinic.address) {
+    addressHtml = `<div class="clinic-address">${ICON_PIN}<span>${escapeHtml(clinic.address)}</span></div>`;
+  }
+
+  const leftMeta =
+    metaRow("School", visit.school || "—") +
+    metaRow("Form type", visit.formType || "—") +
+    metaRow("Location", place || "—") +
+    metaRow("Donor", visit.donor || "—");
+
+  const rightMeta =
+    metaRow("Visit date", apptDate) +
+    metaRow("Status", status || visit.status || "—") +
+    metaRow("Created by", visit.worker || worker || "—") +
+    metaRow("Students (M/F)", `${mCount}/${fCount} · ${children.length}`);
+
+  let body = "";
+  body += `<div class="section"><div class="section-title">Immunization &amp; screening totals</div>`;
+  body += qaBlock("Measles Rubella", String(totals.mr ?? 0));
+  body += qaBlock("Vitamin A", String(totals.vita ?? 0));
+  body += qaBlock("TT", String(totals.tt ?? 0));
+  body += qaBlock("Deworming", String(totals.deworm ?? 0));
+  body += qaBlock("Suspected NTD", String(totals.ntd ?? 0));
+  body += `</div>`;
+
+  if (visit.report?.conductedBy?.length) {
+    body += `<div class="section"><div class="section-title">Report</div>`;
+    body += qaBlock("Conducted by", (visit.report.conductedBy || []).join(", "));
+    if (visit.report.summary) body += qaBlock("Visit summary", visit.report.summary);
+    body += `</div>`;
+  } else if (visit.report?.summary) {
+    body += `<div class="section"><div class="section-title">Report</div>`;
+    body += qaBlock("Visit summary", visit.report.summary);
+    body += `</div>`;
+  }
+
+  body += `<div class="section"><div class="section-title">Children screened · ${children.length}</div>`;
+  if (!children.length) {
+    body += `<p class="empty-body">No children added yet.</p>`;
+  } else {
+    body += `<table class="sh-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Sex / Age</th>
+          <th>Wt/Ht/MUAC</th>
+          <th>Negative exam</th>
+          <th>Immunization</th>
+          <th>NTD</th>
+          <th>Referred</th>
+        </tr>
+      </thead>
+      <tbody>`;
+    children.forEach((c) => {
+      const name = [c.firstName, c.lastName].filter(Boolean).join(" ") || "—";
+      const ageBits = [c.gender || "—", c._ageLabel || "—"].filter(Boolean).join(" · ");
+      const neg = c._negativeExam || "—";
+      body += `<tr>
+        <td>${escapeHtml(name)}</td>
+        <td>${escapeHtml(ageBits)}</td>
+        <td>${escapeHtml(`${c.weight || "—"}/${c.height || "—"}/${c.muac || "—"}`)}</td>
+        <td>${escapeHtml(neg || "—")}</td>
+        <td>${escapeHtml(c._immunSummary || "—")}</td>
+        <td>${escapeHtml(c._ntd ? "Yes" : "No")}</td>
+        <td>${escapeHtml(c.referred === "Yes" ? `Yes${c.referNote ? ` — ${c.referNote}` : ""}` : "No")}</td>
+      </tr>`;
+    });
+    body += `</tbody></table>`;
+  }
+  body += `</div>`;
+
+  const title = `${visit.school || "School Health"} — Visit Summary`;
+  const tableCss = `
+    .sh-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10px; }
+    .sh-table th, .sh-table td { border: 1px solid #d4d4d4; padding: 5px 6px; text-align: left; vertical-align: top; }
+    .sh-table th { background: #f8fafc; color: #334155; font-weight: 700; }
+  `;
+
+  return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>${escapeHtml(title)}</title>
+    <style>${PRINT_STYLES}${tableCss}</style></head><body>
+    <div class="page">
+      <header class="clinic-header">
+        <h1 class="clinic-name">${escapeHtml(clinicName)}</h1>
+        ${contacts ? `<div class="clinic-contacts">${contacts}</div>` : ""}
+        ${addressHtml}
+      </header>
+
+      <hr class="rule-thick" />
+      <div class="meta-grid">
+        <div class="meta-col">${leftMeta}</div>
+        <div class="meta-col">${rightMeta}</div>
+      </div>
+      <hr class="rule-mid" />
+
+      <h2 class="report-title">School Health Visit Summary</h2>
+      ${body}
+
+      <div class="end-report">End of Report</div>
+    </div>
+    </body></html>`;
+}
+
 /** Print via hidden iframe (no blank about:blank popup). */
 export function printHtmlDocument(html) {
   const iframe = document.createElement("iframe");

@@ -273,7 +273,17 @@ export const GrowthEntry = ({ sex, ageMonths, ageLabel, value = {}, previousMeas
   const measures = value.measures || {};
   const setMeasure = (k, v) => {
     const next = v === "" || v == null ? "" : round1(v);
-    onChange({ ...value, standard, mode, measures: { ...measures, [k]: next } });
+    const nextMeasures = { ...measures, [k]: next };
+    // Keep BMI in sync whenever weight or length changes so dashboard/payload see it.
+    if (k === "weight" || k === "height") {
+      const bmi = bmiFrom(
+        k === "weight" ? next : nextMeasures.weight,
+        k === "height" ? next : nextMeasures.height,
+      );
+      if (bmi != null) nextMeasures.bmi = bmi;
+      else delete nextMeasures.bmi;
+    }
+    onChange({ ...value, standard, mode, measures: nextMeasures });
   };
   const setBmi = () => bmiFrom(measures.weight, measures.height);
 
@@ -310,9 +320,21 @@ export const GrowthEntry = ({ sex, ageMonths, ageLabel, value = {}, previousMeas
           );
         })}
       </div>
-      {metricApplies("bmi", ageMonths) && setBmi() && (() => {
-        const r = compute({ metric: "bmi", value: setBmi(), ageMonths, sex, standard });
-        return <div className={`rounded-md border ${ring[r.status]} bg-white p-3`} data-testid={`${testid}-bmi`}><span className="text-xs font-semibold text-muted-foreground">BMI (auto)</span> <span className={`font-bold ${txt[r.status]}`}>{fmtMeasure(setBmi())} kg/m² · {mode === "SD" ? `${r.z > 0 ? "+" : ""}${Number(r.z).toFixed(1)} SD` : `${percentileLabel(r.percentile)} pct`}</span></div>;
+      {setBmi() != null && (() => {
+        const bmi = setBmi();
+        const showZ = metricApplies("bmi", ageMonths);
+        const r = showZ ? compute({ metric: "bmi", value: bmi, ageMonths, sex, standard }) : null;
+        return (
+          <div className={`rounded-md border ${ring[r?.status || ""]} bg-white p-3`} data-testid={`${testid}-bmi`}>
+            <span className="text-xs font-semibold text-muted-foreground">BMI (auto)</span>{" "}
+            <span className={`font-bold ${txt[r?.status || ""]}`}>
+              {fmtMeasure(bmi)} kg/m²
+              {showZ && r?.z != null
+                ? ` · ${mode === "SD" ? `${r.z > 0 ? "+" : ""}${Number(r.z).toFixed(1)} SD` : `${percentileLabel(r.percentile)} pct`}`
+                : ""}
+            </span>
+          </div>
+        );
       })()}
     </div>
   );
@@ -337,7 +359,8 @@ export const GrowthReview = ({ sex, dob, entries = [], testid = "growth-review" 
       const std = e.standard || standard;
       const measures = { ...(e.measures || {}) };
       const bmi = bmiFrom(measures.weight, measures.height);
-      if (bmi && ageMo >= 24) measures.bmi = bmi;
+      // Always derive BMI when weight + length exist (dashboard Parameters row).
+      if (bmi != null) measures.bmi = bmi;
       const w = Number(measures.weight);
       const h = Number(measures.height);
       if (w && h) measures.wfl = Number((w / h).toFixed(1));

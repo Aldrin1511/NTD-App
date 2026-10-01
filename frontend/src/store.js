@@ -18,10 +18,20 @@ import {
   VISIT_TYPES_DEFAULT,
   DISEASE_SPECS,
 } from "@/mock/specs";
-import { featureCodeForDisease, rehydrateFormFromPhi } from "@/lib/phiMap";
+import { featureCodeForDisease, rehydrateFormFromPhi, mergeEncounterFormData } from "@/lib/phiMap";
 import { resolveDob, validateNtdForHmis } from "@/lib/hmisPatient";
 import { formatInternational, parseStoredPhone, digitsOnly } from "@/lib/phone";
 import { dobFromAgeYmd } from "@/components/Capture";
+import { DEFAULT_SCHOOLS, DEFAULT_DONORS } from "@/mock/schoolhealth";
+
+/** Prefer API masters; fall back to built-in seed when Admin masters are empty. */
+const withSchoolHealthMasters = (schools, donors) => ({
+  schools: Array.isArray(schools) && schools.length ? schools : DEFAULT_SCHOOLS,
+  donors: Array.isArray(donors) && donors.length ? donors : DEFAULT_DONORS,
+});
+
+const isSeedMasterId = (id) =>
+  /^(SCHL|DON)-\d+/i.test(String(id || ""));
 
 /** ANC/Mal store outcome as `{ status, ... }`; chips/API need a string. */
 function outcomeToStatus(value) {
@@ -186,8 +196,8 @@ const initial = () => ({
     { id: "R-005", name: "Yaws — azithromycin single dose", disease: "yaws", diagnosis: "", ageMin: 0, ageMax: 120, weightMin: 0, weightMax: 200, frequency: "STAT", durationUnit: "BOLUS", drugs: ["Tab Azithromycin 500mg (30mg per Kg)"] },
     { id: "R-006", name: "LF — IDA (Ivermectin + DEC + Albendazole)", disease: "lf", diagnosis: "", ageMin: 5, ageMax: 120, weightMin: 15, weightMax: 200, frequency: "STAT", duration: 1, durationUnit: "Day(s)", drugs: ["Tab Ivermectin (0.2 mg/kg)", "Tab DEC 100mg (6 mg/kg)", "Tab Albendazole 200mg"] },
   ] },
-  schools: [],
-  donors: [],
+  schools: DEFAULT_SCHOOLS,
+  donors: DEFAULT_DONORS,
   schoolHealth: [],
   currentUserId: null,
   branding: {
@@ -350,8 +360,7 @@ export function StoreProvider({ children }) {
             ]);
             if (!cancelled) {
               patch(() => ({
-                schools: Array.isArray(schools) ? schools : [],
-                donors: Array.isArray(donors) ? donors : [],
+                ...withSchoolHealthMasters(schools, donors),
                 schoolHealth: Array.isArray(visits) ? visits : [],
               }));
             }
@@ -584,8 +593,7 @@ export function StoreProvider({ children }) {
               fetchSchoolHealthVisits(),
             ]);
             patch(() => ({
-              schools: Array.isArray(schools) ? schools : [],
-              donors: Array.isArray(donors) ? donors : [],
+              ...withSchoolHealthMasters(schools, donors),
               schoolHealth: Array.isArray(visits) ? visits : [],
             }));
           } catch (err) {
@@ -651,8 +659,7 @@ export function StoreProvider({ children }) {
             fetchSchoolHealthVisits(),
           ]);
           patch(() => ({
-            schools: Array.isArray(schools) ? schools : [],
-            donors: Array.isArray(donors) ? donors : [],
+            ...withSchoolHealthMasters(schools, donors),
             schoolHealth: Array.isArray(visits) ? visits : [],
           }));
         } catch (err) {
@@ -693,15 +700,18 @@ export function StoreProvider({ children }) {
         const donorMaster = (state.donors || []).find(
           (d) => d.name === v.donor || d.id === v.donorId
         );
+        const schoolId = v.schoolId || schoolMaster?.id;
+        const donorId = v.donorId || donorMaster?.id;
         const created = await createSchoolHealthVisit({
           date: v.date,
           formType: v.formType,
           province: v.province,
           district: v.district,
           village: v.village,
-          schoolId: v.schoolId || schoolMaster?.id,
+          // Seed master ids are local-only — send names so HMIS can store without Admin masters
+          schoolId: isSeedMasterId(schoolId) ? undefined : schoolId,
           school: v.school || schoolMaster?.name,
-          donorId: v.donorId || donorMaster?.id,
+          donorId: isSeedMasterId(donorId) ? undefined : donorId,
           donor: v.donor || donorMaster?.name,
           workerDisplayName: worker,
           status: v.status || "New",
@@ -2142,7 +2152,7 @@ export function StoreProvider({ children }) {
                   ...e,
                   encounterId: encounter.encounterId,
                   featureCode,
-                  data: { ...(e.data || {}), ...form },
+                  data: mergeEncounterFormData(e.data || {}, form),
                   diagnosis: form.diagnosis || e.diagnosis || "",
                   outcome: form.outcome || e.outcome || "",
                 };
@@ -2375,7 +2385,7 @@ export function StoreProvider({ children }) {
             worker: existing.worker || meta.clinicianName || "",
             treatment: existing.treatment || "",
             synced: true,
-            data: { ...(existing.data || {}), ...row.form },
+            data: mergeEncounterFormData(existing.data || {}, row.form),
             diagnosis,
             outcome,
             pendingStart: row.completed ? false : existing.pendingStart !== false,

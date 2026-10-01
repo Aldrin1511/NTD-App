@@ -182,17 +182,26 @@ const normalizeDelivery = (raw = {}, patient = {}) => {
       if (idx < 0) idx = 0;
     }
     const flat = babyFromFlat({ ...details, ...raw }, type);
-    const cur = babies[idx];
-    if (!babyHasContent(cur) && babyHasContent(flat)) {
-      babies[idx] = {
-        ...cur,
-        ...Object.fromEntries(Object.entries(flat).filter(([, v]) => (Array.isArray(v) ? v.length : v))),
-        patientId: patient.id,
-        sex: flat.sex || cur.sex || patient.sex || patient.gender || "",
-      };
-    } else if (!cur.sex) {
-      babies[idx] = { ...cur, sex: patient.sex || patient.gender || cur.sex || "", patientId: cur.patientId || patient.id };
-    }
+    const cur = babies[idx] || emptyBaby(type);
+    const filled = { ...cur };
+    Object.entries(flat).forEach(([k, v]) => {
+      if (k === "physicalExam") {
+        const pe = { ...(cur.physicalExam || {}) };
+        Object.entries(v || {}).forEach(([ek, ev]) => {
+          if (!isBlankVal(ev) && isBlankVal(pe[ek])) pe[ek] = ev;
+        });
+        if (Object.keys(pe).length) filled.physicalExam = pe;
+        return;
+      }
+      if (isBlankVal(cur[k]) && !isBlankVal(v)) filled[k] = v;
+    });
+    babies[idx] = {
+      ...filled,
+      patientId: cur.patientId || patient.id,
+      sex: cur.sex || flat.sex || patient.sex || patient.gender || "",
+      registered: !!(cur.registered || cur.patientId || patient.id),
+      patientCode: cur.patientCode || "",
+    };
   }
   return {
     deliveryDate: raw.deliveryDate || raw.date || details.deliveryDate || details.date || "",
@@ -740,6 +749,8 @@ export default function WellBabyEncounter() {
                 <TextField label="Birth Weight (kgs)" type="number" step="0.1" value={b.weightKg || ""} onChange={(e) => updBaby(i, { weightKg: e.target.value })} testid={`wb-baby-weight-${i}`} />
                 <TextField label="Birth Length (cms)" type="number" step="0.1" value={b.lengthCm || ""} onChange={(e) => updBaby(i, { lengthCm: e.target.value })} testid={`wb-baby-length-${i}`} />
                 <TextField label="Head Circumference (cms)" type="number" step="0.1" value={b.headCm || ""} onChange={(e) => updBaby(i, { headCm: e.target.value })} testid={`wb-baby-hc-${i}`} />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
                 <TextField label="APGAR 1 min" type="number" value={b.apgar1 || ""} onChange={(e) => updBaby(i, { apgar1: e.target.value })} testid={`wb-baby-apgar1-${i}`} />
                 <TextField label="APGAR 5 min" type="number" value={b.apgar5 || ""} onChange={(e) => updBaby(i, { apgar5: e.target.value })} testid={`wb-baby-apgar5-${i}`} />
                 <TextField label="APGAR 10 min" type="number" value={b.apgar10 || ""} onChange={(e) => updBaby(i, { apgar10: e.target.value })} testid={`wb-baby-apgar10-${i}`} />

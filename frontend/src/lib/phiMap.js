@@ -442,3 +442,81 @@ export function rehydrateFormFromPhi(rows) {
   });
   return form;
 }
+
+const NESTED_FORM_KEYS = [
+  "caseDetails",
+  "history",
+  "vitals",
+  "delivery",
+  "immunization",
+  "outcome",
+  "posology",
+  "medCourses",
+  "growth",
+  "milestones",
+  "assessment",
+  "household",
+  "adherence",
+];
+
+function preferRicherBabies(a = [], b = []) {
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  if (!left.length) return right;
+  if (!right.length) return left;
+  const score = (babies) =>
+    babies.reduce((n, baby) => {
+      if (!baby || typeof baby !== "object") return n;
+      let s = Object.keys(baby).filter((k) => baby[k] !== "" && baby[k] != null).length;
+      const exam = baby.physicalExam || {};
+      s += Object.keys(exam).filter((k) => exam[k] !== "" && exam[k] != null).length;
+      return n + s;
+    }, 0);
+  return score(right) >= score(left) ? right : left;
+}
+
+/**
+ * Merge PHI-rehydrated form into existing encounter.data.
+ * Shallow `{...existing, ...form}` replaces nested objects (e.g. delivery) and
+ * drops babies / newborn exam when PHI only returned a subset of delivery fields.
+ */
+export function mergeEncounterFormData(existing = {}, form = {}) {
+  const base = existing && typeof existing === "object" ? existing : {};
+  const incoming = form && typeof form === "object" ? form : {};
+  const out = { ...base, ...incoming };
+  NESTED_FORM_KEYS.forEach((key) => {
+    const prev = base[key];
+    const next = incoming[key];
+    if (
+      prev &&
+      typeof prev === "object" &&
+      !Array.isArray(prev) &&
+      next &&
+      typeof next === "object" &&
+      !Array.isArray(next)
+    ) {
+      out[key] = { ...prev, ...next };
+      if (key === "delivery") {
+        out.delivery.babies = preferRicherBabies(prev.babies, next.babies);
+        if (!out.delivery.date && out.delivery.deliveryDate) out.delivery.date = out.delivery.deliveryDate;
+        if (!out.delivery.deliveryDate && out.delivery.date) out.delivery.deliveryDate = out.delivery.date;
+      }
+      if (key === "history") {
+        out.history.menstrual = { ...(prev.menstrual || {}), ...(next.menstrual || {}) };
+        if (Array.isArray(prev.medical) || Array.isArray(next.medical)) {
+          out.history.medical = [...new Set([...(prev.medical || []), ...(next.medical || [])])];
+        }
+        if (Array.isArray(prev.riskFactors) || Array.isArray(next.riskFactors)) {
+          out.history.riskFactors = [...new Set([...(prev.riskFactors || []), ...(next.riskFactors || [])])];
+        }
+      }
+      if (key === "vitals") {
+        out.vitals = {
+          mother: { ...(prev.mother || {}), ...(next.mother || {}) },
+          fetal: { ...(prev.fetal || {}), ...(next.fetal || {}) },
+        };
+      }
+    }
+  });
+  return out;
+}

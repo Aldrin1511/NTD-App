@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertPanel } from "@/components/Fields";
 import { FeatureCard, ExpandAllButton } from "@/components/EntryKit";
-import { fmtDate, fmtDateTime, groupDiseaseEpisodes, visitLabel } from "@/mock/specs";
-import { ANTENATAL_ID, ANTENATAL_NAME, resolveDating, trimesterLabel, trimesterOf, gaFromEdd, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
+import { fmtDate, fmtDateTime, groupDiseaseEpisodes, visitLabel, coerceOutcome } from "@/mock/specs";
+import { ANTENATAL_ID, ANTENATAL_NAME, resolveDating, trimesterLabel, trimesterChartLabel, trimesterOf, apexGaAtVisit, MOTHER_VITALS, MOTHER_VITAL_CHOICES,
   FETAL_VITALS, FETAL_VITAL_CHOICES, vitalStatus, ANC_IMMUNIZATION, immunizationDueDate, isImmunizationOverdue,
   isAncEpisodeClosed, babyName, ancStatusColor, ancRiskLevel, PHYSICAL_EXAM_FIELDS, autoRiskFactors,
 } from "@/mock/antenatal";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { ancMedicationRows } from "@/components/AntenatalMedications";
-import { Pencil, Plus, Baby, Activity, Printer } from "lucide-react";
+import { Pencil, Plus, Baby, Activity, Printer, CalendarCheck, LineChart as ChartIcon } from "lucide-react";
 
 const chip = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-foreground" };
 
@@ -168,18 +168,14 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
   }
 
   const latest = visits[0];
-  const dating = resolveDating(latest?.data?.caseDetails || {});
   const firstVisit = [...visits].sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
   const firstContact = firstVisit?.data?.caseDetails?.firstContact || firstVisit?.date;
-  const lmp = latest?.data?.caseDetails?.lmp;
-  const closed = isAncEpisodeClosed(episode.outcome);
-  const status = episode.outcome || latest?.data?.outcome?.status || "Active";
-  const risks = latest?.data?.history?.riskFactors?.length
-    ? latest.data.history.riskFactors
-    : autoRiskFactors(latest?.data || {}, patient);
-  const riskLvl = ancRiskLevel(risks);
-  const medicalAll = latest?.data?.history?.medical || [];
-  const menstrual = latest?.data?.history?.menstrual || {};
+  const status =
+    coerceOutcome(episode.outcome) ||
+    coerceOutcome(latest?.outcome) ||
+    coerceOutcome(latest?.data?.outcome) ||
+    "Active";
+  const closed = isAncEpisodeClosed(status);
 
   const withData = (key) => visits.filter((v) => {
     const x = v.data?.[key];
@@ -215,7 +211,20 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
     .filter((v) => v.data.lab.length > 0);
   const radVisits = withData("radiology");
   const drugVisits = withData("drugs");
-  const deliveryVisits = visits.filter((v) => v.data?.delivery?.date || v.data?.delivery?.type || (v.data?.delivery?.babies || []).length);
+  const deliveryHasContent = (del = {}) =>
+    !!(
+      del.date ||
+      del.deliveryDate ||
+      del.type ||
+      del.mode ||
+      del.outcome ||
+      del.complication ||
+      del.fetuses ||
+      del.familyPlanning ||
+      (del.postpartum || []).length ||
+      (del.babies || []).length
+    );
+  const deliveryVisits = visits.filter((v) => deliveryHasContent(v.data?.delivery));
   // Legacy visit-level exam OR any baby with physicalExam
   const examVisits = visits.filter((v) => {
     if (v.data?.physicalExam && Object.keys(v.data.physicalExam).some((k) => v.data.physicalExam[k])) return true;
@@ -224,10 +233,27 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
   const noteVisits = visits.filter((v) => (v.data?.notes || []).some((n) => String(n).trim()));
   const outcomeVisits = visits.filter((v) => v.data?.outcome?.status);
 
+  // Episode dating = visit that actually has LMP/EDD (not merely a blank follow-up with firstContact).
+  const datingSource =
+    visits.find((v) => {
+      const c = v.data?.caseDetails || {};
+      return !!(c.lmp || c.finalEdd || c.scanEdd || c.scanDate);
+    }) ||
+    caseVisits[0] ||
+    latest;
+  const cd = datingSource?.data?.caseDetails || {};
+  // Apex uses record-level LMP for every visit on the maternity chart.
+  const episodeLmp =
+    cd.lmp ||
+    histVisits[0]?.data?.history?.menstrual?.lmp ||
+    visits.map((v) => v.data?.history?.menstrual?.lmp || v.data?.caseDetails?.lmp).find(Boolean) ||
+    "";
+
+  // Same as Apex: GA from episode LMP → visit date; bucket Week 0–14 / 15–28 / 29+.
   const byTrimester = { 1: [], 2: [], 3: [] };
   visits.forEach((v) => {
-    const ga = gaFromEdd(resolveDating(v.data?.caseDetails || {}).finalEdd, v.date);
-    const t = ga ? trimesterOf(ga.weeks) : null;
+    const ga = apexGaAtVisit(episodeLmp, v.date);
+    const t = ga?.trimester || (ga ? trimesterOf(ga.weeks) : null);
     if (t) byTrimester[t].push({ v, ga });
   });
 
@@ -235,8 +261,23 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
   visits.forEach((v) => Object.entries(v.data?.immunization || {}).forEach(([k, val]) => { if (val?.given) mergedImmun[k] = val; }));
   const immunEditVisit = visits.find((v) => Object.values(v.data?.immunization || {}).some((x) => x?.given)) || latest;
 
-  const cd = latest?.data?.caseDetails || {};
-
+  const dating = resolveDating(cd);
+  const lmp = episodeLmp || cd.lmp;
+  const medicalAll = (caseVisits[0] || latest)?.data?.history?.medical
+    || latest?.data?.history?.medical
+    || [];
+  const menstrual =
+    histVisits[0]?.data?.history?.menstrual ||
+    latest?.data?.history?.menstrual ||
+    {};
+  const risks = (() => {
+    const fromLatest = latest?.data?.history?.riskFactors;
+    if (fromLatest?.length) return fromLatest;
+    const fromCase = (caseVisits[0] || histVisits[0])?.data?.history?.riskFactors;
+    if (fromCase?.length) return fromCase;
+    return autoRiskFactors({ ...(latest?.data || {}), caseDetails: cd }, patient);
+  })();
+  const riskLvl = ancRiskLevel(risks);
   const showExamLegacy = examVisits.length > 0 && !deliveryVisits.some((v) => (v.data?.delivery?.babies || []).some((b) => b.physicalExam && Object.keys(b.physicalExam).some((k) => b.physicalExam[k])));
   const featureKeys = [
     "visits",
@@ -347,19 +388,61 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
         </div>
       </div>
 
-      <FeatureCard title="ANC visits by trimester" count={visits.length} testid="anc-feat-visits" open={cardOpen("visits")} onOpenChange={setCardOpen("visits")}>
-        <div className="grid gap-4 sm:grid-cols-3">
+      <FeatureCard
+        title="Maternity visit chart"
+        count={visits.length}
+        testid="anc-feat-visits"
+        open={cardOpen("visits")}
+        onOpenChange={setCardOpen("visits")}
+      >
+        <div className="mb-3 flex flex-wrap items-center gap-4 text-xs font-semibold text-muted-foreground" data-testid="anc-visit-chart-counts">
+          <span>Total Visit: <span className="text-primary">{visits.length}</span></span>
+          <span>ANC Visit: <span className="text-primary">{Object.values(byTrimester).reduce((n, rows) => n + rows.length, 0)}</span></span>
+          {!episodeLmp && (
+            <span className="font-medium text-amber-700">Add LMP in Case details to place visits by trimester</span>
+          )}
+        </div>
+        <div className="grid max-h-[17rem] gap-2 sm:grid-cols-3" data-testid="anc-maternity-visit-chart">
           {[1, 2, 3].map((t) => (
-            <div key={t}>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">{trimesterLabel(t)}</p>
-              <div className="space-y-2">
-                {byTrimester[t].length === 0 && <p className="text-sm text-muted-foreground">No visits</p>}
-                {byTrimester[t].map(({ v, ga }) => (
-                  <button key={v.id} type="button" onClick={() => canEdit && onEdit?.(v)} className="w-full rounded-md border border-border bg-white p-2 text-left hover:bg-muted" data-testid={`anc-visit-chip-${v.id}`}>
-                    <p className="text-sm font-semibold">{fmtDate(v.date)}</p>
-                    <p className="text-xs text-muted-foreground">GA {ga?.text || "—"} · {v.type}</p>
-                  </button>
-                ))}
+            <div key={t} className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-white">
+              <div className="flex h-8 items-center justify-center gap-1.5 bg-muted/70 px-2">
+                <ChartIcon className="h-3.5 w-3.5 text-primary" />
+                <p className="text-xs font-bold tracking-wide text-foreground">{trimesterChartLabel(t)}</p>
+              </div>
+              <div className="flex-1 space-y-0 overflow-auto p-2">
+                {byTrimester[t].length === 0 && (
+                  <p className="px-1 py-3 text-sm text-muted-foreground">No visits</p>
+                )}
+                {byTrimester[t].map(({ v, ga }, idx) => {
+                  const { date, time } = splitDateTime(v.date);
+                  const clinician = v.worker || v.clinicianName || v.createdByName || "";
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => canEdit && onEdit?.(v)}
+                      className="flex w-full gap-2 rounded-md px-1 py-1.5 text-left hover:bg-muted/60"
+                      data-testid={`anc-visit-chip-${v.id}`}
+                    >
+                      <div className="flex w-6 shrink-0 flex-col items-center">
+                        <CalendarCheck className="h-4 w-4 text-muted-foreground" />
+                        {idx < byTrimester[t].length - 1 && (
+                          <div className="mt-1 min-h-[2.5rem] w-px flex-1 bg-border" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1 pb-2">
+                        <p className="text-[11px] leading-tight text-foreground">
+                          <span className="font-bold">{ga?.lmpWeek || "Week —"} {ga?.lmpDay || "Day —"}</span>
+                          <span className="text-muted-foreground"> | {date}{time ? `, ${time}` : ""}</span>
+                        </p>
+                        <p className="mt-0.5 text-[11px] leading-tight">
+                          <span className="font-semibold text-primary">{v.type || "ANC visit"}</span>
+                          {clinician ? <span className="text-muted-foreground"> by {clinician}</span> : null}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -550,7 +633,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                       <tbody>
                         {rows.map((row, i) => (
                           <Fragment key={`${row.name}-${i}`}>
-                            <tr className="border-b border-border/70 align-top">
+                            <tr className={`${row.advice ? "" : "border-b border-border/70 "}align-top`}>
                               <td className="py-2 pr-3 font-medium">{row.name}</td>
                               <td className="py-2 pr-3">{row.dosage}</td>
                               <td className="py-2 pr-3">{row.frequency}</td>
@@ -558,8 +641,8 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                               <td className="py-2">{row.qualifier || "—"}</td>
                             </tr>
                             {row.advice ? (
-                              <tr className="border-b border-border">
-                                <td colSpan={5} className="pb-2 pt-0 text-xs text-muted-foreground">
+                              <tr className="border-b border-border/70">
+                                <td colSpan={5} className="pb-2.5 pt-0 text-xs text-muted-foreground">
                                   <span className="font-semibold">Advice:</span> {row.advice}
                                 </td>
                               </tr>
@@ -596,7 +679,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
             return (
               <div key={v.id} className="space-y-2 border-b border-border/60 py-2 last:border-0">
                 <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.delivery} testid={`anc-del-edit-${v.id}`} />
-                <p className="text-sm"><b>Delivery:</b> {del.date ? fmtDate(del.date) : "—"} · {del.type || del.mode || "—"} · {del.outcome || "—"} · Fetuses {del.fetuses || (del.babies || []).length || "—"}</p>
+                <p className="text-sm"><b>Delivery:</b> {fmtDate(del.date || del.deliveryDate) || "—"} · {del.type || del.mode || "—"} · {del.outcome || "—"} · Fetuses {del.fetuses || (del.babies || []).length || "—"}</p>
                 {del.complication && <p className="text-sm text-muted-foreground">Complication: {del.complication}</p>}
                 {(del.postpartum || []).length > 0 && <p className="text-sm text-muted-foreground">Postpartum: {del.postpartum.join(" · ")}</p>}
                 {(del.babies || []).map((b, i) => {

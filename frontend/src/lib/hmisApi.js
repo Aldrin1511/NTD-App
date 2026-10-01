@@ -569,8 +569,12 @@ export async function fetchSchoolHealthVisit(visitId) {
 }
 
 export async function createSchoolHealthVisit(body) {
-  const res = await http.post("/api/school-health/visits", body);
-  return shData(res, "Failed to create school health visit");
+  try {
+    const res = await http.post("/api/school-health/visits", body);
+    return shData(res, "Failed to create school health visit");
+  } catch (err) {
+    throw new Error(apiError(err, "Failed to create school health visit"));
+  }
 }
 
 export async function updateSchoolHealthVisit(visitId, body) {
