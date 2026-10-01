@@ -8,7 +8,7 @@ import { CloudUpload, Database, WifiOff, CheckCircle2, AlertTriangle } from "luc
 
 const OP_LABEL = {
   REGISTER_PATIENT: "Register patient",
-  START_EPISODE: "Start episode",
+  START_EPISODE: "Start pathway",
   ADD_VISIT: "Add visit",
   START_SUSPECT: "Suspect screening",
   SAVE_ENCOUNTER_FORM: "Disease form",
@@ -112,7 +112,7 @@ export default function Sync() {
             </div>
             {online ? (
               <AlertPanel level="routine" title="Online" testid="online-note">
-                Tap Sync now to upload register → episode → form answers and photographs to HMIS.
+                Tap Sync now to upload register → pathway → form answers and photographs to HMIS.
               </AlertPanel>
             ) : (
               <AlertPanel level="urgent" title="Offline" testid="offline-alert">

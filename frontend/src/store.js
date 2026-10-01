@@ -1159,7 +1159,7 @@ export function StoreProvider({ children }) {
           ),
         })),
       /**
-       * Start episode for Scabies/Yaws/LF/Buruli/Leprosy/AnteNatal/Malnutrition/WellBaby:
+       * Start episode for Scabies/Yaws/LF/Buruli/Leprosy/AnteNatal/Malnutrition/WellBaby/FamilyPlanning:
        * portal-be creates RecordsT + VisitsT + VisitMetaT, then we keep a local pending visit.
        */
       startEpisode: async ({
@@ -1209,7 +1209,7 @@ export function StoreProvider({ children }) {
             type: OP.START_EPISODE,
             localEntityId: localVisitId,
             dependsOn: deps,
-            label: `Start ${disease} episode`,
+            label: `Start ${disease} pathway`,
             payload: {
               patientId,
               localVisitId,
@@ -1270,7 +1270,7 @@ export function StoreProvider({ children }) {
         const visitId = data.visitId;
         const recordId = data.recordId;
         if (!visitId || !recordId) {
-          throw new Error("Episode create did not return visitId/recordId");
+          throw new Error("Pathway create did not return visitId/recordId");
         }
         const encounterId = data.encounterId || "";
         const featureCode = data.featureCode || featureCodeForDisease(disease);

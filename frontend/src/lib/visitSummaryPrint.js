@@ -577,8 +577,8 @@ export function buildVisitSummaryPrintHtml({
 
   if (episodeCaption || episodeDates || episode?.diagnosis || episode?.outcome) {
     included += 1;
-    body += `<div class="section"><div class="section-title">${escapeHtml(diseaseName || "Condition")} episode</div>`;
-    if (episodeCaption) body += qaBlock("Episode", episodeCaption);
+    body += `<div class="section"><div class="section-title">${escapeHtml(diseaseName || "Condition")} pathway</div>`;
+    if (episodeCaption) body += qaBlock("Pathway", episodeCaption);
     if (episodeDates) body += qaBlock("Dates", episodeDates);
     if (episode?.diagnosis) body += qaBlock("Diagnosis", episode.diagnosis);
     if (episode?.outcome) body += qaBlock("Outcome", episode.outcome);
@@ -602,7 +602,7 @@ export function buildVisitSummaryPrintHtml({
   }
 
   if (!included) {
-    body = `<p class="empty-body">No completed visit data for this episode yet.</p>`;
+    body = `<p class="empty-body">No completed visit data for this pathway yet.</p>`;
   }
 
   const title = `${patient?.name || "Patient"} — Visit Summary`;

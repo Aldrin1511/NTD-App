@@ -1293,7 +1293,7 @@ export default function Encounter() {
         <div className="space-y-5">
           {usesActiveDefault && (
             <p className="text-sm text-muted-foreground">
-              Outcome defaults to Active when the episode starts. If diagnosis is {noDiseaseOutcome || "No disease"}, outcome is set to {noDiseaseOutcome || "match"} automatically.
+              Outcome defaults to Active when the pathway starts. If diagnosis is {noDiseaseOutcome || "No disease"}, outcome is set to {noDiseaseOutcome || "match"} automatically.
             </p>
           )}
           <ChoiceRow label="Outcome" options={spec.outcomes} value={outcome} onChange={(v) => {
@@ -1301,8 +1301,8 @@ export default function Encounter() {
             queueBlob("Outcome", "Final case outcome", v, "outcome", 150);
           }} testid="outcome" />
           {isEpisodeClosed(outcome) && (
-            <AlertPanel level="review" title="This closes the episode" testid="outcome-close">
-              Saving with this outcome closes the episode. Start a new encounter to open a fresh episode later.
+            <AlertPanel level="review" title="This closes the pathway" testid="outcome-close">
+              Saving with this outcome closes the pathway. Start a new encounter to open a fresh pathway later.
             </AlertPanel>
           )}
           {spec.id === "leprosy" && outcome === "Cured" && (

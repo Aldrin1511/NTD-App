@@ -30,16 +30,19 @@ import { REACTION_COLS, REACTION_GRID } from "@/components/LeprosyReaction";
 import AntenatalDashboard from "@/components/AntenatalDashboard";
 import WellBabyDashboard from "@/components/WellBabyDashboard";
 import MalnutritionDashboard from "@/components/MalnutritionDashboard";
+import FamilyPlanningDashboard from "@/components/FamilyPlanningDashboard";
 import { useAppointmentDateGate } from "@/components/AppointmentDatePrompt";
 import { visitDay } from "@/lib/appointmentDate";
 import { ANTENATAL_ID, ANTENATAL_NAME } from "@/mock/antenatal";
 import { WELLBABY_ID, WELLBABY_NAME } from "@/mock/wellbaby";
 import { MAL_ID, MAL_NAME } from "@/mock/malnutrition";
+import { FP_ID, FP_NAME } from "@/mock/familyPlanning";
 
 const EXTRA_CONDITIONS = [
   { id: ANTENATAL_ID, name: ANTENATAL_NAME, route: "antenatal" },
   { id: WELLBABY_ID, name: WELLBABY_NAME, route: "wellbaby" },
   { id: MAL_ID, name: MAL_NAME, route: "malnutrition" },
+  { id: FP_ID, name: FP_NAME, route: "familyplanning" },
 ];
 const EXTRA_IDS = EXTRA_CONDITIONS.map((c) => c.id);
 
@@ -1472,7 +1475,7 @@ export default function PatientRecord() {
 
   const runStart = async (visitDate) => {
     if (enc.mode !== "encounter" && enc.disease && activeDiseaseIds.has(enc.disease)) {
-      return toast.error("This disease already has an active episode — close it first or choose another");
+      return toast.error("This disease already has an active pathway — close it first or choose another");
     }
     if (enc.referral === "Yes" && (!enc.province || !enc.district)) return toast.error("Choose province and district for the referral");
     if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
@@ -1525,7 +1528,7 @@ export default function PatientRecord() {
             referral: enc.referral,
             clinicianName: user?.name,
           });
-          toast.success(`${extra?.name || "Episode"} started`);
+          toast.success(`${extra?.name || "Pathway"} started`);
         }
         const visitId = result.visitId || result.encounter?.id;
         setEnc({ ...enc, show: false, mode: "episode", recordId: "", date: visitDate });
@@ -1537,7 +1540,7 @@ export default function PatientRecord() {
         });
         navigate(`/patients/${p.id}/${extra.route}?${q.toString()}`, withFrom());
       } catch (err) {
-        toast.error(err?.message || (enc.mode === "encounter" ? "Failed to add encounter" : "Failed to start episode"));
+        toast.error(err?.message || (enc.mode === "encounter" ? "Failed to add encounter" : "Failed to start pathway"));
       } finally {
         setStarting(false);
       }
@@ -1572,7 +1575,7 @@ export default function PatientRecord() {
           referral: enc.referral,
           clinicianName: user?.name,
         });
-        toast.success(`${DISEASE_SPECS[enc.disease]?.name || "Episode"} started`);
+        toast.success(`${DISEASE_SPECS[enc.disease]?.name || "Pathway"} started`);
       }
       const visitId = result.visitId || result.encounter?.id;
       setEnc({ ...enc, show: false, mode: "episode", recordId: "", date: visitDate });
@@ -1581,7 +1584,7 @@ export default function PatientRecord() {
         withFrom()
       );
     } catch (err) {
-      toast.error(err?.message || (enc.mode === "encounter" ? "Failed to add encounter" : "Failed to start episode"));
+      toast.error(err?.message || (enc.mode === "encounter" ? "Failed to add encounter" : "Failed to start pathway"));
     } finally {
       setStarting(false);
     }
@@ -1589,7 +1592,7 @@ export default function PatientRecord() {
 
   const start = () => {
     if (enc.mode !== "encounter" && enc.disease && activeDiseaseIds.has(enc.disease)) {
-      return toast.error("This disease already has an active episode — close it first or choose another");
+      return toast.error("This disease already has an active pathway — close it first or choose another");
     }
     if (enc.referral === "Yes" && (!enc.province || !enc.district)) return toast.error("Choose province and district for the referral");
     if (!enc.facility || !enc.visitType) return toast.error("Choose location and visit type");
@@ -1709,7 +1712,7 @@ export default function PatientRecord() {
       ? episodeNumber(episodesByDisease[activeTab], selectedEpisode.id)
       : "";
     const episodeCaption = selectedEpisode
-      ? `Episode ${epNo} · ${visitLabel(selectedEpisode.visitCount)}`
+      ? `Pathway ${epNo} · ${visitLabel(selectedEpisode.visitCount)}`
       : "";
     const episodeDates = selectedEpisode
       ? episodeDateParts(selectedEpisode)
@@ -1824,6 +1827,31 @@ export default function PatientRecord() {
           <Printer className="mr-2 h-4 w-4" /> Print
         </Button>
       )}
+      {activeTab === FP_ID && isExtra(FP_ID) && (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11"
+          data-testid="print-fp-visit-summary-btn"
+          onClick={() => {
+            const ep = groupDiseaseEpisodes(encs, FP_ID, null)[0];
+            const visitList = [...(ep?.visits || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+            if (!visitList.length) {
+              toast.error("No visits to print yet");
+              return;
+            }
+            printProgramVisitSummary({
+              diseaseName: FP_NAME,
+              episode: ep,
+              visits: visitList,
+              caption: `${FP_NAME} · ${visitLabel(ep?.visitCount || visitList.length)}`,
+              dates: `Start: ${fmtDate(ep?.start)} · Latest: ${fmtDate(ep?.last || visitList[visitList.length - 1]?.date)}`,
+            });
+          }}
+        >
+          <Printer className="mr-2 h-4 w-4" /> Print
+        </Button>
+      )}
       <Button
         className="h-11"
         data-testid="add-encounter-btn"
@@ -1838,7 +1866,7 @@ export default function PatientRecord() {
           })
         }
       >
-        <Plus className="h-4 w-4" /> Episode
+        <Plus className="h-4 w-4" /> Pathways
       </Button>
       {p.phone && (
         <>
@@ -1935,7 +1963,7 @@ export default function PatientRecord() {
                           <button
                             type="button"
                             data-testid={`tab-${k}-episodes`}
-                            aria-label={`${label} episodes`}
+                            aria-label={`${label} pathways`}
                             className={`${tabCls} rounded-l-none px-2`}
                             onClick={() => selectTab(k)}
                           >
@@ -1953,7 +1981,7 @@ export default function PatientRecord() {
                                 setEpisodeSel((s) => ({ ...s, [k]: ep.id }));
                               }}
                             >
-                              <span className="font-semibold">Episode {episodeNumber(episodes, ep.id)} · {visitLabel(ep.visitCount)}</span>
+                              <span className="font-semibold">Pathway {episodeNumber(episodes, ep.id)} · {visitLabel(ep.visitCount)}</span>
                               <span className="text-xs text-muted-foreground">
                                 {episodeDateParts(ep).map((d) => `${d.label}: ${d.value}`).join(" · ")}
                                 {` · ${episodeStatus(ep.outcome)}`}
@@ -2020,6 +2048,19 @@ export default function PatientRecord() {
               onEdit={(v) => navigate(`/patients/${p.id}/malnutrition?enc=${encodeURIComponent(v.id)}`)}
               onAddVisit={(episode) => openProgramEncounter(MAL_ID, episode)}
               onPrint={printProgramVisitSummary}
+            />
+          )}
+          {activeTab === FP_ID && isExtra(FP_ID) && (
+            <FamilyPlanningDashboard
+              patient={p}
+              encounters={encs}
+              canEdit={canEdit}
+              onEdit={(v, section) => {
+                const q = new URLSearchParams({ enc: v.id });
+                if (section) q.set("section", String(section));
+                navigate(`/patients/${p.id}/familyplanning?${q.toString()}`);
+              }}
+              onAddVisit={(episode) => openProgramEncounter(FP_ID, episode)}
             />
           )}
 
@@ -2142,7 +2183,7 @@ export default function PatientRecord() {
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/25 bg-secondary px-4 py-3" data-testid="episode-summary">
                   <div>
                     <p className="font-semibold">
-                      Episode {episodeNumber(episodesByDisease[activeTab], selectedEpisode.id)}
+                      Pathway {episodeNumber(episodesByDisease[activeTab], selectedEpisode.id)}
                       {" · "}{visitLabel(selectedEpisode.visitCount)}
                     </p>
                     <p className="mt-0.5 text-xs font-medium text-secondary-foreground/80">
@@ -2206,7 +2247,7 @@ export default function PatientRecord() {
                       {fmtDate(v.date)}
                       {v.type ? ` · ${v.type}` : ""}
                       {v.facility ? ` · ${v.facility}` : ""}
-                      {" · "}A visit was created for this episode. Continue to complete the entry form.
+                      {" · "}A visit was created for this pathway. Continue to complete the entry form.
                     </p>
                   </div>
                   {canEdit && (
@@ -2433,7 +2474,7 @@ export default function PatientRecord() {
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-md" data-testid="add-encounter-dialog">
           <DialogHeader>
             <DialogTitle className="font-head text-xl">
-              {enc.mode === "encounter" ? "Add Encounter" : "Add Episode"}
+              {enc.mode === "encounter" ? "Add Encounter" : "Add Pathways"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-5">
@@ -2505,7 +2546,7 @@ export default function PatientRecord() {
               testid="encounter-facility-select"
               hint={
                 enc.mode === "encounter"
-                  ? "Using the location from this episode"
+                  ? "Using the location from this pathway"
                   : enc.referral === "Yes" && !enc.district
                     ? "Select province and district to see referral locations"
                     : enc.referral === "Yes" && locationOptions.length === 0
@@ -2539,9 +2580,9 @@ export default function PatientRecord() {
               testid="encounter-target-select"
               hint={
                 enc.mode === "encounter"
-                  ? `Locked to ${diseaseLabel(enc.disease)} episode`
+                  ? `Locked to ${diseaseLabel(enc.disease)} pathway`
                   : activeDiseaseIds.size
-                    ? "Active diseases are hidden — close the episode to start a new one"
+                    ? "Active diseases are hidden — close the pathway to start a new one"
                     : undefined
               }
             />
@@ -2553,7 +2594,7 @@ export default function PatientRecord() {
                 ? "Starting…"
                 : enc.mode === "encounter"
                   ? "Start Encounter"
-                  : "Start Episode"}
+                  : "Start Pathways"}
             </Button>
           </DialogFooter>
         </DialogContent>

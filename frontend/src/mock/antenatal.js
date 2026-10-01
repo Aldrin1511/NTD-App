@@ -435,7 +435,30 @@ export const ancEntryDropdownVaccines = (vaccines, records, firstContact, lmp, r
 export const DELIVERY_TYPES = ["SVD (Normal)", "Assisted (Vacuum/Forceps)", "Caesarean section", "Breech delivery", "Vacuum"];
 export const DELIVERY_COMPLICATIONS = ["None", "PPH", "3/4 perineal laceration", "Vacuum"];
 export const FETUS_COUNTS = ["1", "2", "3", "4", "5"];
-export const FAMILY_PLANNING = ["None", "Pill", "Injection", "Implant", "Planned"];
+/** Full Apex / Family Planning services (+ None / Planned for delivery context). */
+export const FAMILY_PLANNING = [
+  "None",
+  "Condom",
+  "Emergency contraceptive",
+  "Oral Contraceptive pill",
+  "Injectable",
+  "Implant",
+  "IUD Insertion - 10 years",
+  "Tubal Ligation",
+  "Implant removal",
+  "IUD removal",
+  "Planned",
+];
+/** Map legacy ANC chip values → current Family Planning services. */
+export const normalizeFamilyPlanningService = (raw) => {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const legacy = {
+    Pill: "Oral Contraceptive pill",
+    Injection: "Injectable",
+    Implant: "Implant",  };
+  return legacy[s] || s;
+};
 export const POSTPARTUM_COMPLICATIONS = [
   "Fever", "Hypertension", "Anaemia", "Poor Milk Supply", "Urinary Infection", "Respiratory Infection",
   "Seizure", "Patient Death", "Teenage (<20Y)", "Maternal Death", "BBA", "Village Birth",

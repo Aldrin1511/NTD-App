@@ -48,7 +48,7 @@ async function replayStartEpisode(op, facilityId, clinicianId) {
   const p = op.payload || {};
   const { patientId } = await resolvePatientIds(p.patientId);
   if (isLocalId(patientId)) {
-    throw new Error("Patient must be synced before starting an episode");
+    throw new Error("Patient must be synced before starting a pathway");
   }
   const data = await startEpisode(patientId, {
     disease: p.disease,
@@ -88,7 +88,7 @@ async function replayAddVisit(op, facilityId, clinicianId) {
   const { patientId } = await resolvePatientIds(p.patientId);
   const recordId = await resolveEntityId(p.recordId);
   if (isLocalId(patientId) || isLocalId(recordId)) {
-    throw new Error("Patient/episode must be synced before adding a visit");
+    throw new Error("Patient/pathway must be synced before adding a visit");
   }
   const data = await addEpisodeVisit(patientId, recordId, {
     disease: p.disease,
@@ -229,7 +229,7 @@ async function replaySaveForm(op) {
   }
 
   if (!encounterId || isLocalId(encounterId)) {
-    throw new Error("Missing encounterId for form sync — sync the episode first");
+    throw new Error("Missing encounterId for form sync — sync the pathway first");
   }
   if (!disease) {
     throw new Error("Missing disease on form sync payload");

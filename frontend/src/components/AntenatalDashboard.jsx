@@ -11,6 +11,7 @@ import { ANTENATAL_ID, ANTENATAL_NAME, resolveDating, trimesterLabel, trimesterC
 } from "@/mock/antenatal";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { ancMedicationRows } from "@/components/AntenatalMedications";
+import { formatServiceDetails } from "@/mock/familyPlanning";
 import { Pencil, Plus, Baby, Activity, Printer, CalendarCheck, LineChart as ChartIcon } from "lucide-react";
 
 const chip = { green: "text-green-700", amber: "text-amber-700", red: "text-red-700", "": "text-foreground" };
@@ -145,8 +146,9 @@ export const ANC_SECTIONS = {
   immunization: 9,
   notes: 10,
   delivery: 11,
-  newborn: 12,
-  outcome: 13,
+  familyPlanning: 12,
+  newborn: 13,
+  outcome: 14,
 };
 
 const statusBadgeCls = {
@@ -220,11 +222,18 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       del.outcome ||
       del.complication ||
       del.fetuses ||
-      del.familyPlanning ||
       (del.postpartum || []).length ||
       (del.babies || []).length
     );
+  const fpHasContent = (del = {}) => {
+    const exclusive = String(del.familyPlanning || "").trim();
+    if (exclusive === "None" || exclusive === "Planned") return true;
+    if ((del.familyPlanningServices || []).length) return true;
+    if (exclusive && exclusive !== "None" && exclusive !== "Planned") return true;
+    return false;
+  };
   const deliveryVisits = visits.filter((v) => deliveryHasContent(v.data?.delivery));
+  const fpVisits = visits.filter((v) => fpHasContent(v.data?.delivery));
   // Legacy visit-level exam OR any baby with physicalExam
   const examVisits = visits.filter((v) => {
     if (v.data?.physicalExam && Object.keys(v.data.physicalExam).some((k) => v.data.physicalExam[k])) return true;
@@ -290,6 +299,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
     drugVisits.length > 0 && "drugs",
     "immunization",
     deliveryVisits.length > 0 && "delivery",
+    fpVisits.length > 0 && "familyPlanning",
     showExamLegacy && "exam",
     noteVisits.length > 0 && "notes",
     outcomeVisits.length > 0 && "outcome",
@@ -303,10 +313,10 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/25 bg-secondary px-4 py-3" data-testid="anc-episode-summary">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="font-semibold">Pregnancy episode · {visitLabel(episode.visitCount)}</p>
+            <p className="font-semibold">Pregnancy pathway · {visitLabel(episode.visitCount)}</p>
             {episodes.length > 1 && (
               <select value={sel} onChange={(e) => setSel(e.target.value)} data-testid="anc-episode-select" className="rounded-md border border-input bg-white px-2 py-1 text-xs font-semibold">
-                {episodes.map((ep, i) => <option key={ep.id} value={ep.id}>Episode {episodes.length - i}</option>)}
+                {episodes.map((ep, i) => <option key={ep.id} value={ep.id}>Pathway {episodes.length - i}</option>)}
               </select>
             )}
             <Badge variant="outline" className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${statusBadgeCls[ancStatusColor(status)] || statusBadgeCls.green}`} data-testid="anc-episode-status">
@@ -342,7 +352,7 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                   diseaseName: ANTENATAL_NAME,
                   episode,
                   visits,
-                  caption: `Pregnancy episode · ${visitLabel(episode.visitCount)}`,
+                  caption: `Pregnancy pathway · ${visitLabel(episode.visitCount)}`,
                   dates: `Start: ${fmtDate(episode.start)} · Latest: ${fmtDate(episode.last)}`,
                 })
               }
@@ -704,6 +714,54 @@ export default function AntenatalDashboard({ patient, encounters, canEdit, onEdi
                     </div>
                   );
                 })}
+              </div>
+            );
+          })}
+        </FeatureCard>
+      )}
+
+      {fpVisits.length > 0 && (
+        <FeatureCard
+          title="Family Planning"
+          count={fpVisits.length}
+          testid="anc-feat-fp"
+          open={cardOpen("familyPlanning")}
+          onOpenChange={setCardOpen("familyPlanning")}
+        >
+          {fpVisits.map((v) => {
+            const del = v.data.delivery || {};
+            const exclusive = String(del.familyPlanning || "").trim();
+            const rows = Array.isArray(del.familyPlanningServices) ? del.familyPlanningServices : [];
+            return (
+              <div key={v.id} className="space-y-2 border-b border-border/60 py-2 last:border-0" data-testid={`anc-fp-${v.id}`}>
+                <VisitHead v={v} onEdit={onEdit} canEdit={canEdit} section={ANC_SECTIONS.familyPlanning} testid={`anc-fp-edit-${v.id}`} />
+                {exclusive === "None" && (
+                  <p className="text-sm">None</p>
+                )}
+                {exclusive === "Planned" && (
+                  <p className="text-sm">
+                    <b>Planned</b>
+                    {del.familyPlanningPlannedDate ? ` · ${fmtDate(del.familyPlanningPlannedDate)}` : ""}
+                  </p>
+                )}
+                {rows.length > 0 && (
+                  <div className="space-y-1.5">
+                    {rows.map((row) => {
+                      const name = row.service || row.familyPlanningService;
+                      const details = formatServiceDetails(name, row.rawData?.childData || {});
+                      return (
+                        <p key={row.id || name} className="text-sm">
+                          <b>{name}</b>
+                          {row.dateOfService || row.dateOfServiceIso ? ` · ${row.dateOfService || fmtDate(row.dateOfServiceIso)}` : ""}
+                          {details && details !== "—" ? ` · ${details}` : ""}
+                        </p>
+                      );
+                    })}
+                  </div>
+                )}
+                {!exclusive && !rows.length && del.familyPlanning && (
+                  <p className="text-sm">{del.familyPlanning}</p>
+                )}
               </div>
             );
           })}

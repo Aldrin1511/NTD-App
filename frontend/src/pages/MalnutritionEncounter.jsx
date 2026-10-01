@@ -205,7 +205,7 @@ export default function MalnutritionEncounter() {
 
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
 
-  const { queueSectionDiff, queueField } = useExtraPhiAutosave({
+  const { queueSectionDiff, queueField, flushPendingPhi } = useExtraPhiAutosave({
     online,
     upsertEncounterPhiField,
     patientId: p?.id || id,
@@ -321,6 +321,7 @@ export default function MalnutritionEncounter() {
       saveEncounter,
       upsertEncounterPhiField,
       finalizeEncounterPhi,
+      flushPendingPhi,
       existing,
       payload: {
         id: existing?.id,
@@ -638,7 +639,7 @@ export default function MalnutritionEncounter() {
             <AreaField label="Details" rows={2} value={d.outcome.note || ""} onChange={(e) => set("outcome", { ...d.outcome, note: e.target.value })} testid="mal-outcome-note" />
           )}
           {isMalEpisodeClosed(d.outcome.status) && (
-            <AlertPanel level="review" title="This closes the malnutrition episode" testid="mal-outcome-close">
+            <AlertPanel level="review" title="This closes the malnutrition pathway" testid="mal-outcome-close">
               Any outcome other than Active closes the case. Active keeps follow-up open.
             </AlertPanel>
           )}

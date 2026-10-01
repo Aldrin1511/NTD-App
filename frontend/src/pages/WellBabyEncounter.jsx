@@ -18,10 +18,14 @@ import {
   ANTENATAL_ID,
   DELIVERY_TYPES, DELIVERY_COMPLICATIONS, FETUS_COUNTS, FAMILY_PLANNING, POSTPARTUM_COMPLICATIONS,
   DELIVERY_OUTCOMES, BABY_SEX, BABY_COMPLICATIONS, BABY_OUTCOMES, BABY_OUTCOME_ALERTS, YES_NO,
-  PHYSICAL_EXAM_FIELDS, babyName,
+  PHYSICAL_EXAM_FIELDS, babyName, normalizeFamilyPlanningService,
 } from "@/mock/antenatal";
 import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
 import AntenatalMedications from "@/components/AntenatalMedications";
+import FamilyPlanningServicesPicker, {
+  exclusiveFamilyPlanningValue,
+  legacyFamilyPlanningToRows,
+} from "@/components/FamilyPlanningServicesPicker";
 import { toast } from "sonner";
 import { persistIntegratedEncounter, useExtraPhiAutosave, useLoadEncounterPhi } from "@/lib/extraEncounterSync";
 
@@ -213,7 +217,21 @@ const normalizeDelivery = (raw = {}, patient = {}) => {
     complication: raw.complication || details.complication || "",
     fetuses,
     fetusLengths: raw.fetusLengths || details.fetusLengths || {},
-    familyPlanning: raw.familyPlanning || details.familyPlanning || "",
+    familyPlanning: normalizeFamilyPlanningService(raw.familyPlanning || details.familyPlanning || ""),
+    familyPlanningDetails: raw.familyPlanningDetails || details.familyPlanningDetails || {},
+    familyPlanningPlannedDate:
+      normalizeFamilyPlanningService(raw.familyPlanning || details.familyPlanning || "") === "Planned"
+        ? (raw.familyPlanningPlannedDate || details.familyPlanningPlannedDate || "")
+        : "",
+    familyPlanningServices: (() => {
+      const merged = {
+        familyPlanning: normalizeFamilyPlanningService(raw.familyPlanning || details.familyPlanning || ""),
+        familyPlanningDetails: raw.familyPlanningDetails || details.familyPlanningDetails || {},
+        familyPlanningServices: raw.familyPlanningServices || details.familyPlanningServices,
+        date: raw.date || raw.deliveryDate || details.date || details.deliveryDate || "",
+      };
+      return legacyFamilyPlanningToRows(merged);
+    })(),
     postpartum: raw.postpartum || details.postpartum || [],
     babies,
     motherId: raw.motherId || details.motherId || patient?.bornFrom || "",
@@ -366,7 +384,7 @@ export default function WellBabyEncounter() {
   const vaccineDrugs = (settings.drugs || []).filter((x) => x.type === "Vaccine" || x.form === "Vaccine");
   const facilityHasLab = useMemo(() => (facilities || []).some((f) => f.name === facility && f.hasLab), [facilities, facility]);
 
-  const { queueSectionDiff, queueField } = useExtraPhiAutosave({
+  const { queueSectionDiff, queueField, flushPendingPhi } = useExtraPhiAutosave({
     online,
     upsertEncounterPhiField,
     patientId: p?.id || id,
@@ -607,6 +625,7 @@ export default function WellBabyEncounter() {
       saveEncounter,
       upsertEncounterPhiField,
       finalizeEncounterPhi,
+      flushPendingPhi,
       existing,
       payload: {
         id: existing?.id,
@@ -632,7 +651,7 @@ export default function WellBabyEncounter() {
   const sections = [
     {
       title: "Delivery details",
-      done: !!(delivery.deliveryDate || delivery.date || delivery.mode || delivery.type || delivery.place || delivery.outcome || delivery.complication || delivery.fetuses || delivery.familyPlanning || (delivery.postpartum || []).length),
+      done: !!(delivery.deliveryDate || delivery.date || delivery.mode || delivery.type || delivery.place || delivery.outcome || delivery.complication || delivery.fetuses || delivery.familyPlanning || (delivery.familyPlanningServices || []).length || (delivery.postpartum || []).length),
       body: (
         <div className="space-y-5">
           {(carriedFromPrior || carriedFromMother) && (
@@ -691,11 +710,30 @@ export default function WellBabyEncounter() {
               ))}
             </div>
           )}
-          <ChoiceChips
-            label="Family planning"
+          <FamilyPlanningServicesPicker
             options={FAMILY_PLANNING}
-            value={delivery.familyPlanning || ""}
-            onChange={(v) => setDelivery({ familyPlanning: v })}
+            value={delivery.familyPlanningServices || []}
+            onChange={(rows) =>
+              setDelivery({
+                familyPlanningServices: rows,
+                familyPlanning: rows.map((r) => r.service || r.familyPlanningService).filter(Boolean).join(", "),
+                familyPlanningDetails: rows[0]?.rawData?.childData || {},
+                familyPlanningPlannedDate: "",
+              })
+            }
+            exclusiveOptions={["None", "Planned"]}
+            exclusiveValue={exclusiveFamilyPlanningValue(delivery)}
+            onExclusiveChange={(v) =>
+              setDelivery({
+                familyPlanning: v,
+                familyPlanningServices: [],
+                familyPlanningDetails: {},
+                familyPlanningPlannedDate: v === "Planned" ? (delivery.familyPlanningPlannedDate || localISODate()) : "",
+              })
+            }
+            plannedDate={delivery.familyPlanningPlannedDate || ""}
+            onPlannedDateChange={(date) => setDelivery({ familyPlanningPlannedDate: date || "" })}
+            label="Family planning (multi-select)"
             testid="wb-del-fp"
           />
           <CheckGrid

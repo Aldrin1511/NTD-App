@@ -11,6 +11,7 @@ import ScabiesEncounter from "@/pages/Encounter";
 import AntenatalEncounter from "@/pages/AntenatalEncounter";
 import WellBabyEncounter from "@/pages/WellBabyEncounter";
 import MalnutritionEncounter from "@/pages/MalnutritionEncounter";
+import FamilyPlanningEncounter from "@/pages/FamilyPlanningEncounter";
 import SchoolHealth, { SchoolHealthVisit } from "@/pages/SchoolHealth";
 import SuspectScreen from "@/pages/SuspectScreen";
 // Admin module hidden for now — re-enable import + route when ready
@@ -65,6 +66,7 @@ function Shell() {
       <Route path="/patients/:id/antenatal" element={<Guard><AntenatalEncounter /></Guard>} />
       <Route path="/patients/:id/wellbaby" element={<Guard><WellBabyEncounter /></Guard>} />
       <Route path="/patients/:id/malnutrition" element={<Guard><MalnutritionEncounter /></Guard>} />
+      <Route path="/patients/:id/familyplanning" element={<Guard><FamilyPlanningEncounter /></Guard>} />
       <Route path="/school-health" element={<Guard><SchoolHealth /></Guard>} />
       <Route path="/school-health/:visitId" element={<Guard><SchoolHealthVisit /></Guard>} />
       <Route path="/patients/:id/disease/:diseaseId" element={<Guard><PatientRecord /></Guard>} />

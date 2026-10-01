@@ -10,6 +10,7 @@ export const FEATURE_CODES = {
   antenatal: "ANAS",
   malnutrition: "MLAS",
   wellbaby: "WBAS",
+  familyplanning: "FPAS",
 };
 
 export function featureCodeForDisease(disease) {
@@ -17,7 +18,7 @@ export function featureCodeForDisease(disease) {
 }
 
 /** ANC / malnutrition / well-baby — dedicated forms; ignore stub DISEASE_SPECS from Access configs. */
-export const EXTRA_DISEASE_IDS = new Set(["antenatal", "malnutrition", "wellbaby"]);
+export const EXTRA_DISEASE_IDS = new Set(["antenatal", "malnutrition", "wellbaby", "familyplanning"]);
 
 export function isExtraDisease(disease) {
   return EXTRA_DISEASE_IDS.has(String(disease || "").toLowerCase());
@@ -70,6 +71,12 @@ export const EXTRA_PHI_SECTIONS = {
     medCourses: "Medications",
     notes: "Visit notes",
     outcome: "Final case outcome",
+  },
+  familyplanning: {
+    caseDetails: "Case details",
+    history: "Family Planning Clinical history",
+    services: "Family Planning",
+    notes: "Visit notes",
   },
 };
 

@@ -501,7 +501,7 @@ export default function PatientForm({ f, setF, patientId, patientCode, mode = "c
     <div className="min-w-0 space-y-6">
       <SectionCard
         title="Patient identity"
-        desc={displayPid ? `PID ${displayPid} is kept. Episode IDs are not changed.` : "Patient ID and episode ID are generated automatically"}
+        desc={displayPid ? `PID ${displayPid} is kept. Pathway IDs are not changed.` : "Patient ID and pathway ID are generated automatically"}
       >
         <div className="grid min-w-0 gap-5 sm:grid-cols-2">
           {displayPid && (

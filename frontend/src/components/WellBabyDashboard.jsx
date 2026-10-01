@@ -8,6 +8,8 @@ import MilestoneChart from "@/components/MilestoneChart";
 import { dobFromAge, formatAgeYMD } from "@/components/Capture";
 import { fmtDate, fmtDateTime, groupDiseaseEpisodes } from "@/mock/specs";
 import { WELLBABY_ID, WELLBABY_NAME, immunizationDueFromDob, isVaccineOverdue, WELLBABY_DRUG_META } from "@/mock/wellbaby";
+import { formatServiceDetails } from "@/mock/familyPlanning";
+import { normalizeFamilyPlanningService } from "@/mock/antenatal";
 import { monthsBetween } from "@/mock/growth";
 import { ImmunizationDashCards } from "@/components/ImmunizationCards";
 import { medicationRows } from "@/components/AntenatalMedications";
@@ -100,18 +102,43 @@ export default function WellBabyDashboard({ patient, encounters, settings, canEd
     .filter((v) => v.data.lab.length > 0);
   const editVisit = immunVisits[0] || visits[0];
 
-  const deliverySummary = (del = {}) =>
-    [
+  const deliverySummary = (del = {}) => {
+    const rows = Array.isArray(del.familyPlanningServices) && del.familyPlanningServices.length
+      ? del.familyPlanningServices
+      : null;
+    let fpLabel = null;
+    if (rows) {
+      fpLabel = rows
+        .map((r) => {
+          const name = r.service || r.familyPlanningService;
+          if (!name || name === "None" || name === "Planned") return null;
+          const details = formatServiceDetails(name, r.rawData?.childData || {});
+          return details && details !== "—" ? `${name} (${details})` : name;
+        })
+        .filter(Boolean)
+        .join(", ");
+      if (fpLabel) fpLabel = `FP: ${fpLabel}`;
+    } else {
+      const fp = normalizeFamilyPlanningService(del.familyPlanning);
+      const fpDetails = fp && fp !== "None" && fp !== "Planned"
+        ? formatServiceDetails(fp, del.familyPlanningDetails || {})
+        : "";
+      if (fp && fp !== "None") {
+        fpLabel = `FP: ${fp}${fpDetails && fpDetails !== "—" ? ` (${fpDetails})` : ""}`;
+      }
+    }
+    return [
       del.deliveryDate || del.date ? fmtDate(del.deliveryDate || del.date) : null,
       del.mode || del.type || null,
       del.complication && del.complication !== "None" ? del.complication : null,
       del.fetuses ? `${del.fetuses} fetus${String(del.fetuses) === "1" ? "" : "es"}` : null,
-      del.familyPlanning && del.familyPlanning !== "None" ? `FP: ${del.familyPlanning}` : null,
+      fpLabel,
       (del.postpartum || []).length ? del.postpartum.join(", ") : null,
       del.place || del.outcome || null,
     ]
       .filter(Boolean)
       .join(" · ") || "—";
+  };
 
   const primaryBaby = (del = {}) =>
     (del.babies || []).find((b) => b.patientId) || (del.babies || [])[0] || del;

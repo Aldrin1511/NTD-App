@@ -151,7 +151,7 @@ export default function Dashboard() {
       )}
 
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="New episodes" value={rows.length} sub="Scabies episodes opened" icon={TrendingUp} testid="kpi-episodes" />
+        <Kpi label="New pathways" value={rows.length} sub="Scabies pathways opened" icon={TrendingUp} testid="kpi-episodes" />
         <Kpi label="Patients" value={rows.length} sub={`${children} children under 15`} icon={Users} testid="kpi-patients" />
         <Kpi label="Households" value={hh.length} sub={`${hh.reduce((a, h) => a + h.members, 0)} members listed`} icon={Home} testid="kpi-households" />
         <Kpi label="Household coverage" value={`${coverage}%`} sub="Members treated simultaneously" icon={Percent} tone="routine" testid="kpi-coverage" />
@@ -163,12 +163,12 @@ export default function Dashboard() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <div className="rounded-lg border border-border bg-white p-5 lg:col-span-2">
-          <h3 className="font-head text-xl font-semibold tracking-tight">Episodes by month</h3>
-          <p className="mb-4 text-sm text-muted-foreground">New scabies episodes vs confirmed cases</p>
+          <h3 className="font-head text-xl font-semibold tracking-tight">Pathways by month</h3>
+          <p className="mb-4 text-sm text-muted-foreground">New scabies pathways vs confirmed cases</p>
           {asTable ? (
             <div className="overflow-x-auto rounded-md border border-border" data-testid="mis-trend-table">
               <table className="w-full text-sm">
-                <thead className="bg-muted"><tr><th className="p-2 text-left font-semibold">Month</th><th className="p-2 text-left font-semibold">Episodes</th><th className="p-2 text-left font-semibold">Confirmed</th></tr></thead>
+                <thead className="bg-muted"><tr><th className="p-2 text-left font-semibold">Month</th><th className="p-2 text-left font-semibold">Pathways</th><th className="p-2 text-left font-semibold">Confirmed</th></tr></thead>
                 <tbody>{MIS_TREND.map((r) => (<tr key={r.month} className="border-t border-border"><td className="p-2 font-semibold">{r.month}</td><td className="p-2">{r.episodes}</td><td className="p-2">{r.confirmed}</td></tr>))}</tbody>
               </table>
             </div>
@@ -245,7 +245,7 @@ export default function Dashboard() {
             2 households below 50% treatment coverage; 1 patient with suspected treatment failure.
           </AlertPanel>
           <AlertPanel level="routine" title="🟢 Routine" testid="alert-routine">
-            {encounters.filter((e) => e.outcome).length} treatment episodes closed with recorded outcomes.
+            {encounters.filter((e) => e.outcome).length} treatment pathways closed with recorded outcomes.
           </AlertPanel>
           <InstallPrompt />
         </div>

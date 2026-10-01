@@ -9,9 +9,21 @@ import {
   phiItemForExtraFieldChange,
 } from "@/lib/phiMap";
 
+function isPhiEmpty(v) {
+  if (v === undefined || v === null || v === "") return true;
+  if (Array.isArray(v) && v.length === 0) return true;
+  if (typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0) return true;
+  return false;
+}
+
 /**
- * Persist ANC / malnutrition / well-baby encounters the same way as skin NTDs:
- * local encounter + PHI upserts + finalize when online with real visit/encounter ids.
+ * Persist ANC / malnutrition / well-baby / family-planning like skin NTDs:
+ * trust autosave for field values → flush pending debounced upserts →
+ * light diagnosis/outcome flush → finalize (action → null) → local save.
+ *
+ * Pass `forceFullPhiUpsert: true` when seeding a brand-new visit that never
+ * went through the form autosave path (e.g. FP created from ANC delivery).
+ * Full upserts run in parallel (not sequential) to keep latency down.
  */
 export async function persistIntegratedEncounter({
   online,
@@ -20,6 +32,8 @@ export async function persistIntegratedEncounter({
   finalizeEncounterPhi,
   existing,
   payload,
+  flushPendingPhi,
+  forceFullPhiUpsert = false,
 }) {
   const disease = payload.disease;
   const featureCode =
@@ -52,12 +66,6 @@ export async function persistIntegratedEncounter({
     featureCode;
 
   if (canWritePhi && typeof upsertEncounterPhiField === "function") {
-    const items = flattenEncounterToPhiItems({
-      disease,
-      data: payload.data || {},
-      diagnosis: payload.diagnosis,
-      outcome: payload.outcome,
-    });
     const phiEncounter = {
       patientId: payload.patientId,
       encounterId,
@@ -66,13 +74,63 @@ export async function persistIntegratedEncounter({
       featureCode,
       disease,
     };
-    for (const item of items) {
+
+    // 1) Flush any debounced autosave still waiting (same idea as Encounter.jsx clearing timers)
+    if (typeof flushPendingPhi === "function") {
       try {
-        await upsertEncounterPhiField(phiEncounter, item);
+        await flushPendingPhi();
       } catch (err) {
-        console.warn("PHI upsert failed", item?.fieldKey || item?.item, err);
+        console.warn("PHI pending flush failed", err);
       }
     }
+
+    // 2a) Seed / recovery path — full form upsert in parallel
+    // 2b) Normal Save — only diagnosis + outcome (autosave already has the rest)
+    let items = [];
+    if (forceFullPhiUpsert) {
+      items = flattenEncounterToPhiItems({
+        disease,
+        data: payload.data || {},
+        diagnosis: payload.diagnosis,
+        outcome: payload.outcome,
+      });
+    } else {
+      if (!isPhiEmpty(payload.diagnosis)) {
+        items.push({
+          item: "Diagnosis",
+          subFeatureCode: "Diagnosis",
+          value: payload.diagnosis,
+          fieldKey: "diagnosis",
+        });
+      }
+      const out =
+        payload.outcome ||
+        (typeof payload.data?.outcome === "object" && payload.data.outcome != null
+          ? payload.data.outcome.status || payload.data.outcome
+          : payload.data?.outcome);
+      if (!isPhiEmpty(out)) {
+        items.push({
+          item: "Outcome",
+          subFeatureCode: "Final case outcome",
+          value: out,
+          fieldKey: "outcome",
+        });
+      }
+    }
+
+    if (items.length) {
+      await Promise.all(
+        items.map(async (item) => {
+          try {
+            await upsertEncounterPhiField(phiEncounter, item);
+          } catch (err) {
+            console.warn("PHI upsert failed", item?.fieldKey || item?.item, err);
+          }
+        }),
+      );
+    }
+
+    // 3) Commit ProgressEdited → action null
     if (typeof finalizeEncounterPhi === "function") {
       await finalizeEncounterPhi({
         patientId: payload.patientId,
@@ -93,6 +151,7 @@ export async function persistIntegratedEncounter({
 
 /**
  * Debounced per-field PHI autosave (same pattern as Encounter.jsx for scabies/yaws/…).
+ * Exposes flushPendingPhi so Save can push in-flight debounced writes before finalize.
  */
 export function useExtraPhiAutosave({
   online,
@@ -114,23 +173,61 @@ export function useExtraPhiAutosave({
   );
 
   const timers = useRef({});
+  const pending = useRef({});
   const sections = EXTRA_PHI_SECTIONS[diseaseId] || {};
 
   const queuePhiItems = (items, delay = 350) => {
     (items || []).forEach((item) => {
       const key = item.fieldKey || `${item.subFeatureCode}::${item.item}`;
+      pending.current[key] = item;
       if (timers.current[key]) clearTimeout(timers.current[key]);
       timers.current[key] = setTimeout(() => {
+        delete timers.current[key];
+        const latest = pending.current[key];
+        delete pending.current[key];
         const visitId = phiEncounter.visitId || "";
         const encId = phiEncounter.encounterId || "";
         if (!online || !encId || String(visitId).startsWith("local-") || String(encId).startsWith("local-")) {
           return;
         }
-        upsertEncounterPhiField(phiEncounter, item).catch((err) => {
+        if (!latest) return;
+        upsertEncounterPhiField(phiEncounter, latest).catch((err) => {
           console.warn("PHI autosave failed", key, err);
         });
       }, delay);
     });
+  };
+
+  /** Immediately send all debounced pending PHI items (parallel), then clear timers. */
+  const flushPendingPhi = async () => {
+    const keys = Object.keys(timers.current);
+    keys.forEach((k) => {
+      clearTimeout(timers.current[k]);
+      delete timers.current[k];
+    });
+    const items = Object.values(pending.current);
+    pending.current = {};
+    const visitId = phiEncounter.visitId || "";
+    const encId = phiEncounter.encounterId || "";
+    if (
+      !online ||
+      !encId ||
+      String(visitId).startsWith("local-") ||
+      String(encId).startsWith("local-") ||
+      !items.length ||
+      typeof upsertEncounterPhiField !== "function"
+    ) {
+      return;
+    }
+    await Promise.all(
+      items.map(async (item) => {
+        try {
+          await upsertEncounterPhiField(phiEncounter, item);
+        } catch (err) {
+          console.warn("PHI flush failed", item?.fieldKey || item?.item, err);
+        }
+      }),
+    );
   };
 
   /** Diff a whole section object (caseDetails, history, vitals, …). */
@@ -165,7 +262,7 @@ export function useExtraPhiAutosave({
     );
   };
 
-  return { phiEncounter, queuePhiItems, queueSectionDiff, queueField, sections };
+  return { phiEncounter, queuePhiItems, queueSectionDiff, queueField, flushPendingPhi, sections };
 }
 
 /**

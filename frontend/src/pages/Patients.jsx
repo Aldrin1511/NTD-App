@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { MAL_ID, malLastVisitLabel } from "@/mock/malnutrition";
 import { ANTENATAL_ID } from "@/mock/antenatal";
 import { WELLBABY_ID } from "@/mock/wellbaby";
+import { FP_ID } from "@/mock/familyPlanning";
 import { useAppointmentDateGate } from "@/components/AppointmentDatePrompt";
 import { visitDay } from "@/lib/appointmentDate";
 
@@ -24,6 +25,7 @@ const EXTRA_ROUTES = {
   [ANTENATAL_ID]: "antenatal",
   [WELLBABY_ID]: "wellbaby",
   [MAL_ID]: "malnutrition",
+  [FP_ID]: "familyplanning",
 };
 
 const PERIODS = ["Day", "Week", "Month", "Quarter", "Year", "All", "Custom"];
@@ -187,7 +189,7 @@ export default function Patients() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             data-testid="patient-search-input"
-            placeholder="Search name, patient ID or episode ID"
+            placeholder="Search name, patient ID or pathway ID"
             className="h-12 w-full min-w-0 bg-white pl-10 text-base"
             value={q}
             onChange={(e) => setQ(e.target.value)}

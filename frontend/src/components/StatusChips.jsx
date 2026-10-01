@@ -8,6 +8,7 @@ import {
   MAL_ID, MAL_NAME, malDisplayStatus, malStatusColor, malColorGrade, malWeeksVisited,
 } from "@/mock/malnutrition";
 import { WELLBABY_ID, WELLBABY_NAME } from "@/mock/wellbaby";
+import { FP_ID, FP_NAME } from "@/mock/familyPlanning";
 
 const chipCls = "shrink-0 rounded px-2 py-0.5 text-[11px] font-bold";
 const EPISODE_PREFIX = { SCAB: "scabies", YAWS: "yaws", LF: "lf", BURU: "buruli", LEP: "leprosy" };
@@ -22,6 +23,7 @@ export const DISEASE_CHIP_CLASS = {
   antenatal: "border-transparent bg-fuchsia-700 text-white",
   malnutrition: "border-transparent bg-orange-700 text-white",
   wellbaby: "border-transparent bg-cyan-700 text-white",
+  familyplanning: "border-transparent bg-indigo-700 text-white",
 };
 
 export function diseaseChipClass(diseaseId) {
@@ -54,7 +56,7 @@ export function patientStatusRecords(p, encounters, settings) {
   const latestByDisease = new Map();
   for (const e of encs) {
     if (!e.disease) continue;
-    if (!DISEASE_SPECS[e.disease] && e.disease !== ANTENATAL_ID && e.disease !== MAL_ID && e.disease !== WELLBABY_ID) continue;
+    if (!DISEASE_SPECS[e.disease] && e.disease !== ANTENATAL_ID && e.disease !== MAL_ID && e.disease !== WELLBABY_ID && e.disease !== FP_ID) continue;
     const prev = latestByDisease.get(e.disease);
     if (!prev || String(e.date).localeCompare(String(prev.date)) > 0) latestByDisease.set(e.disease, e);
   }
@@ -62,7 +64,7 @@ export function patientStatusRecords(p, encounters, settings) {
   for (const s of p.diseaseStatuses || []) {
     const id = String(s?.diseaseId || "").toLowerCase();
     if (!id) continue;
-    if (!DISEASE_SPECS[id] && id !== ANTENATAL_ID && id !== MAL_ID && id !== WELLBABY_ID) continue;
+    if (!DISEASE_SPECS[id] && id !== ANTENATAL_ID && id !== MAL_ID && id !== WELLBABY_ID && id !== FP_ID) continue;
     statusByDisease.set(id, s);
   }
   const ids = DISEASES.map((d) => d.id).filter(
@@ -76,6 +78,9 @@ export function patientStatusRecords(p, encounters, settings) {
   }
   if (latestByDisease.has(WELLBABY_ID) || statusByDisease.has(WELLBABY_ID) || (p.diseases || []).includes(WELLBABY_ID) || (p.conditions || []).includes(WELLBABY_ID)) {
     if (!ids.includes(WELLBABY_ID)) ids.push(WELLBABY_ID);
+  }
+  if (latestByDisease.has(FP_ID) || statusByDisease.has(FP_ID) || (p.diseases || []).includes(FP_ID) || (p.conditions || []).includes(FP_ID)) {
+    if (!ids.includes(FP_ID)) ids.push(FP_ID);
   }
   if (!ids.length && encs.length) {
     const last = [...encs].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
@@ -133,6 +138,14 @@ export function patientStatusRecords(p, encounters, settings) {
       return {
         diseaseId,
         diseaseName: WELLBABY_NAME,
+        diagnosis: real(last?.diagnosis) || real(persisted?.diagnosis),
+        outcome: real(last?.outcome) || real(persisted?.outcome) || "Active",
+      };
+    }
+    if (diseaseId === FP_ID) {
+      return {
+        diseaseId,
+        diseaseName: FP_NAME,
         diagnosis: real(last?.diagnosis) || real(persisted?.diagnosis),
         outcome: real(last?.outcome) || real(persisted?.outcome) || "Active",
       };

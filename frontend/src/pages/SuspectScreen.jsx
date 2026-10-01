@@ -75,11 +75,11 @@ export default function SuspectScreen() {
       return null;
     }
     if (!visitType) {
-      toast.error("Visit type is missing — start again from Add Episode");
+      toast.error("Visit type is missing — start again from Add Pathways");
       return null;
     }
     if (!locationId) {
-      toast.error("Location is missing — start again from Add Episode and choose a location");
+      toast.error("Location is missing — start again from Add Pathways and choose a location");
       return null;
     }
     if (!authSession?.facilityId) {
@@ -141,7 +141,7 @@ export default function SuspectScreen() {
       markSaved(formState);
       addDisease(p.id, diseaseId);
       const visitId = result.visitId || result.encounter?.id;
-      toast.success(`${accessibleDiseases.find((d) => d.id === diseaseId)?.name || DISEASES.find((d) => d.id === diseaseId)?.name || "Disease"} episode started`);
+      toast.success(`${accessibleDiseases.find((d) => d.id === diseaseId)?.name || DISEASES.find((d) => d.id === diseaseId)?.name || "Disease"} pathway started`);
       if (visitId) {
         navigate(
           `/patients/${p.id}/encounter/${diseaseId}?enc=${encodeURIComponent(visitId)}&fac=${encodeURIComponent(facilityName)}&vt=${encodeURIComponent(visitType)}&ref=${encodeURIComponent(referral)}`
@@ -150,7 +150,7 @@ export default function SuspectScreen() {
         navigate(`/patients/${p.id}/encounter/${diseaseId}?sus=${encodeURIComponent(rec?.id || "")}`);
       }
     } catch (err) {
-      toast.error(err?.message || "Failed to start episode from suspect screening");
+      toast.error(err?.message || "Failed to start pathway from suspect screening");
     } finally {
       setStarting(false);
     }
@@ -234,7 +234,7 @@ export default function SuspectScreen() {
               desc={
                 saved
                   ? `${saved.id} · ${(saved.symptoms || symptoms).length} complaint(s) · ${(saved.photos || photos).length} photo(s)`
-                  : "Save screening, or start a disease episode to persist symptoms in HMIS"
+                  : "Save screening, or start a disease pathway to persist symptoms in HMIS"
               }
             >
               {["none", "other"].includes(suspect) || !accessibleDiseases.find((d) => d.id === suspect) ? (
@@ -245,7 +245,7 @@ export default function SuspectScreen() {
                 <>
                   <AlertPanel level="review" title={`🟠 ${SUSPECT_OPTIONS.find((d) => d.id === suspect)?.label}`} testid="suspect-result">
                     Start the {accessibleDiseases.find((d) => d.id === suspect)?.name || "disease"} clinical flow to record history, assessment,
-                    diagnosis and treatment. Symptoms will be saved with the episode visit.
+                    diagnosis and treatment. Symptoms will be saved with the pathway visit.
                   </AlertPanel>
                   <Button
                     className="h-12 w-full text-base"
@@ -253,7 +253,7 @@ export default function SuspectScreen() {
                     data-testid="start-encounter-btn"
                     onClick={() => startEncounter(suspect)}
                   >
-                    {starting ? "Starting…" : `Start ${accessibleDiseases.find((d) => d.id === suspect)?.name} episode`}
+                    {starting ? "Starting…" : `Start ${accessibleDiseases.find((d) => d.id === suspect)?.name} pathway`}
                   </Button>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {accessibleDiseases.filter((d) => d.id !== suspect).map((d) => (

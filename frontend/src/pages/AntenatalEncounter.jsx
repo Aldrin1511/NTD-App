@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AppShell from "@/components/AppShell";
 import { useStore } from "@/store";
@@ -18,10 +18,17 @@ import {
   YES_NO, PRESENT_ABSENT, DYSMENORRHEA, MENSTRUAL_FLOW, CYCLE_REGULARITY,
   DELIVERY_TYPES, DELIVERY_COMPLICATIONS, FETUS_COUNTS, FAMILY_PLANNING, POSTPARTUM_COMPLICATIONS,
   DELIVERY_OUTCOMES, PHYSICAL_EXAM_FIELDS, COUNT_0_10, obstetricCountValue,
+  normalizeFamilyPlanningService,
 } from "@/mock/antenatal";
 import { WELLBABY_ID } from "@/mock/wellbaby";
+import { FP_ID, FP_NAME, fpFormFromAntenatal } from "@/mock/familyPlanning";
+import FamilyPlanningServicesPicker, {
+  exclusiveFamilyPlanningValue,
+  legacyFamilyPlanningToRows,
+} from "@/components/FamilyPlanningServicesPicker";
 import { ImmunizationEntryCards } from "@/components/ImmunizationCards";
 import AntenatalMedications from "@/components/AntenatalMedications";
+import { GEO } from "@/mock/data";
 import { toast } from "sonner";
 import { persistIntegratedEncounter, useExtraPhiAutosave, useLoadEncounterPhi } from "@/lib/extraEncounterSync";
 import { mergeEncounterFormData } from "@/lib/phiMap";
@@ -145,7 +152,18 @@ const normalizeAncForm = (
       completed: false,
     }));
   }
-  base.delivery = { babies: [], postpartum: [], fetusLengths: {}, ...(base.delivery || {}) };
+  base.delivery = { babies: [], postpartum: [], fetusLengths: {}, familyPlanningDetails: {}, familyPlanningServices: [], familyPlanningPlannedDate: "", ...(base.delivery || {}) };
+  if (base.delivery.familyPlanning) {
+    base.delivery.familyPlanning = normalizeFamilyPlanningService(base.delivery.familyPlanning);
+  }
+  if (!base.delivery.familyPlanningDetails || typeof base.delivery.familyPlanningDetails !== "object") {
+    base.delivery.familyPlanningDetails = {};
+  }
+  if (!Array.isArray(base.delivery.familyPlanningServices)) {
+    base.delivery.familyPlanningServices = legacyFamilyPlanningToRows(base.delivery);
+  } else if (base.delivery.familyPlanningServices.length === 0 && base.delivery.familyPlanning) {
+    base.delivery.familyPlanningServices = legacyFamilyPlanningToRows(base.delivery);
+  }
   if (base.delivery.fetuses) {
     base.delivery.babies = syncBabiesToFetuses(
       base.delivery.babies,
@@ -320,7 +338,7 @@ export default function AntenatalEncounter() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, registerBaby, startEpisode, online, ensureCatalogueDrug } = useStore();
+  const { patients, encounters, saveEncounter, loadEncounterPhi, upsertEncounterPhiField, finalizeEncounterPhi, user, settings, facilities, registerBaby, startEpisode, online, ensureCatalogueDrug, authSession } = useStore();
   const p = patients.find((x) => x.id === id);
   const existing = encounters.find((e) => e.disease === ANTENATAL_ID && (e.id === params.get("enc") || e.visitId === params.get("enc")));
   const patientEncs = useMemo(() => encounters.filter((e) => e.patientId === id), [encounters, id]);
@@ -349,9 +367,16 @@ export default function AntenatalEncounter() {
   const [labOther, setLabOther] = useState("");
   const [revealedVacIds, setRevealedVacIds] = useState([]);
   const [registeringBabyIdx, setRegisteringBabyIdx] = useState(null);
+  const fpSeededRef = useRef(false);
   const facility = existing?.facility || params.get("fac") || p?.facility || "";
   const visitType = existing?.type || params.get("vt") || "ANC visit";
   const focusSection = params.get("section");
+
+  useEffect(() => {
+    if (encounters.some((e) => e.patientId === id && e.disease === FP_ID)) {
+      fpSeededRef.current = true;
+    }
+  }, [encounters, id]);
 
   useEffect(() => {
     const n = focusSection != null && focusSection !== "" ? Number(focusSection) : null;
@@ -501,7 +526,7 @@ export default function AntenatalEncounter() {
     });
   }, []);
 
-  const { queueSectionDiff, queueField } = useExtraPhiAutosave({
+  const { queueSectionDiff, queueField, flushPendingPhi } = useExtraPhiAutosave({
     online,
     upsertEncounterPhiField,
     patientId: p?.id || id,
@@ -757,6 +782,96 @@ export default function AntenatalEncounter() {
     queueSectionDiff("delivery", prev, next);
   };
 
+  const ensureFamilyPlanningFromDelivery = async (ancForm) => {
+    if (fpSeededRef.current) {
+      return { skipped: true, reason: "already-seeded" };
+    }
+
+    const del = ancForm?.delivery || {};
+    const exclusive = String(del.familyPlanning || "").trim();
+    const services = (del.familyPlanningServices || []).filter((r) => {
+      const name = r?.service || r?.familyPlanningService;
+      return name && name !== "None" && name !== "Planned";
+    });
+
+    // None / Planned / empty → do not create an FP pathway
+    if (exclusive === "None" || exclusive === "Planned" || !services.length) {
+      return {
+        skipped: true,
+        reason: exclusive === "Planned" ? "planned" : exclusive === "None" ? "none" : "no-services",
+      };
+    }
+
+    const already = encounters.some((e) => e.patientId === p.id && e.disease === FP_ID);
+    if (already) {
+      fpSeededRef.current = true;
+      return { skipped: true, reason: "already-exists" };
+    }
+
+    const locationId =
+      existing?.locationId
+      || facilities.find((f) => f.name === facility)?.id
+      || authSession?.facilityId
+      || p?.facilityId
+      || "";
+    if (!locationId) {
+      throw new Error("No location available to start Family Planning — set facility on the ANC visit");
+    }
+
+    const fpVisitType = (existing?.type || params.get("vt") || "New Visit").trim() || "New Visit";
+    const visitDate = String(del.date || del.deliveryDate || localISODate()).slice(0, 10);
+
+    fpSeededRef.current = true;
+    try {
+      const result = await startEpisode({
+        patientId: p.id,
+        disease: FP_ID,
+        visitType: fpVisitType,
+        locationId,
+        locationName: facility || facilities.find((f) => f.id === locationId)?.name || "",
+        visitDate,
+        referral: existing?.referral || "No",
+        clinicianName: user?.name,
+      });
+
+      const fpData = fpFormFromAntenatal(ancForm);
+      const diagnosis = (fpData.services || []).map((s) => s.service).filter(Boolean).join(", ");
+      await persistIntegratedEncounter({
+        online,
+        saveEncounter,
+        upsertEncounterPhiField,
+        finalizeEncounterPhi,
+        forceFullPhiUpsert: true,
+        existing: result.encounter,
+        payload: {
+          id: result.visitId || result.encounter?.id,
+          visitId: result.visitId || result.encounter?.visitId,
+          encounterId: result.encounterId || result.encounter?.encounterId || "",
+          recordId: result.recordId || result.encounter?.recordId,
+          episodeId: result.recordId || result.encounter?.episodeId,
+          featureCode: result.featureCode || result.encounter?.featureCode,
+          patientId: p.id,
+          disease: FP_ID,
+          facility: facility || result.encounter?.facility || "",
+          locationId,
+          worker: user?.name,
+          type: fpVisitType,
+          diagnosis,
+          treatment: "",
+          outcome: "Active",
+          date: `${visitDate}T12:00:00`,
+          data: fpData,
+          pendingStart: false,
+          complete: true,
+        },
+      });
+      return { skipped: false, result };
+    } catch (err) {
+      fpSeededRef.current = false;
+      throw err;
+    }
+  };
+
   const doRegisterBaby = async (i) => {
     const b = babies[i];
     if (b.registered) return toast.message("Baby already registered");
@@ -784,6 +899,9 @@ export default function AntenatalEncounter() {
         fetuses: d.delivery.fetuses || String(babies.length || 1),
         fetusLengths: d.delivery.fetusLengths || {},
         familyPlanning: d.delivery.familyPlanning || "",
+        familyPlanningDetails: d.delivery.familyPlanningDetails || {},
+        familyPlanningServices: d.delivery.familyPlanningServices || [],
+        familyPlanningPlannedDate: d.delivery.familyPlanningPlannedDate || "",
         postpartum: d.delivery.postpartum || [],
         babies: d.delivery.babies || [],
       };
@@ -800,6 +918,10 @@ export default function AntenatalEncounter() {
       });
       if (!rec?.id) throw new Error("Baby registration failed");
 
+      // Ensure delivery date is present on form so FP seed can proceed
+      if (!d.delivery.date && !d.delivery.deliveryDate) {
+        setDelivery({ date: deliveryDate, deliveryDate });
+      }
       const linkedBabies = (d.delivery.babies || []).map((baby, idx) =>
         idx === i
           ? { ...baby, registered: true, patientId: rec.id, patientCode: rec.patientCode || "" }
@@ -908,6 +1030,7 @@ export default function AntenatalEncounter() {
       saveEncounter,
       upsertEncounterPhiField,
       finalizeEncounterPhi,
+      flushPendingPhi,
       existing,
       payload: {
         id: existing?.id,
@@ -929,6 +1052,21 @@ export default function AntenatalEncounter() {
       },
     });
     setSavedAt(new Date().toLocaleTimeString());
+    // Real FP services selected (not None/Planned) → create Family Planning pathway on save
+    try {
+      const fpOutcome = await ensureFamilyPlanningFromDelivery({
+        ...d,
+        delivery,
+        history: { ...d.history, riskFactors: d.history.riskFactors || [], riskFactorsDismissed: d.history.riskFactorsDismissed || [] },
+        caseDetails: { ...d.caseDetails, firstContact },
+      });
+      if (fpOutcome && !fpOutcome.skipped) {
+        toast.success(`${FP_NAME} pathway started from Ante Natal`);
+      }
+    } catch (fpErr) {
+      console.warn("Family Planning auto-create on save failed", fpErr);
+      toast.error(fpErr?.message || `${FP_NAME} pathway could not be created`);
+    }
     if (close) navigate(`/patients/${p.id}?tab=antenatal`);
     if (canWritePhi) toast.success(close ? "ANC visit saved" : "Saved");
     else if (online) toast.success(close ? "ANC visit queued for sync" : "Saved · queued for sync");
@@ -1345,14 +1483,48 @@ export default function AntenatalEncounter() {
               ))}
             </div>
           )}
-          <ChoiceChips label="Family planning" options={FAMILY_PLANNING} value={d.delivery.familyPlanning || ""} onChange={(v) => setDelivery({ familyPlanning: v })} testid="anc-del-fp" />
           <MultiChips label="Postpartum complication(s)" options={POSTPARTUM_COMPLICATIONS} value={d.delivery.postpartum || []} onChange={(v) => setDelivery({ postpartum: v })} testid="anc-del-postpartum" />
           <ChoiceChips label="Delivery Outcome" options={DELIVERY_OUTCOMES} value={d.delivery.outcome || ""} onChange={(v) => setDelivery({ outcome: v })} testid="anc-del-outcome" />
         </div>
       ),
     },
     {
-      n: 12, title: "New born details",
+      n: 12, title: "Family Planning",
+      done:
+        !!(d.delivery.familyPlanningServices || []).length
+        || d.delivery.familyPlanning === "None"
+        || d.delivery.familyPlanning === "Planned",
+      body: (
+        <FamilyPlanningServicesPicker
+          options={FAMILY_PLANNING}
+          value={d.delivery.familyPlanningServices || []}
+          onChange={(rows) =>
+            setDelivery({
+              familyPlanningServices: rows,
+              familyPlanning: rows.map((r) => r.service || r.familyPlanningService).filter(Boolean).join(", "),
+              familyPlanningDetails: rows[0]?.rawData?.childData || {},
+              familyPlanningPlannedDate: "",
+            })
+          }
+          exclusiveOptions={["None", "Planned"]}
+          exclusiveValue={exclusiveFamilyPlanningValue(d.delivery)}
+          onExclusiveChange={(v) =>
+            setDelivery({
+              familyPlanning: v,
+              familyPlanningServices: [],
+              familyPlanningDetails: {},
+              familyPlanningPlannedDate: v === "Planned" ? (d.delivery.familyPlanningPlannedDate || localISODate()) : "",
+            })
+          }
+          plannedDate={d.delivery.familyPlanningPlannedDate || ""}
+          onPlannedDateChange={(date) => setDelivery({ familyPlanningPlannedDate: date || "" })}
+          label="Family planning (multi-select)"
+          testid="anc-fp"
+        />
+      ),
+    },
+    {
+      n: 13, title: "New born details",
       done: babies.length > 0 && babies.some((b) => b.sex || b.weightKg || b.outcome || Object.values(b.physicalExam || {}).some(Boolean)),
       body: (
         <div className="space-y-4">
@@ -1428,7 +1600,7 @@ export default function AntenatalEncounter() {
       ),
     },
     {
-      n: 13, title: "Case outcome",
+      n: 14, title: "Case outcome",
       done: !!d.outcome.status,
       body: (
         <div className="space-y-4">
@@ -1445,7 +1617,46 @@ export default function AntenatalEncounter() {
             }}
             testid="anc-outcome"
           />
-          {isAncEpisodeClosed(d.outcome.status) && <AlertPanel level="review" title="This closes the ANC episode" testid="anc-outcome-close">Saving with this outcome closes the episode.</AlertPanel>}
+          {isAncEpisodeClosed(d.outcome.status) && <AlertPanel level="review" title="This closes the ANC pathway" testid="anc-outcome-close">Saving with this outcome closes the pathway.</AlertPanel>}
+          {d.outcome.status === "Discharged" && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <SelectField
+                label="Province"
+                options={Object.keys(GEO)}
+                value={d.outcome.province || ""}
+                onChange={(v) => {
+                  const prev = d.outcome || {};
+                  const next = { ...prev, province: v, district: "" };
+                  setD((s) => ({ ...s, outcome: next }));
+                  queueSectionDiff("outcome", prev, next);
+                }}
+                testid="anc-outcome-province"
+              />
+              <SelectField
+                label="District"
+                options={Object.keys(GEO[d.outcome.province] || {})}
+                value={d.outcome.district || ""}
+                onChange={(v) => {
+                  const prev = d.outcome || {};
+                  const next = { ...prev, district: v };
+                  setD((s) => ({ ...s, outcome: next }));
+                  queueSectionDiff("outcome", prev, next);
+                }}
+                testid="anc-outcome-district"
+              />
+              <TextField
+                label="Facility"
+                value={d.outcome.facility || ""}
+                onChange={(e) => {
+                  const prev = d.outcome || {};
+                  const next = { ...prev, facility: e.target.value };
+                  setD((s) => ({ ...s, outcome: next }));
+                  queueSectionDiff("outcome", prev, next);
+                }}
+                testid="anc-outcome-facility"
+              />
+            </div>
+          )}
           <AreaField
             label="Outcome notes"
             rows={2}

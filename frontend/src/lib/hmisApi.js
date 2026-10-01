@@ -218,14 +218,14 @@ export async function startEpisode(patientId, body) {
   try {
     const res = await http.post(`/api/patients/${encodeURIComponent(patientId)}/episodes`, body);
     if (!res.data?.status) {
-      throw new Error(res.data?.message || "Failed to start episode");
+      throw new Error(res.data?.message || "Failed to start pathway");
     }
     return res.data.data || {};
   } catch (err) {
     if (err?.response?.status === 401) {
       throw new Error("Not authenticated — sign in with programme credentials");
     }
-    throw new Error(apiError(err, "Failed to start episode"));
+    throw new Error(apiError(err, "Failed to start pathway"));
   }
 }
 
@@ -254,7 +254,7 @@ export async function fetchPatientEpisodes(patientId, { disease } = {}) {
   if (disease) params.disease = disease;
   const res = await http.get(`/api/patients/${encodeURIComponent(patientId)}/episodes`, { params });
   if (!res.data?.status) {
-    throw new Error(res.data?.message || "Failed to load episodes");
+    throw new Error(res.data?.message || "Failed to load pathways");
   }
   return Array.isArray(res.data.data) ? res.data.data : [];
 }
